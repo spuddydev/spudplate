@@ -246,3 +246,108 @@ TEST(LexerTest, IntegerColumnTracking) {
     EXPECT_EQ(tok.type, TokenType::INTEGER_LITERAL);
     EXPECT_EQ(tok.column, 3);
 }
+
+TEST(LexerTest, SingleCharOperators) {
+    struct Case {
+        const char *input;
+        TokenType expected;
+        const char *value;
+    };
+    Case cases[] = {
+        {"+", TokenType::PLUS, "+"},
+        {"-", TokenType::MINUS, "-"},
+        {"*", TokenType::STAR, "*"},
+        {"/", TokenType::SLASH, "/"},
+        {"(", TokenType::LPAREN, "("},
+        {")", TokenType::RPAREN, ")"},
+    };
+    for (const auto &c : cases) {
+        Lexer lexer(c.input);
+        Token tok = lexer.nextToken();
+        EXPECT_EQ(tok.type, c.expected) << "Failed for: " << c.input;
+        EXPECT_EQ(tok.value, c.value);
+        EXPECT_EQ(tok.line, 1);
+        EXPECT_EQ(tok.column, 1);
+    }
+}
+
+TEST(LexerTest, AssignOperator) {
+    Lexer lexer("=");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::ASSIGN);
+    EXPECT_EQ(tok.value, "=");
+}
+
+TEST(LexerTest, EqualsOperator) {
+    Lexer lexer("==");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::EQUALS);
+    EXPECT_EQ(tok.value, "==");
+}
+
+TEST(LexerTest, NotEqualsOperator) {
+    Lexer lexer("!=");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::NOT_EQUALS);
+    EXPECT_EQ(tok.value, "!=");
+}
+
+TEST(LexerTest, BangAloneIsError) {
+    Lexer lexer("!");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::ERROR);
+    EXPECT_EQ(tok.value, "!");
+}
+
+TEST(LexerTest, GreaterOperator) {
+    Lexer lexer(">");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::GREATER);
+    EXPECT_EQ(tok.value, ">");
+}
+
+TEST(LexerTest, GreaterEqualOperator) {
+    Lexer lexer(">=");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::GREATER_EQUAL);
+    EXPECT_EQ(tok.value, ">=");
+}
+
+TEST(LexerTest, LessOperator) {
+    Lexer lexer("<");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::LESS);
+    EXPECT_EQ(tok.value, "<");
+}
+
+TEST(LexerTest, LessEqualOperator) {
+    Lexer lexer("<=");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::LESS_EQUAL);
+    EXPECT_EQ(tok.value, "<=");
+}
+
+TEST(LexerTest, OperatorColumnTracking) {
+    Lexer lexer("  + ==");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::PLUS);
+    EXPECT_EQ(tok1.column, 3);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::EQUALS);
+    EXPECT_EQ(tok2.column, 5);
+}
+
+TEST(LexerTest, OperatorsInExpression) {
+    Lexer lexer("x >= 10");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok1.value, "x");
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::GREATER_EQUAL);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tok3.value, "10");
+}
