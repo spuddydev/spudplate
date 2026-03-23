@@ -24,6 +24,7 @@ class Lexer {
     char advance();
     bool isAtEnd() const;
     void skipWhitespace();
+    Token readIdentifierOrKeyword();
 };
 
 } // namespace spudplate
