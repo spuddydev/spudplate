@@ -74,6 +74,25 @@ Token Lexer::readIdentifierOrKeyword() {
     return Token(TokenType::IDENTIFIER, value, startLine, startCol);
 }
 
+Token Lexer::readStringLiteral() {
+    int startLine = line_;
+    int startCol = column_;
+    advance(); // skip opening "
+
+    std::string value;
+    while (!isAtEnd() && current() != '"') {
+        value += advance();
+    }
+
+    if (isAtEnd()) {
+        return Token(TokenType::ERROR, "unterminated string", startLine,
+                     startCol);
+    }
+
+    advance(); // skip closing "
+    return Token(TokenType::STRING_LITERAL, value, startLine, startCol);
+}
+
 Token Lexer::nextToken() {
     skipWhitespace();
 
@@ -85,6 +104,10 @@ Token Lexer::nextToken() {
 
     if (std::isalpha(static_cast<unsigned char>(ch)) || ch == '_') {
         return readIdentifierOrKeyword();
+    }
+
+    if (ch == '"') {
+        return readStringLiteral();
     }
 
     int startLine = line_;
