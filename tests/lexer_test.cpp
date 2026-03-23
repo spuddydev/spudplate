@@ -351,3 +351,78 @@ TEST(LexerTest, OperatorsInExpression) {
     EXPECT_EQ(tok3.type, TokenType::INTEGER_LITERAL);
     EXPECT_EQ(tok3.value, "10");
 }
+
+TEST(LexerTest, NewlineToken) {
+    Lexer lexer("\n");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::NEWLINE);
+    EXPECT_EQ(tok.value, "\\n");
+    EXPECT_EQ(tok.line, 1);
+    EXPECT_EQ(tok.column, 1);
+}
+
+TEST(LexerTest, NewlineBetweenTokens) {
+    Lexer lexer("ask\nname");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::NEWLINE);
+    EXPECT_EQ(tok2.line, 1);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok3.value, "name");
+    EXPECT_EQ(tok3.line, 2);
+    EXPECT_EQ(tok3.column, 1);
+}
+
+TEST(LexerTest, MultipleNewlines) {
+    Lexer lexer("\n\n");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::NEWLINE);
+    EXPECT_EQ(tok1.line, 1);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::NEWLINE);
+    EXPECT_EQ(tok2.line, 2);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, CommentSkipped) {
+    Lexer lexer("# this is a comment");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, CommentBeforeNewline) {
+    Lexer lexer("# comment\nask");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::NEWLINE);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::ASK);
+}
+
+TEST(LexerTest, TokenBeforeComment) {
+    Lexer lexer("ask # get name");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, CommentDoesNotConsumeNewline) {
+    Lexer lexer("ask # comment\nlet");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::NEWLINE);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::LET);
+}
