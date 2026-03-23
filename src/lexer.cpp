@@ -57,8 +57,8 @@ void Lexer::skipWhitespace() {
 }
 
 Token Lexer::readIdentifierOrKeyword() {
-    int startLine = line_;
-    int startCol = column_;
+    int start_line = line_;
+    int start_col = column_;
     std::string value;
 
     while (!isAtEnd() &&
@@ -69,14 +69,14 @@ Token Lexer::readIdentifierOrKeyword() {
 
     auto it = keywords.find(value);
     if (it != keywords.end()) {
-        return Token(it->second, value, startLine, startCol);
+        return Token(it->second, value, start_line, start_col);
     }
-    return Token(TokenType::IDENTIFIER, value, startLine, startCol);
+    return Token(TokenType::IDENTIFIER, value, start_line, start_col);
 }
 
 Token Lexer::readStringLiteral() {
-    int startLine = line_;
-    int startCol = column_;
+    int start_line = line_;
+    int start_col = column_;
     advance(); // skip opening "
 
     std::string value;
@@ -85,17 +85,17 @@ Token Lexer::readStringLiteral() {
     }
 
     if (isAtEnd()) {
-        return Token(TokenType::ERROR, "unterminated string", startLine,
-                     startCol);
+        return Token(TokenType::ERROR, "unterminated string", start_line,
+                     start_col);
     }
 
     advance(); // skip closing "
-    return Token(TokenType::STRING_LITERAL, value, startLine, startCol);
+    return Token(TokenType::STRING_LITERAL, value, start_line, start_col);
 }
 
 Token Lexer::readIntegerLiteral() {
-    int startLine = line_;
-    int startCol = column_;
+    int start_line = line_;
+    int start_col = column_;
     std::string value;
 
     while (!isAtEnd() &&
@@ -103,7 +103,7 @@ Token Lexer::readIntegerLiteral() {
         value += advance();
     }
 
-    return Token(TokenType::INTEGER_LITERAL, value, startLine, startCol);
+    return Token(TokenType::INTEGER_LITERAL, value, start_line, start_col);
 }
 
 Token Lexer::nextToken() {
@@ -127,11 +127,11 @@ Token Lexer::nextToken() {
         return readIntegerLiteral();
     }
 
-    int startLine = line_;
-    int startCol = column_;
+    int start_line = line_;
+    int start_col = column_;
     advance();
 
-    return Token(TokenType::ERROR, std::string(1, ch), startLine, startCol);
+    return Token(TokenType::ERROR, std::string(1, ch), start_line, start_col);
 }
 
 } // namespace spudplate
