@@ -93,6 +93,19 @@ Token Lexer::readStringLiteral() {
     return Token(TokenType::STRING_LITERAL, value, startLine, startCol);
 }
 
+Token Lexer::readIntegerLiteral() {
+    int startLine = line_;
+    int startCol = column_;
+    std::string value;
+
+    while (!isAtEnd() &&
+           std::isdigit(static_cast<unsigned char>(current()))) {
+        value += advance();
+    }
+
+    return Token(TokenType::INTEGER_LITERAL, value, startLine, startCol);
+}
+
 Token Lexer::nextToken() {
     skipWhitespace();
 
@@ -108,6 +121,10 @@ Token Lexer::nextToken() {
 
     if (ch == '"') {
         return readStringLiteral();
+    }
+
+    if (std::isdigit(static_cast<unsigned char>(ch))) {
+        return readIntegerLiteral();
     }
 
     int startLine = line_;
