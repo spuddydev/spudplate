@@ -25,6 +25,8 @@ class Lexer {
     bool isAtEnd() const;
     void skipWhitespace();
     Token readIdentifierOrKeyword();
+    Token readStringLiteral();
+    Token readIntegerLiteral();
 };
 
 } // namespace spudplate
