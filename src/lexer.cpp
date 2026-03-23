@@ -113,6 +113,20 @@ Token Lexer::nextToken() {
         return Token(TokenType::EOF_TOKEN, "", line_, column_);
     }
 
+    if (current() == '\n') {
+        int start_line = line_;
+        int start_col = column_;
+        advance();
+        return Token(TokenType::NEWLINE, "\\n", start_line, start_col);
+    }
+
+    if (current() == '#') {
+        while (!isAtEnd() && current() != '\n') {
+            advance();
+        }
+        return nextToken();
+    }
+
     char ch = current();
 
     if (std::isalpha(static_cast<unsigned char>(ch)) || ch == '_') {
