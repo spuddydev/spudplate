@@ -157,3 +157,92 @@ TEST(LexerTest, KeywordPrefixIsIdentifier) {
     EXPECT_EQ(tok.type, TokenType::IDENTIFIER);
     EXPECT_EQ(tok.value, "asking");
 }
+
+TEST(LexerTest, SimpleString) {
+    Lexer lexer("\"hello\"");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok.value, "hello");
+    EXPECT_EQ(tok.line, 1);
+    EXPECT_EQ(tok.column, 1);
+}
+
+TEST(LexerTest, EmptyString) {
+    Lexer lexer("\"\"");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok.value, "");
+}
+
+TEST(LexerTest, StringWithSpaces) {
+    Lexer lexer("\"hello world\"");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok.value, "hello world");
+}
+
+TEST(LexerTest, UnterminatedString) {
+    Lexer lexer("\"hello");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::ERROR);
+    EXPECT_EQ(tok.value, "unterminated string");
+    EXPECT_EQ(tok.line, 1);
+    EXPECT_EQ(tok.column, 1);
+}
+
+TEST(LexerTest, StringThenKeyword) {
+    Lexer lexer("\"path\" file");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok1.value, "path");
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::FILE);
+}
+
+TEST(LexerTest, StringColumnTracking) {
+    Lexer lexer("  \"hi\"");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok.column, 3);
+}
+
+TEST(LexerTest, SimpleInteger) {
+    Lexer lexer("42");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tok.value, "42");
+    EXPECT_EQ(tok.line, 1);
+    EXPECT_EQ(tok.column, 1);
+}
+
+TEST(LexerTest, MultiDigitInteger) {
+    Lexer lexer("12345");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tok.value, "12345");
+}
+
+TEST(LexerTest, SingleDigitZero) {
+    Lexer lexer("0");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tok.value, "0");
+}
+
+TEST(LexerTest, IntegerThenKeyword) {
+    Lexer lexer("100 let");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tok1.value, "100");
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::LET);
+}
+
+TEST(LexerTest, IntegerColumnTracking) {
+    Lexer lexer("  99");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::INTEGER_LITERAL);
+    EXPECT_EQ(tok.column, 3);
+}
