@@ -131,7 +131,40 @@ Token Lexer::nextToken() {
     int start_col = column_;
     advance();
 
-    return Token(TokenType::ERROR, std::string(1, ch), start_line, start_col);
+    switch (ch) {
+    case '+': return Token(TokenType::PLUS, "+", start_line, start_col);
+    case '-': return Token(TokenType::MINUS, "-", start_line, start_col);
+    case '*': return Token(TokenType::STAR, "*", start_line, start_col);
+    case '/': return Token(TokenType::SLASH, "/", start_line, start_col);
+    case '(': return Token(TokenType::LPAREN, "(", start_line, start_col);
+    case ')': return Token(TokenType::RPAREN, ")", start_line, start_col);
+    case '=':
+        if (!isAtEnd() && current() == '=') {
+            advance();
+            return Token(TokenType::EQUALS, "==", start_line, start_col);
+        }
+        return Token(TokenType::ASSIGN, "=", start_line, start_col);
+    case '!':
+        if (!isAtEnd() && current() == '=') {
+            advance();
+            return Token(TokenType::NOT_EQUALS, "!=", start_line, start_col);
+        }
+        return Token(TokenType::ERROR, "!", start_line, start_col);
+    case '>':
+        if (!isAtEnd() && current() == '=') {
+            advance();
+            return Token(TokenType::GREATER_EQUAL, ">=", start_line, start_col);
+        }
+        return Token(TokenType::GREATER, ">", start_line, start_col);
+    case '<':
+        if (!isAtEnd() && current() == '=') {
+            advance();
+            return Token(TokenType::LESS_EQUAL, "<=", start_line, start_col);
+        }
+        return Token(TokenType::LESS, "<", start_line, start_col);
+    default:
+        return Token(TokenType::ERROR, std::string(1, ch), start_line, start_col);
+    }
 }
 
 } // namespace spudplate
