@@ -3,6 +3,9 @@
         {
             "name": "Mac",
             "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "includePath": [
+                "${workspaceFolder}/include"
+            ],
             "cppStandard": "c++17"
         }
     ],

@@ -28,6 +28,11 @@ class Parser {
 
     ExprPtr parseExpression();
 
+    StmtPtr parseAsk();
+    StmtPtr parseLet();
+    StmtPtr parseMkdir();
+    StmtPtr parseFile();
+
   private:
     Lexer lexer_;
     Token current_;
@@ -38,6 +43,12 @@ class Parser {
     bool match(TokenType type);
     Token expect(TokenType type, const std::string &message);
     void skip_newlines();
+
+    // Statement helpers
+    VarType parse_var_type();
+    std::optional<ExprPtr> parse_when_clause();
+    std::optional<int> parse_mode_clause();
+    void expect_newline(const std::string &context);
 
     // Expression precedence climbing
     ExprPtr parse_or();
