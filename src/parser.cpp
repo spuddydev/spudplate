@@ -81,7 +81,7 @@ StmtPtr Parser::parseAsk() {
     expect_newline("ask statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = AskStmt{name.value,         prompt.value,          var_type,
+    stmt->data = AskStmt{name.value,         prompt.value,          var_type,
                     required,            std::move(when_clause), start.line,
                     start.column};
     return stmt;
@@ -96,7 +96,7 @@ StmtPtr Parser::parseLet() {
     expect_newline("let statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = LetStmt{name.value, std::move(value), start.line, start.column};
+    stmt->data = LetStmt{name.value, std::move(value), start.line, start.column};
     return stmt;
 }
 
@@ -109,7 +109,7 @@ StmtPtr Parser::parseMkdir() {
     expect_newline("mkdir statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = MkdirStmt{path.value, mode, std::move(when_clause), start.line,
+    stmt->data = MkdirStmt{path.value, mode, std::move(when_clause), start.line,
                       start.column};
     return stmt;
 }
@@ -139,9 +139,65 @@ StmtPtr Parser::parseFile() {
     expect_newline("file statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = FileStmt{path.value, std::move(source), mode,
+    stmt->data = FileStmt{path.value, std::move(source), mode,
                      std::move(when_clause), start.line, start.column};
     return stmt;
+}
+
+// Repeat block parser
+
+StmtPtr Parser::parseRepeat() {
+    Token start = expect(TokenType::REPEAT, "expected 'repeat'");
+    Token collection =
+        expect(TokenType::IDENTIFIER, "expected collection variable after 'repeat'");
+    expect(TokenType::AS, "expected 'as' after collection variable");
+    Token iterator =
+        expect(TokenType::IDENTIFIER, "expected iterator variable after 'as'");
+    expect_newline("repeat header");
+
+    std::vector<StmtPtr> body;
+    skip_newlines();
+    while (!check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+        body.push_back(parseStatement());
+        skip_newlines();
+    }
+
+    expect(TokenType::END, "expected 'end' to close repeat block");
+    expect_newline("repeat block");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->data = RepeatStmt{collection.value, iterator.value, std::move(body),
+                            start.line, start.column};
+    return stmt;
+}
+
+// Statement dispatch
+
+StmtPtr Parser::parseStatement() {
+    if (check(TokenType::ASK))
+        return parseAsk();
+    if (check(TokenType::LET))
+        return parseLet();
+    if (check(TokenType::MKDIR))
+        return parseMkdir();
+    if (check(TokenType::FILE))
+        return parseFile();
+    if (check(TokenType::REPEAT))
+        return parseRepeat();
+    throw ParseError("unexpected token: " + current_.value, current_.line,
+                     current_.column);
+}
+
+// Full program parser
+
+Program Parser::parse() {
+    Program program;
+    skip_newlines();
+    while (!check(TokenType::EOF_TOKEN)) {
+        program.statements.push_back(parseStatement());
+        skip_newlines();
+    }
+    return program;
 }
 
 // Expression precedence: or < and < comparison < addition < multiplication <

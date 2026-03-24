@@ -26,12 +26,16 @@ class Parser {
   public:
     explicit Parser(Lexer lexer);
 
+    Program parse();
+
     ExprPtr parseExpression();
 
     StmtPtr parseAsk();
     StmtPtr parseLet();
     StmtPtr parseMkdir();
     StmtPtr parseFile();
+    StmtPtr parseRepeat();
+    StmtPtr parseStatement();
 
   private:
     Lexer lexer_;
