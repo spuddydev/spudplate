@@ -114,16 +114,28 @@ struct FileStmt {
     int column;
 };
 
-// Forward declare RepeatStmt — defined in branch 3
-struct RepeatStmt;
-
-// Stmt variant and pointer type
-using Stmt =
-    std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt>;
+// Forward declare Stmt so RepeatStmt can hold a vector of them
+struct Stmt;
 using StmtPtr = std::unique_ptr<Stmt>;
 
+struct RepeatStmt {
+    std::string collection_var;
+    std::string iterator_var;
+    std::vector<StmtPtr> body;
+    int line;
+    int column;
+};
+
+// Stmt variant and pointer type
+using StmtData =
+    std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt>;
+
+struct Stmt {
+    StmtData data;
+};
+
 struct Program {
-    // Populated in branch 3
+    std::vector<StmtPtr> statements;
 };
 
 } // namespace spudplate

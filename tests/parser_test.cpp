@@ -6,7 +6,6 @@
 
 using spudplate::AskStmt;
 using spudplate::BinaryExpr;
-using spudplate::Expr;
 using spudplate::ExprPtr;
 using spudplate::FileContentSource;
 using spudplate::FileFromSource;
@@ -19,7 +18,6 @@ using spudplate::Lexer;
 using spudplate::MkdirStmt;
 using spudplate::ParseError;
 using spudplate::Parser;
-using spudplate::Stmt;
 using spudplate::StmtPtr;
 using spudplate::StringLiteralExpr;
 using spudplate::TokenType;
@@ -218,7 +216,7 @@ static StmtPtr parse_file(const std::string &input) {
 
 TEST(ParserTest, AskBasicString) {
     auto stmt = parse_ask("ask name \"What is your name?\" string\n");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     EXPECT_EQ(ask.name, "name");
     EXPECT_EQ(ask.prompt, "What is your name?");
     EXPECT_EQ(ask.var_type, VarType::String);
@@ -229,25 +227,25 @@ TEST(ParserTest, AskBasicString) {
 
 TEST(ParserTest, AskBoolType) {
     auto stmt = parse_ask("ask use_ci \"Enable CI?\" bool\n");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     EXPECT_EQ(ask.var_type, VarType::Bool);
 }
 
 TEST(ParserTest, AskIntType) {
     auto stmt = parse_ask("ask count \"How many?\" int\n");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     EXPECT_EQ(ask.var_type, VarType::Int);
 }
 
 TEST(ParserTest, AskRequired) {
     auto stmt = parse_ask("ask name \"Name?\" string required\n");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     EXPECT_TRUE(ask.required);
 }
 
 TEST(ParserTest, AskWhenClause) {
     auto stmt = parse_ask("ask port \"Port?\" int when use_server\n");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     ASSERT_TRUE(ask.when_clause.has_value());
     auto &cond = std::get<IdentifierExpr>((*ask.when_clause)->data);
     EXPECT_EQ(cond.name, "use_server");
@@ -255,14 +253,14 @@ TEST(ParserTest, AskWhenClause) {
 
 TEST(ParserTest, AskRequiredAndWhen) {
     auto stmt = parse_ask("ask port \"Port?\" int required when use_server\n");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     EXPECT_TRUE(ask.required);
     ASSERT_TRUE(ask.when_clause.has_value());
 }
 
 TEST(ParserTest, AskWhenExpression) {
     auto stmt = parse_ask("ask x \"X?\" string when a and b\n");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     ASSERT_TRUE(ask.when_clause.has_value());
     auto &bin = std::get<BinaryExpr>((*ask.when_clause)->data);
     EXPECT_EQ(bin.op, TokenType::AND);
@@ -270,7 +268,7 @@ TEST(ParserTest, AskWhenExpression) {
 
 TEST(ParserTest, AskAtEof) {
     auto stmt = parse_ask("ask name \"Name?\" string");
-    auto &ask = std::get<AskStmt>(*stmt);
+    auto &ask = std::get<AskStmt>(stmt->data);
     EXPECT_EQ(ask.name, "name");
 }
 
@@ -290,7 +288,7 @@ TEST(ParserTest, AskMissingType) {
 
 TEST(ParserTest, LetBasic) {
     auto stmt = parse_let("let x = 42\n");
-    auto &let = std::get<LetStmt>(*stmt);
+    auto &let = std::get<LetStmt>(stmt->data);
     EXPECT_EQ(let.name, "x");
     auto &val = std::get<IntegerLiteralExpr>(let.value->data);
     EXPECT_EQ(val.value, 42);
@@ -298,7 +296,7 @@ TEST(ParserTest, LetBasic) {
 
 TEST(ParserTest, LetStringExpression) {
     auto stmt = parse_let("let greeting = \"hello\" + name\n");
-    auto &let = std::get<LetStmt>(*stmt);
+    auto &let = std::get<LetStmt>(stmt->data);
     EXPECT_EQ(let.name, "greeting");
     auto &bin = std::get<BinaryExpr>(let.value->data);
     EXPECT_EQ(bin.op, TokenType::PLUS);
@@ -306,14 +304,14 @@ TEST(ParserTest, LetStringExpression) {
 
 TEST(ParserTest, LetFunctionCall) {
     auto stmt = parse_let("let lower_name = lower(name)\n");
-    auto &let = std::get<LetStmt>(*stmt);
+    auto &let = std::get<LetStmt>(stmt->data);
     auto &call = std::get<FunctionCallExpr>(let.value->data);
     EXPECT_EQ(call.name, "lower");
 }
 
 TEST(ParserTest, LetAtEof) {
     auto stmt = parse_let("let x = 1");
-    auto &let = std::get<LetStmt>(*stmt);
+    auto &let = std::get<LetStmt>(stmt->data);
     EXPECT_EQ(let.name, "x");
 }
 
@@ -329,7 +327,7 @@ TEST(ParserTest, LetMissingName) {
 
 TEST(ParserTest, MkdirBasic) {
     auto stmt = parse_mkdir("mkdir \"src\"\n");
-    auto &mk = std::get<MkdirStmt>(*stmt);
+    auto &mk = std::get<MkdirStmt>(stmt->data);
     EXPECT_EQ(mk.path, "src");
     EXPECT_FALSE(mk.mode.has_value());
     EXPECT_FALSE(mk.when_clause.has_value());
@@ -337,7 +335,7 @@ TEST(ParserTest, MkdirBasic) {
 
 TEST(ParserTest, MkdirWithMode) {
     auto stmt = parse_mkdir("mkdir \"bin\" mode 0755\n");
-    auto &mk = std::get<MkdirStmt>(*stmt);
+    auto &mk = std::get<MkdirStmt>(stmt->data);
     EXPECT_EQ(mk.path, "bin");
     ASSERT_TRUE(mk.mode.has_value());
     EXPECT_EQ(*mk.mode, 0755);
@@ -345,7 +343,7 @@ TEST(ParserTest, MkdirWithMode) {
 
 TEST(ParserTest, MkdirWithWhen) {
     auto stmt = parse_mkdir("mkdir \"tests\" when use_tests\n");
-    auto &mk = std::get<MkdirStmt>(*stmt);
+    auto &mk = std::get<MkdirStmt>(stmt->data);
     ASSERT_TRUE(mk.when_clause.has_value());
     auto &cond = std::get<IdentifierExpr>((*mk.when_clause)->data);
     EXPECT_EQ(cond.name, "use_tests");
@@ -353,7 +351,7 @@ TEST(ParserTest, MkdirWithWhen) {
 
 TEST(ParserTest, MkdirWithModeAndWhen) {
     auto stmt = parse_mkdir("mkdir \"bin\" mode 0755 when need_bin\n");
-    auto &mk = std::get<MkdirStmt>(*stmt);
+    auto &mk = std::get<MkdirStmt>(stmt->data);
     ASSERT_TRUE(mk.mode.has_value());
     EXPECT_EQ(*mk.mode, 0755);
     ASSERT_TRUE(mk.when_clause.has_value());
@@ -361,7 +359,7 @@ TEST(ParserTest, MkdirWithModeAndWhen) {
 
 TEST(ParserTest, MkdirAtEof) {
     auto stmt = parse_mkdir("mkdir \"src\"");
-    auto &mk = std::get<MkdirStmt>(*stmt);
+    auto &mk = std::get<MkdirStmt>(stmt->data);
     EXPECT_EQ(mk.path, "src");
 }
 
@@ -373,7 +371,7 @@ TEST(ParserTest, MkdirMissingPath) {
 
 TEST(ParserTest, FileFromBasic) {
     auto stmt = parse_file("file \"out.txt\" from \"template.txt\"\n");
-    auto &file = std::get<FileStmt>(*stmt);
+    auto &file = std::get<FileStmt>(stmt->data);
     EXPECT_EQ(file.path, "out.txt");
     auto &src = std::get<FileFromSource>(file.source);
     EXPECT_EQ(src.path, "template.txt");
@@ -382,14 +380,14 @@ TEST(ParserTest, FileFromBasic) {
 
 TEST(ParserTest, FileFromVerbatim) {
     auto stmt = parse_file("file \"out.c\" from \"main.c\" verbatim\n");
-    auto &file = std::get<FileStmt>(*stmt);
+    auto &file = std::get<FileStmt>(stmt->data);
     auto &src = std::get<FileFromSource>(file.source);
     EXPECT_TRUE(src.verbatim);
 }
 
 TEST(ParserTest, FileContentExpression) {
     auto stmt = parse_file("file \"readme.md\" content \"# \" + name\n");
-    auto &file = std::get<FileStmt>(*stmt);
+    auto &file = std::get<FileStmt>(stmt->data);
     auto &src = std::get<FileContentSource>(file.source);
     auto &bin = std::get<BinaryExpr>(src.value->data);
     EXPECT_EQ(bin.op, TokenType::PLUS);
@@ -397,21 +395,21 @@ TEST(ParserTest, FileContentExpression) {
 
 TEST(ParserTest, FileWithMode) {
     auto stmt = parse_file("file \"run.sh\" from \"run.sh\" mode 0755\n");
-    auto &file = std::get<FileStmt>(*stmt);
+    auto &file = std::get<FileStmt>(stmt->data);
     ASSERT_TRUE(file.mode.has_value());
     EXPECT_EQ(*file.mode, 0755);
 }
 
 TEST(ParserTest, FileWithWhen) {
     auto stmt = parse_file("file \"ci.yml\" from \"ci.yml\" when use_ci\n");
-    auto &file = std::get<FileStmt>(*stmt);
+    auto &file = std::get<FileStmt>(stmt->data);
     ASSERT_TRUE(file.when_clause.has_value());
 }
 
 TEST(ParserTest, FileFromVerbatimModeWhen) {
     auto stmt = parse_file(
         "file \"main.c\" from \"main.c\" verbatim mode 0644 when need_c\n");
-    auto &file = std::get<FileStmt>(*stmt);
+    auto &file = std::get<FileStmt>(stmt->data);
     auto &src = std::get<FileFromSource>(file.source);
     EXPECT_TRUE(src.verbatim);
     ASSERT_TRUE(file.mode.has_value());
@@ -421,15 +419,15 @@ TEST(ParserTest, FileFromVerbatimModeWhen) {
 
 TEST(ParserTest, FileContentWithMode) {
     auto stmt = parse_file("file \"x\" content \"data\" mode 0444\n");
-    auto &file = std::get<FileStmt>(*stmt);
-    std::get<FileContentSource>(file.source);
+    auto &file = std::get<FileStmt>(stmt->data);
+    std::get<FileContentSource>(file.source); // NOLINT
     ASSERT_TRUE(file.mode.has_value());
     EXPECT_EQ(*file.mode, 0444);
 }
 
 TEST(ParserTest, FileAtEof) {
     auto stmt = parse_file("file \"out.txt\" from \"in.txt\"");
-    auto &file = std::get<FileStmt>(*stmt);
+    auto &file = std::get<FileStmt>(stmt->data);
     EXPECT_EQ(file.path, "out.txt");
 }
 

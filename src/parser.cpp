@@ -81,7 +81,7 @@ StmtPtr Parser::parseAsk() {
     expect_newline("ask statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = AskStmt{name.value,         prompt.value,          var_type,
+    stmt->data = AskStmt{name.value,         prompt.value,          var_type,
                     required,            std::move(when_clause), start.line,
                     start.column};
     return stmt;
@@ -96,7 +96,7 @@ StmtPtr Parser::parseLet() {
     expect_newline("let statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = LetStmt{name.value, std::move(value), start.line, start.column};
+    stmt->data = LetStmt{name.value, std::move(value), start.line, start.column};
     return stmt;
 }
 
@@ -109,7 +109,7 @@ StmtPtr Parser::parseMkdir() {
     expect_newline("mkdir statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = MkdirStmt{path.value, mode, std::move(when_clause), start.line,
+    stmt->data = MkdirStmt{path.value, mode, std::move(when_clause), start.line,
                       start.column};
     return stmt;
 }
@@ -139,7 +139,7 @@ StmtPtr Parser::parseFile() {
     expect_newline("file statement");
 
     auto stmt = std::make_unique<Stmt>();
-    *stmt = FileStmt{path.value, std::move(source), mode,
+    stmt->data = FileStmt{path.value, std::move(source), mode,
                      std::move(when_clause), start.line, start.column};
     return stmt;
 }
