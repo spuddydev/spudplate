@@ -119,6 +119,8 @@ StmtPtr Parser::parseFile() {
     Token path =
         expect(TokenType::STRING_LITERAL, "expected path string after 'file'");
 
+    bool append = match(TokenType::APPEND);
+
     FileSource source = [&]() -> FileSource {
         if (match(TokenType::FROM)) {
             Token src = expect(TokenType::STRING_LITERAL,
@@ -139,7 +141,7 @@ StmtPtr Parser::parseFile() {
     expect_newline("file statement");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->data = FileStmt{path.value, std::move(source), mode,
+    stmt->data = FileStmt{path.value, std::move(source), append, mode,
                      std::move(when_clause), start.line, start.column};
     return stmt;
 }
