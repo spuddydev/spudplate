@@ -18,6 +18,8 @@ using spudplate::Lexer;
 using spudplate::MkdirStmt;
 using spudplate::ParseError;
 using spudplate::Parser;
+using spudplate::Program;
+using spudplate::RepeatStmt;
 using spudplate::StmtPtr;
 using spudplate::StringLiteralExpr;
 using spudplate::TokenType;
@@ -441,4 +443,131 @@ TEST(ParserTest, FileMissingPath) {
 
 TEST(ParserTest, FileFromMissingSourcePath) {
     EXPECT_THROW(parse_file("file \"out.txt\" from\n"), ParseError);
+}
+
+// --- Repeat and program parsing helpers ---
+
+static Program parse_program(const std::string &input) {
+    Lexer lexer(input);
+    Parser parser(std::move(lexer));
+    return parser.parse();
+}
+
+// --- Program parsing tests ---
+
+TEST(ParserTest, SingleStatementProgram) {
+    auto program = parse_program("ask name \"Name?\" string\n");
+    ASSERT_EQ(program.statements.size(), 1);
+    auto &ask = std::get<AskStmt>(program.statements[0]->data);
+    EXPECT_EQ(ask.name, "name");
+}
+
+TEST(ParserTest, MultiStatementWithBlankLinesAndComments) {
+    auto program = parse_program(
+        "# A comment\n"
+        "\n"
+        "ask name \"Name?\" string\n"
+        "\n"
+        "# Another comment\n"
+        "let lower_name = lower(name)\n"
+        "\n"
+        "mkdir \"src\"\n");
+    ASSERT_EQ(program.statements.size(), 3);
+    std::get<AskStmt>(program.statements[0]->data);
+    std::get<LetStmt>(program.statements[1]->data);
+    std::get<MkdirStmt>(program.statements[2]->data);
+}
+
+// --- Repeat block tests ---
+
+TEST(ParserTest, RepeatBasic) {
+    auto program = parse_program(
+        "repeat items as item\n"
+        "  mkdir \"dir\"\n"
+        "end\n");
+    ASSERT_EQ(program.statements.size(), 1);
+    auto &rep = std::get<RepeatStmt>(program.statements[0]->data);
+    EXPECT_EQ(rep.collection_var, "items");
+    EXPECT_EQ(rep.iterator_var, "item");
+    ASSERT_EQ(rep.body.size(), 1);
+    std::get<MkdirStmt>(rep.body[0]->data);
+}
+
+TEST(ParserTest, RepeatMultipleBodyStatements) {
+    auto program = parse_program(
+        "repeat modules as mod\n"
+        "  mkdir \"src\"\n"
+        "  file \"main.c\" from \"template.c\"\n"
+        "  let x = 1\n"
+        "end\n");
+    ASSERT_EQ(program.statements.size(), 1);
+    auto &rep = std::get<RepeatStmt>(program.statements[0]->data);
+    ASSERT_EQ(rep.body.size(), 3);
+    std::get<MkdirStmt>(rep.body[0]->data);
+    std::get<FileStmt>(rep.body[1]->data);
+    std::get<LetStmt>(rep.body[2]->data);
+}
+
+TEST(ParserTest, RepeatNested) {
+    auto program = parse_program(
+        "repeat outer as o\n"
+        "  repeat inner as i\n"
+        "    mkdir \"dir\"\n"
+        "  end\n"
+        "end\n");
+    ASSERT_EQ(program.statements.size(), 1);
+    auto &outer = std::get<RepeatStmt>(program.statements[0]->data);
+    ASSERT_EQ(outer.body.size(), 1);
+    auto &inner = std::get<RepeatStmt>(outer.body[0]->data);
+    EXPECT_EQ(inner.collection_var, "inner");
+    EXPECT_EQ(inner.iterator_var, "i");
+    ASSERT_EQ(inner.body.size(), 1);
+    std::get<MkdirStmt>(inner.body[0]->data);
+}
+
+// --- Full integration test ---
+
+TEST(ParserTest, FullSpudFile) {
+    auto program = parse_program(
+        "# Project scaffolding\n"
+        "\n"
+        "ask name \"Project name?\" string required\n"
+        "ask use_ci \"Enable CI?\" bool\n"
+        "ask num_modules \"How many modules?\" int\n"
+        "\n"
+        "let lower_name = lower(name)\n"
+        "\n"
+        "mkdir \"src\"\n"
+        "mkdir \"tests\" when use_ci\n"
+        "\n"
+        "file \"README.md\" content \"# \" + name\n"
+        "file \"main.c\" from \"templates/main.c\" mode 0644\n"
+        "\n"
+        "repeat modules as mod\n"
+        "  mkdir \"src\"\n"
+        "  file \"mod.c\" from \"templates/mod.c\"\n"
+        "end\n");
+    ASSERT_EQ(program.statements.size(), 9);
+    std::get<AskStmt>(program.statements[0]->data);
+    std::get<AskStmt>(program.statements[1]->data);
+    std::get<AskStmt>(program.statements[2]->data);
+    std::get<LetStmt>(program.statements[3]->data);
+    std::get<MkdirStmt>(program.statements[4]->data);
+    std::get<MkdirStmt>(program.statements[5]->data);
+    std::get<FileStmt>(program.statements[6]->data);
+    std::get<FileStmt>(program.statements[7]->data);
+    auto &rep = std::get<RepeatStmt>(program.statements[8]->data);
+    ASSERT_EQ(rep.body.size(), 2);
+}
+
+// --- Error tests ---
+
+TEST(ParserTest, RepeatWithoutEnd) {
+    EXPECT_THROW(parse_program(
+        "repeat items as item\n"
+        "  mkdir \"dir\"\n"), ParseError);
+}
+
+TEST(ParserTest, UnexpectedTokenAtTopLevel) {
+    EXPECT_THROW(parse_program("42\n"), ParseError);
 }
