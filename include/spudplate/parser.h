@@ -9,12 +9,20 @@
 
 namespace spudplate {
 
+/**
+ * @brief Exception thrown when the parser encounters invalid spudlang syntax.
+ *
+ * Carries the source location (line and column) alongside the error message so
+ * callers can produce precise diagnostics.
+ */
 class ParseError : public std::runtime_error {
   public:
     ParseError(const std::string &message, int line, int column)
         : std::runtime_error(message), line_(line), column_(column) {}
 
+    /** @brief 1-based line number where the error occurred. */
     int line() const { return line_; }
+    /** @brief 1-based column number where the error occurred. */
     int column() const { return column_; }
 
   private:
@@ -22,19 +30,37 @@ class ParseError : public std::runtime_error {
     int column_;
 };
 
+/**
+ * @brief Recursive-descent parser that produces an AST from a token stream.
+ *
+ * Construct with a Lexer over the source text, then call parse() to obtain a
+ * Program. Throws ParseError on any syntax violation.
+ *
+ * Individual statement parsers (parseAsk(), parseLet(), etc.) are public so
+ * they can be exercised directly in unit tests.
+ */
 class Parser {
   public:
+    /** @brief Constructs a Parser that reads tokens from the given Lexer. */
     explicit Parser(Lexer lexer);
 
+    /** @brief Parses the full program and returns the top-level AST node. */
     Program parse();
 
+    /** @brief Parses a single expression starting at the current token. */
     ExprPtr parseExpression();
 
+    /** @brief Parses an `ask` statement. */
     StmtPtr parseAsk();
+    /** @brief Parses a `let` statement. */
     StmtPtr parseLet();
+    /** @brief Parses a `mkdir` statement. */
     StmtPtr parseMkdir();
+    /** @brief Parses a `file` statement. */
     StmtPtr parseFile();
+    /** @brief Parses a `repeat` block. */
     StmtPtr parseRepeat();
+    /** @brief Dispatches to the appropriate statement parser based on the current token. */
     StmtPtr parseStatement();
 
   private:
@@ -43,16 +69,16 @@ class Parser {
 
     // Token consumption
     Token advance();
-    bool check(TokenType type) const;
-    bool match(TokenType type);
+    bool  check(TokenType type) const;
+    bool  match(TokenType type);
     Token expect(TokenType type, const std::string &message);
-    void skip_newlines();
+    void  skip_newlines();
 
     // Statement helpers
-    VarType parse_var_type();
+    VarType                parse_var_type();
     std::optional<ExprPtr> parse_when_clause();
-    std::optional<int> parse_mode_clause();
-    void expect_newline(const std::string &context);
+    std::optional<int>     parse_mode_clause();
+    void                   expect_newline(const std::string &context);
 
     // Expression precedence climbing
     ExprPtr parse_or();

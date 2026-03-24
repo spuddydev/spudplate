@@ -1,0 +1,38 @@
+PROJECT_NAME           = "spudplate"
+PROJECT_BRIEF          = "Template scaffolding compiler for spudlang .spud files"
+PROJECT_NUMBER         =
+
+OUTPUT_DIRECTORY       = docs
+CREATE_SUBDIRS         = NO
+
+INPUT                  = include src docs/syntax.md
+USE_MDFILE_AS_MAINPAGE = docs/syntax.md
+FILE_PATTERNS          = *.h *.cpp
+RECURSIVE              = YES
+
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+
+GENERATE_LATEX         = NO
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = NO
+
+SHOW_INCLUDE_FILES     = YES
+SHOW_USED_FILES        = NO
+SHOW_FILES             = YES
+
+SORT_MEMBER_DOCS       = NO
+
+SOURCE_BROWSER         = NO
+INLINE_SOURCES         = NO
+
+HAVE_DOT               = NO

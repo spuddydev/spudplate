@@ -5,70 +5,72 @@
 
 namespace spudplate {
 
+/** @brief All token types produced by the Lexer. */
 enum class TokenType {
     // Keywords
-    ASK,
-    LET,
-    MKDIR,
-    FILE,
-    FROM,
-    CONTENT,
-    WHEN,
-    REPEAT,
-    END,
-    REQUIRED,
-    VERBATIM,
-    APPEND,
-    MODE,
-    AS,
+    ASK,      ///< `ask` — declare a user prompt
+    LET,      ///< `let` — declare a derived variable
+    MKDIR,    ///< `mkdir` — create a directory
+    FILE,     ///< `file` — create or append to a file
+    FROM,     ///< `from` — source file path for file statements
+    CONTENT,  ///< `content` — inline content for file statements
+    WHEN,     ///< `when` — conditional modifier
+    REPEAT,   ///< `repeat` — begin a loop block
+    END,      ///< `end` — close a repeat block
+    REQUIRED, ///< `required` — mark an ask as mandatory
+    VERBATIM, ///< `verbatim` — suppress interpolation in from-file contents
+    APPEND,   ///< `append` — append to file instead of overwriting
+    MODE,     ///< `mode` — set file/directory permissions (octal)
+    AS,       ///< `as` — bind loop iterator variable in repeat
 
     // Logical operators (keywords)
-    AND,
-    OR,
-    NOT,
+    AND, ///< `and` — logical AND
+    OR,  ///< `or`  — logical OR
+    NOT, ///< `not` — logical NOT
 
     // Type keywords
-    STRING_TYPE,
-    BOOL_TYPE,
-    INT_TYPE,
+    STRING_TYPE, ///< `string` type annotation
+    BOOL_TYPE,   ///< `bool` type annotation
+    INT_TYPE,    ///< `int` type annotation
 
     // Literals
-    STRING_LITERAL,
-    INTEGER_LITERAL,
-    IDENTIFIER,
+    STRING_LITERAL,  ///< Quoted string literal, e.g. `"hello"`
+    INTEGER_LITERAL, ///< Integer literal, e.g. `42`
+    IDENTIFIER,      ///< Variable or function name
 
     // Comparison operators
-    EQUALS,
-    NOT_EQUALS,
-    GREATER,
-    LESS,
-    GREATER_EQUAL,
-    LESS_EQUAL,
+    EQUALS,        ///< `==`
+    NOT_EQUALS,    ///< `!=`
+    GREATER,       ///< `>`
+    LESS,          ///< `<`
+    GREATER_EQUAL, ///< `>=`
+    LESS_EQUAL,    ///< `<=`
 
     // Arithmetic operators
-    PLUS,
-    MINUS,
-    STAR,
-    SLASH,
+    PLUS,  ///< `+` — addition or string concatenation
+    MINUS, ///< `-` — subtraction
+    STAR,  ///< `*` — multiplication
+    SLASH, ///< `/` — division
 
     // Assignment
-    ASSIGN,
+    ASSIGN, ///< `=`
 
     // Structure
-    NEWLINE,
-    LPAREN,
-    RPAREN,
+    NEWLINE, ///< Logical line break (newline or semicolon)
+    LPAREN,  ///< `(`
+    RPAREN,  ///< `)`
 
     // Special
-    EOF_TOKEN,
-    ERROR,
+    EOF_TOKEN, ///< End of input
+    ERROR,     ///< Lexer error (unrecognised character)
 };
 
+/** @brief A single lexical token with source location. */
 struct Token {
-    TokenType type;
-    std::string value;
-    int line;
-    int column;
+    TokenType   type;   ///< The token's classification.
+    std::string value;  ///< The raw text of the token (empty for punctuation).
+    int         line;   ///< 1-based source line number.
+    int         column; ///< 1-based source column number.
 
     Token() : type(TokenType::EOF_TOKEN), value(""), line(0), column(0) {}
 
@@ -76,6 +78,7 @@ struct Token {
         : type(type), value(std::move(value)), line(line), column(column) {}
 };
 
+/** @brief Returns a human-readable string for a TokenType value. */
 inline std::string tokenTypeToString(TokenType type) {
     switch (type) {
     case TokenType::ASK: return "ASK";

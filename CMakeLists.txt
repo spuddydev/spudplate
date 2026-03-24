@@ -28,3 +28,14 @@ add_executable(spudplate_tests tests/lexer_test.cpp tests/parser_test.cpp)
 target_link_libraries(spudplate_tests PRIVATE spudplate_lib GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(spudplate_tests)
+
+# Documentation
+find_package(Doxygen OPTIONAL_COMPONENTS dot)
+if(DOXYGEN_FOUND)
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Generating API documentation with Doxygen"
+        VERBATIM
+    )
+endif()

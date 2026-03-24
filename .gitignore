@@ -71,3 +71,10 @@ Testing/
 # Claude files
 .claude/
 CLAUDE.md
+
+# Doxygen generated html documentation 
+docs/html/
+
+# Apple tracking files
+*/.DS_Store
+.DS_Store
