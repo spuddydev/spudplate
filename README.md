@@ -13,3 +13,13 @@ cmake -B build && cmake --build build
 ```bash
 ctest --test-dir build
 ```
+
+## Docs
+
+Requires [Doxygen](https://www.doxygen.nl/) (`brew install doxygen`).
+
+```bash
+cmake --build build --target docs
+```
+
+Opens `docs/html/index.html` — includes the full spudlang syntax reference and API documentation.

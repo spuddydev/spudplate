@@ -5,7 +5,8 @@ PROJECT_NUMBER         =
 OUTPUT_DIRECTORY       = docs
 CREATE_SUBDIRS         = NO
 
-INPUT                  = include src
+INPUT                  = include src docs/syntax.md
+USE_MDFILE_AS_MAINPAGE = docs/syntax.md
 FILE_PATTERNS          = *.h *.cpp
 RECURSIVE              = YES
 
@@ -15,7 +16,6 @@ EXTRACT_STATIC         = YES
 
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
-HTML_TIMESTAMP         = NO
 
 GENERATE_LATEX         = NO
 
