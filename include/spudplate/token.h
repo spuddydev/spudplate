@@ -18,6 +18,7 @@ enum class TokenType {
     END,
     REQUIRED,
     VERBATIM,
+    APPEND,
     MODE,
     AS,
 
@@ -88,6 +89,7 @@ inline std::string tokenTypeToString(TokenType type) {
     case TokenType::END: return "END";
     case TokenType::REQUIRED: return "REQUIRED";
     case TokenType::VERBATIM: return "VERBATIM";
+    case TokenType::APPEND: return "APPEND";
     case TokenType::MODE: return "MODE";
     case TokenType::AS: return "AS";
     case TokenType::AND: return "AND";

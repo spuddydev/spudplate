@@ -108,6 +108,7 @@ struct MkdirStmt {
 struct FileStmt {
     std::string path;
     FileSource source;
+    bool append;
     std::optional<int> mode;
     std::optional<ExprPtr> when_clause;
     int line;

@@ -375,6 +375,7 @@ TEST(ParserTest, FileFromBasic) {
     auto stmt = parse_file("file \"out.txt\" from \"template.txt\"\n");
     auto &file = std::get<FileStmt>(stmt->data);
     EXPECT_EQ(file.path, "out.txt");
+    EXPECT_FALSE(file.append);
     auto &src = std::get<FileFromSource>(file.source);
     EXPECT_EQ(src.path, "template.txt");
     EXPECT_FALSE(src.verbatim);
@@ -443,6 +444,53 @@ TEST(ParserTest, FileMissingPath) {
 
 TEST(ParserTest, FileFromMissingSourcePath) {
     EXPECT_THROW(parse_file("file \"out.txt\" from\n"), ParseError);
+}
+
+// --- Append tests ---
+
+TEST(ParserTest, FileAppendFrom) {
+    auto stmt = parse_file("file \"log.txt\" append from \"entry.txt\"\n");
+    auto &file = std::get<FileStmt>(stmt->data);
+    EXPECT_EQ(file.path, "log.txt");
+    EXPECT_TRUE(file.append);
+    auto &src = std::get<FileFromSource>(file.source);
+    EXPECT_EQ(src.path, "entry.txt");
+    EXPECT_FALSE(src.verbatim);
+}
+
+TEST(ParserTest, FileAppendContent) {
+    auto stmt = parse_file("file \"log.txt\" append content \"new line\"\n");
+    auto &file = std::get<FileStmt>(stmt->data);
+    EXPECT_TRUE(file.append);
+    auto &src = std::get<FileContentSource>(file.source);
+    auto &lit = std::get<StringLiteralExpr>(src.value->data);
+    EXPECT_EQ(lit.value, "new line");
+}
+
+TEST(ParserTest, FileAppendFromVerbatim) {
+    auto stmt = parse_file("file \"out\" append from \"src\" verbatim\n");
+    auto &file = std::get<FileStmt>(stmt->data);
+    EXPECT_TRUE(file.append);
+    auto &src = std::get<FileFromSource>(file.source);
+    EXPECT_TRUE(src.verbatim);
+}
+
+TEST(ParserTest, FileAppendFromModeWhen) {
+    auto stmt = parse_file(
+        "file \"out\" append from \"src\" mode 0644 when active\n");
+    auto &file = std::get<FileStmt>(stmt->data);
+    EXPECT_TRUE(file.append);
+    auto &src = std::get<FileFromSource>(file.source);
+    EXPECT_EQ(src.path, "src");
+    ASSERT_TRUE(file.mode.has_value());
+    EXPECT_EQ(*file.mode, 0644);
+    ASSERT_TRUE(file.when_clause.has_value());
+}
+
+TEST(ParserTest, FileWithoutAppendDefaultsFalse) {
+    auto stmt = parse_file("file \"out\" from \"src\"\n");
+    auto &file = std::get<FileStmt>(stmt->data);
+    EXPECT_FALSE(file.append);
 }
 
 // --- Repeat and program parsing helpers ---

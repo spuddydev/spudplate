@@ -16,6 +16,7 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"end", TokenType::END},
     {"required", TokenType::REQUIRED},
     {"verbatim", TokenType::VERBATIM},
+    {"append", TokenType::APPEND},
     {"mode", TokenType::MODE},
     {"as", TokenType::AS},
     {"and", TokenType::AND},
