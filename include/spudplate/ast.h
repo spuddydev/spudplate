@@ -63,12 +63,64 @@ struct Expr {
     ExprData data;
 };
 
-// Statement types — stubs for branch 2
-struct AskStmt;
-struct LetStmt;
-struct MkdirStmt;
-struct FileStmt;
+// Variable types for ask statements
+enum class VarType { String, Bool, Int };
+
+// File source: either a path (from) or an expression (content)
+struct FileFromSource {
+    std::string path;
+    bool verbatim;
+};
+
+struct FileContentSource {
+    ExprPtr value;
+};
+
+using FileSource = std::variant<FileFromSource, FileContentSource>;
+
+// Statement types
+
+struct AskStmt {
+    std::string name;
+    std::string prompt;
+    VarType var_type;
+    bool required;
+    std::optional<ExprPtr> when_clause;
+    int line;
+    int column;
+};
+
+struct LetStmt {
+    std::string name;
+    ExprPtr value;
+    int line;
+    int column;
+};
+
+struct MkdirStmt {
+    std::string path;
+    std::optional<int> mode;
+    std::optional<ExprPtr> when_clause;
+    int line;
+    int column;
+};
+
+struct FileStmt {
+    std::string path;
+    FileSource source;
+    std::optional<int> mode;
+    std::optional<ExprPtr> when_clause;
+    int line;
+    int column;
+};
+
+// Forward declare RepeatStmt — defined in branch 3
 struct RepeatStmt;
+
+// Stmt variant and pointer type
+using Stmt =
+    std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt>;
+using StmtPtr = std::unique_ptr<Stmt>;
 
 struct Program {
     // Populated in branch 3
