@@ -5,26 +5,16 @@
 namespace spudplate {
 
 static const std::unordered_map<std::string, TokenType> keywords = {
-    {"ask", TokenType::ASK},
-    {"let", TokenType::LET},
-    {"mkdir", TokenType::MKDIR},
-    {"file", TokenType::FILE},
-    {"from", TokenType::FROM},
-    {"content", TokenType::CONTENT},
-    {"when", TokenType::WHEN},
-    {"repeat", TokenType::REPEAT},
-    {"end", TokenType::END},
-    {"required", TokenType::REQUIRED},
-    {"verbatim", TokenType::VERBATIM},
-    {"append", TokenType::APPEND},
-    {"mode", TokenType::MODE},
-    {"as", TokenType::AS},
-    {"and", TokenType::AND},
-    {"or", TokenType::OR},
-    {"not", TokenType::NOT},
-    {"string", TokenType::STRING_TYPE},
-    {"bool", TokenType::BOOL_TYPE},
-    {"int", TokenType::INT_TYPE},
+    {"ask", TokenType::ASK},           {"let", TokenType::LET},
+    {"mkdir", TokenType::MKDIR},       {"file", TokenType::FILE},
+    {"from", TokenType::FROM},         {"content", TokenType::CONTENT},
+    {"when", TokenType::WHEN},         {"repeat", TokenType::REPEAT},
+    {"end", TokenType::END},           {"required", TokenType::REQUIRED},
+    {"verbatim", TokenType::VERBATIM}, {"append", TokenType::APPEND},
+    {"mode", TokenType::MODE},         {"as", TokenType::AS},
+    {"and", TokenType::AND},           {"or", TokenType::OR},
+    {"not", TokenType::NOT},           {"string", TokenType::STRING_TYPE},
+    {"bool", TokenType::BOOL_TYPE},    {"int", TokenType::INT_TYPE},
 };
 
 Lexer::Lexer(std::string source)
@@ -49,7 +39,9 @@ char Lexer::advance() {
     return ch;
 }
 
-bool Lexer::isAtEnd() const { return pos_ >= source_.size(); }
+bool Lexer::isAtEnd() const {
+    return pos_ >= source_.size();
+}
 
 void Lexer::skipWhitespace() {
     while (!isAtEnd() && (current() == ' ' || current() == '\t')) {
@@ -63,8 +55,7 @@ Token Lexer::readIdentifierOrKeyword() {
     std::string value;
 
     while (!isAtEnd() &&
-           (std::isalnum(static_cast<unsigned char>(current())) ||
-            current() == '_')) {
+           (std::isalnum(static_cast<unsigned char>(current())) || current() == '_')) {
         value += advance();
     }
 
@@ -78,7 +69,7 @@ Token Lexer::readIdentifierOrKeyword() {
 Token Lexer::readStringLiteral() {
     int start_line = line_;
     int start_col = column_;
-    advance(); // skip opening "
+    advance();  // skip opening "
 
     std::string value;
     while (!isAtEnd() && current() != '"') {
@@ -86,11 +77,10 @@ Token Lexer::readStringLiteral() {
     }
 
     if (isAtEnd()) {
-        return Token(TokenType::ERROR, "unterminated string", start_line,
-                     start_col);
+        return Token(TokenType::ERROR, "unterminated string", start_line, start_col);
     }
 
-    advance(); // skip closing "
+    advance();  // skip closing "
     return Token(TokenType::STRING_LITERAL, value, start_line, start_col);
 }
 
@@ -99,8 +89,7 @@ Token Lexer::readIntegerLiteral() {
     int start_col = column_;
     std::string value;
 
-    while (!isAtEnd() &&
-           std::isdigit(static_cast<unsigned char>(current()))) {
+    while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(current()))) {
         value += advance();
     }
 
@@ -147,39 +136,45 @@ Token Lexer::nextToken() {
     advance();
 
     switch (ch) {
-    case '+': return Token(TokenType::PLUS, "+", start_line, start_col);
-    case '-': return Token(TokenType::MINUS, "-", start_line, start_col);
-    case '*': return Token(TokenType::STAR, "*", start_line, start_col);
-    case '/': return Token(TokenType::SLASH, "/", start_line, start_col);
-    case '(': return Token(TokenType::LPAREN, "(", start_line, start_col);
-    case ')': return Token(TokenType::RPAREN, ")", start_line, start_col);
-    case '=':
-        if (!isAtEnd() && current() == '=') {
-            advance();
-            return Token(TokenType::EQUALS, "==", start_line, start_col);
-        }
-        return Token(TokenType::ASSIGN, "=", start_line, start_col);
-    case '!':
-        if (!isAtEnd() && current() == '=') {
-            advance();
-            return Token(TokenType::NOT_EQUALS, "!=", start_line, start_col);
-        }
-        return Token(TokenType::ERROR, "!", start_line, start_col);
-    case '>':
-        if (!isAtEnd() && current() == '=') {
-            advance();
-            return Token(TokenType::GREATER_EQUAL, ">=", start_line, start_col);
-        }
-        return Token(TokenType::GREATER, ">", start_line, start_col);
-    case '<':
-        if (!isAtEnd() && current() == '=') {
-            advance();
-            return Token(TokenType::LESS_EQUAL, "<=", start_line, start_col);
-        }
-        return Token(TokenType::LESS, "<", start_line, start_col);
-    default:
-        return Token(TokenType::ERROR, std::string(1, ch), start_line, start_col);
+        case '+':
+            return Token(TokenType::PLUS, "+", start_line, start_col);
+        case '-':
+            return Token(TokenType::MINUS, "-", start_line, start_col);
+        case '*':
+            return Token(TokenType::STAR, "*", start_line, start_col);
+        case '/':
+            return Token(TokenType::SLASH, "/", start_line, start_col);
+        case '(':
+            return Token(TokenType::LPAREN, "(", start_line, start_col);
+        case ')':
+            return Token(TokenType::RPAREN, ")", start_line, start_col);
+        case '=':
+            if (!isAtEnd() && current() == '=') {
+                advance();
+                return Token(TokenType::EQUALS, "==", start_line, start_col);
+            }
+            return Token(TokenType::ASSIGN, "=", start_line, start_col);
+        case '!':
+            if (!isAtEnd() && current() == '=') {
+                advance();
+                return Token(TokenType::NOT_EQUALS, "!=", start_line, start_col);
+            }
+            return Token(TokenType::ERROR, "!", start_line, start_col);
+        case '>':
+            if (!isAtEnd() && current() == '=') {
+                advance();
+                return Token(TokenType::GREATER_EQUAL, ">=", start_line, start_col);
+            }
+            return Token(TokenType::GREATER, ">", start_line, start_col);
+        case '<':
+            if (!isAtEnd() && current() == '=') {
+                advance();
+                return Token(TokenType::LESS_EQUAL, "<=", start_line, start_col);
+            }
+            return Token(TokenType::LESS, "<", start_line, start_col);
+        default:
+            return Token(TokenType::ERROR, std::string(1, ch), start_line, start_col);
     }
 }
 
-} // namespace spudplate
+}  // namespace spudplate

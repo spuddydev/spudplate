@@ -12,7 +12,9 @@ Token Parser::advance() {
     return prev;
 }
 
-bool Parser::check(TokenType type) const { return current_.type == type; }
+bool Parser::check(TokenType type) const {
+    return current_.type == type;
+}
 
 bool Parser::match(TokenType type) {
     if (check(type)) {
@@ -22,7 +24,7 @@ bool Parser::match(TokenType type) {
     return false;
 }
 
-Token Parser::expect(TokenType type, const std::string &message) {
+Token Parser::expect(TokenType type, const std::string& message) {
     if (check(type)) {
         return advance();
     }
@@ -57,12 +59,11 @@ std::optional<ExprPtr> Parser::parse_when_clause() {
 std::optional<int> Parser::parse_mode_clause() {
     if (!match(TokenType::MODE))
         return std::nullopt;
-    Token tok = expect(TokenType::INTEGER_LITERAL,
-                       "expected octal integer after 'mode'");
+    Token tok = expect(TokenType::INTEGER_LITERAL, "expected octal integer after 'mode'");
     return std::stoi(tok.value, nullptr, 8);
 }
 
-void Parser::expect_newline(const std::string &context) {
+void Parser::expect_newline(const std::string& context) {
     if (check(TokenType::EOF_TOKEN))
         return;
     expect(TokenType::NEWLINE, "expected newline after " + context);
@@ -73,24 +74,22 @@ void Parser::expect_newline(const std::string &context) {
 StmtPtr Parser::parseAsk() {
     Token start = expect(TokenType::ASK, "expected 'ask'");
     Token name = expect(TokenType::IDENTIFIER, "expected variable name after 'ask'");
-    Token prompt =
-        expect(TokenType::STRING_LITERAL, "expected prompt string after name");
+    Token prompt = expect(TokenType::STRING_LITERAL, "expected prompt string after name");
     VarType var_type = parse_var_type();
     bool required = match(TokenType::REQUIRED);
     auto when_clause = parse_when_clause();
     expect_newline("ask statement");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->data = AskStmt{name.value,         prompt.value,          var_type,
-                    required,            std::move(when_clause), start.line,
-                    start.column};
+    stmt->data =
+        AskStmt{name.value, prompt.value, var_type, required, std::move(when_clause),
+                start.line, start.column};
     return stmt;
 }
 
 StmtPtr Parser::parseLet() {
     Token start = expect(TokenType::LET, "expected 'let'");
-    Token name =
-        expect(TokenType::IDENTIFIER, "expected variable name after 'let'");
+    Token name = expect(TokenType::IDENTIFIER, "expected variable name after 'let'");
     expect(TokenType::ASSIGN, "expected '=' after variable name");
     auto value = parseExpression();
     expect_newline("let statement");
@@ -102,29 +101,27 @@ StmtPtr Parser::parseLet() {
 
 StmtPtr Parser::parseMkdir() {
     Token start = expect(TokenType::MKDIR, "expected 'mkdir'");
-    Token path =
-        expect(TokenType::STRING_LITERAL, "expected path string after 'mkdir'");
+    Token path = expect(TokenType::STRING_LITERAL, "expected path string after 'mkdir'");
     auto mode = parse_mode_clause();
     auto when_clause = parse_when_clause();
     expect_newline("mkdir statement");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->data = MkdirStmt{path.value, mode, std::move(when_clause), start.line,
-                      start.column};
+    stmt->data =
+        MkdirStmt{path.value, mode, std::move(when_clause), start.line, start.column};
     return stmt;
 }
 
 StmtPtr Parser::parseFile() {
     Token start = expect(TokenType::FILE, "expected 'file'");
-    Token path =
-        expect(TokenType::STRING_LITERAL, "expected path string after 'file'");
+    Token path = expect(TokenType::STRING_LITERAL, "expected path string after 'file'");
 
     bool append = match(TokenType::APPEND);
 
     FileSource source = [&]() -> FileSource {
         if (match(TokenType::FROM)) {
-            Token src = expect(TokenType::STRING_LITERAL,
-                               "expected source path after 'from'");
+            Token src =
+                expect(TokenType::STRING_LITERAL, "expected source path after 'from'");
             bool verbatim = match(TokenType::VERBATIM);
             return FileFromSource{src.value, verbatim};
         }
@@ -132,8 +129,8 @@ StmtPtr Parser::parseFile() {
             auto value = parseExpression();
             return FileContentSource{std::move(value)};
         }
-        throw ParseError("expected 'from' or 'content' after file path",
-                         current_.line, current_.column);
+        throw ParseError("expected 'from' or 'content' after file path", current_.line,
+                         current_.column);
     }();
 
     auto mode = parse_mode_clause();
@@ -141,8 +138,9 @@ StmtPtr Parser::parseFile() {
     expect_newline("file statement");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->data = FileStmt{path.value, std::move(source), append, mode,
-                     std::move(when_clause), start.line, start.column};
+    stmt->data =
+        FileStmt{path.value, std::move(source), append, mode, std::move(when_clause),
+                 start.line, start.column};
     return stmt;
 }
 
@@ -168,8 +166,8 @@ StmtPtr Parser::parseRepeat() {
     expect_newline("repeat block");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->data = RepeatStmt{collection.value, iterator.value, std::move(body),
-                            start.line, start.column};
+    stmt->data = RepeatStmt{collection.value, iterator.value, std::move(body), start.line,
+                            start.column};
     return stmt;
 }
 
@@ -205,7 +203,9 @@ Program Parser::parse() {
 // Expression precedence: or < and < comparison < addition < multiplication <
 // unary < primary
 
-ExprPtr Parser::parseExpression() { return parse_or(); }
+ExprPtr Parser::parseExpression() {
+    return parse_or();
+}
 
 ExprPtr Parser::parse_or() {
     auto left = parse_and();
@@ -217,8 +217,8 @@ ExprPtr Parser::parse_or() {
         auto right = parse_and();
 
         auto expr = std::make_unique<Expr>();
-        expr->data = BinaryExpr{TokenType::OR, std::move(left), std::move(right),
-                                line, col};
+        expr->data =
+            BinaryExpr{TokenType::OR, std::move(left), std::move(right), line, col};
         left = std::move(expr);
     }
 
@@ -235,8 +235,8 @@ ExprPtr Parser::parse_and() {
         auto right = parse_comparison();
 
         auto expr = std::make_unique<Expr>();
-        expr->data = BinaryExpr{TokenType::AND, std::move(left),
-                                std::move(right), line, col};
+        expr->data =
+            BinaryExpr{TokenType::AND, std::move(left), std::move(right), line, col};
         left = std::move(expr);
     }
 
@@ -256,8 +256,7 @@ ExprPtr Parser::parse_comparison() {
         auto right = parse_addition();
 
         auto expr = std::make_unique<Expr>();
-        expr->data =
-            BinaryExpr{op, std::move(left), std::move(right), line, col};
+        expr->data = BinaryExpr{op, std::move(left), std::move(right), line, col};
         left = std::move(expr);
     }
 
@@ -275,8 +274,7 @@ ExprPtr Parser::parse_addition() {
         auto right = parse_multiplication();
 
         auto expr = std::make_unique<Expr>();
-        expr->data =
-            BinaryExpr{op, std::move(left), std::move(right), line, col};
+        expr->data = BinaryExpr{op, std::move(left), std::move(right), line, col};
         left = std::move(expr);
     }
 
@@ -294,8 +292,7 @@ ExprPtr Parser::parse_multiplication() {
         auto right = parse_unary();
 
         auto expr = std::make_unique<Expr>();
-        expr->data =
-            BinaryExpr{op, std::move(left), std::move(right), line, col};
+        expr->data = BinaryExpr{op, std::move(left), std::move(right), line, col};
         left = std::move(expr);
     }
 
@@ -328,8 +325,7 @@ ExprPtr Parser::parse_primary() {
     if (check(TokenType::INTEGER_LITERAL)) {
         Token tok = advance();
         auto expr = std::make_unique<Expr>();
-        expr->data =
-            IntegerLiteralExpr{std::stoi(tok.value), tok.line, tok.column};
+        expr->data = IntegerLiteralExpr{std::stoi(tok.value), tok.line, tok.column};
         return expr;
     }
 
@@ -343,8 +339,8 @@ ExprPtr Parser::parse_primary() {
             expect(TokenType::RPAREN, "expected ')' after function argument");
 
             auto expr = std::make_unique<Expr>();
-            expr->data = FunctionCallExpr{tok.value, std::move(arg), tok.line,
-                                          tok.column};
+            expr->data =
+                FunctionCallExpr{tok.value, std::move(arg), tok.line, tok.column};
             return expr;
         }
 
@@ -364,4 +360,4 @@ ExprPtr Parser::parse_primary() {
                      current_.column);
 }
 
-} // namespace spudplate
+}  // namespace spudplate
