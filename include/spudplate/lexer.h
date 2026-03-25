@@ -1,10 +1,10 @@
 #ifndef SPUDPLATE_LEXER_H
 #define SPUDPLATE_LEXER_H
 
-#include "spudplate/token.h"
-
 #include <cstddef>
 #include <string>
+
+#include "spudplate/token.h"
 
 namespace spudplate {
 
@@ -24,20 +24,20 @@ class Lexer {
     Token nextToken();
 
   private:
-    std::string  source_;
-    std::size_t  pos_;
-    int          line_;
-    int          column_;
+    std::string source_;
+    std::size_t pos_;
+    int line_;
+    int column_;
 
-    char  current() const;
-    char  advance();
-    bool  isAtEnd() const;
-    void  skipWhitespace();
+    [[nodiscard]] char current() const;
+    char advance();
+    [[nodiscard]] bool isAtEnd() const;
+    void skipWhitespace();
     Token readIdentifierOrKeyword();
     Token readStringLiteral();
     Token readIntegerLiteral();
 };
 
-} // namespace spudplate
+}  // namespace spudplate
 
-#endif // SPUDPLATE_LEXER_H
+#endif  // SPUDPLATE_LEXER_H

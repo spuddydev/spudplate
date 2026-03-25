@@ -1,0 +1,17 @@
+Checks: >
+    clang-analyzer-*,
+    modernize-*,
+    readability-*,
+    performance-*,
+    -modernize-use-trailing-return-type,
+    -modernize-return-braced-init-list,
+    -readability-magic-numbers,
+    -readability-named-parameter,
+    -readability-identifier-length,
+    -readability-identifier-naming,
+    -performance-enum-size
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: 'include/spudplate/.*'
+

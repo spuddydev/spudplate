@@ -1,7 +1,8 @@
 #include "spudplate/lexer.h"
-#include "spudplate/token.h"
 
 #include <gtest/gtest.h>
+
+#include "spudplate/token.h"
 
 using spudplate::Lexer;
 using spudplate::Token;
@@ -76,7 +77,7 @@ TEST(LexerTest, WhitespaceBeforeUnrecognized) {
 
 TEST(LexerTest, AllKeywords) {
     struct Case {
-        const char *input;
+        const char* input;
         TokenType expected;
     };
     Case cases[] = {
@@ -100,11 +101,10 @@ TEST(LexerTest, AllKeywords) {
         {"bool", TokenType::BOOL_TYPE},
         {"int", TokenType::INT_TYPE},
     };
-    for (const auto &c : cases) {
+    for (const auto& c : cases) {
         Lexer lexer(c.input);
         Token tok = lexer.nextToken();
-        EXPECT_EQ(tok.type, c.expected)
-            << "Failed for keyword: " << c.input;
+        EXPECT_EQ(tok.type, c.expected) << "Failed for keyword: " << c.input;
         EXPECT_EQ(tok.value, c.input);
         EXPECT_EQ(tok.line, 1);
         EXPECT_EQ(tok.column, 1);
@@ -249,19 +249,16 @@ TEST(LexerTest, IntegerColumnTracking) {
 
 TEST(LexerTest, SingleCharOperators) {
     struct Case {
-        const char *input;
+        const char* input;
         TokenType expected;
-        const char *value;
+        const char* value;
     };
     Case cases[] = {
-        {"+", TokenType::PLUS, "+"},
-        {"-", TokenType::MINUS, "-"},
-        {"*", TokenType::STAR, "*"},
-        {"/", TokenType::SLASH, "/"},
-        {"(", TokenType::LPAREN, "("},
-        {")", TokenType::RPAREN, ")"},
+        {"+", TokenType::PLUS, "+"},   {"-", TokenType::MINUS, "-"},
+        {"*", TokenType::STAR, "*"},   {"/", TokenType::SLASH, "/"},
+        {"(", TokenType::LPAREN, "("}, {")", TokenType::RPAREN, ")"},
     };
-    for (const auto &c : cases) {
+    for (const auto& c : cases) {
         Lexer lexer(c.input);
         Token tok = lexer.nextToken();
         EXPECT_EQ(tok.type, c.expected) << "Failed for: " << c.input;

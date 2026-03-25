@@ -1,11 +1,11 @@
 #ifndef SPUDPLATE_PARSER_H
 #define SPUDPLATE_PARSER_H
 
-#include "spudplate/ast.h"
-#include "spudplate/lexer.h"
-
 #include <stdexcept>
 #include <string>
+
+#include "spudplate/ast.h"
+#include "spudplate/lexer.h"
 
 namespace spudplate {
 
@@ -17,13 +17,13 @@ namespace spudplate {
  */
 class ParseError : public std::runtime_error {
   public:
-    ParseError(const std::string &message, int line, int column)
+    ParseError(const std::string& message, int line, int column)
         : std::runtime_error(message), line_(line), column_(column) {}
 
     /** @brief 1-based line number where the error occurred. */
-    int line() const { return line_; }
+    [[nodiscard]] int line() const { return line_; }
     /** @brief 1-based column number where the error occurred. */
-    int column() const { return column_; }
+    [[nodiscard]] int column() const { return column_; }
 
   private:
     int line_;
@@ -60,7 +60,8 @@ class Parser {
     StmtPtr parseFile();
     /** @brief Parses a `repeat` block. */
     StmtPtr parseRepeat();
-    /** @brief Dispatches to the appropriate statement parser based on the current token. */
+    /** @brief Dispatches to the appropriate statement parser based on the current token.
+     */
     StmtPtr parseStatement();
 
   private:
@@ -69,16 +70,16 @@ class Parser {
 
     // Token consumption
     Token advance();
-    bool  check(TokenType type) const;
-    bool  match(TokenType type);
-    Token expect(TokenType type, const std::string &message);
-    void  skip_newlines();
+    [[nodiscard]] bool check(TokenType type) const;
+    bool match(TokenType type);
+    Token expect(TokenType type, const std::string& message);
+    void skip_newlines();
 
     // Statement helpers
-    VarType                parse_var_type();
+    VarType parse_var_type();
     std::optional<ExprPtr> parse_when_clause();
-    std::optional<int>     parse_mode_clause();
-    void                   expect_newline(const std::string &context);
+    std::optional<int> parse_mode_clause();
+    void expect_newline(const std::string& context);
 
     // Expression precedence climbing
     ExprPtr parse_or();
@@ -90,6 +91,6 @@ class Parser {
     ExprPtr parse_primary();
 };
 
-} // namespace spudplate
+}  // namespace spudplate
 
-#endif // SPUDPLATE_PARSER_H
+#endif  // SPUDPLATE_PARSER_H

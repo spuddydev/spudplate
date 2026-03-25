@@ -34,7 +34,7 @@ Declares a variable `<name>` and asks the user a question at runtime.
 
 **Examples:**
 
-```spud
+```
 ask project_name "What is the project name?" string required
 ask use_tests "Include a test suite?" bool
 ask num_weeks "How many weeks is the project?" int when use_tests
@@ -56,7 +56,7 @@ Computes a new variable from an expression. Useful for transforming user input b
 
 **Examples:**
 
-```spud
+```
 let slug = lower(trim(project_name))
 let dir = slug + "-project"
 let total_days = num_weeks * 7
@@ -74,7 +74,7 @@ Creates a directory at the given path. The path may contain `{variable}` interpo
 
 **Examples:**
 
-```spud
+```
 mkdir "{dir}/src"
 mkdir "{dir}/tests" when use_tests
 mkdir "{dir}/private" mode 0700
@@ -99,7 +99,7 @@ Creates a file at `<path>`, either from a source file (`from`) or from an inline
 
 **Examples:**
 
-```spud
+```
 file "{dir}/README.md" content "# " + project_name
 file "{dir}/.gitignore" from "templates/gitignore"
 file "{dir}/run.sh" from "templates/run.sh" mode 0755
@@ -121,7 +121,7 @@ Repeats the nested block `<int_var>` times. The loop variable `<iter>` holds the
 
 **Example:**
 
-```spud
+```
 ask num_modules "How many modules?" int
 repeat num_modules as i
     mkdir "{dir}/module_{i}"
@@ -137,7 +137,7 @@ Expressions appear in `let` values, `content` values, and `when` conditions.
 
 ### Literals
 
-```spud
+```
 "hello"      # string literal
 42           # integer literal
 true         # boolean literal
@@ -148,7 +148,7 @@ false        # boolean literal
 
 Any previously declared variable (from `ask` or `let`) can be referenced by name:
 
-```spud
+```
 project_name
 num_weeks
 use_tests
@@ -196,7 +196,7 @@ use_tests
 
 Lines beginning with `#` are comments and are ignored by the compiler.
 
-```spud
+```
 # This is a comment
 ask name "Your name?" string
 ```
@@ -211,7 +211,7 @@ The output binary will **refuse to write to any path that already existed before
 
 ## Full Example
 
-```spud
+```
 ask project_name "Project name?" string required
 ask use_tests "Include tests?" bool
 ask num_weeks "Estimated weeks?" int when use_tests
