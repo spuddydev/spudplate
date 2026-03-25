@@ -21,9 +21,9 @@ class ParseError : public std::runtime_error {
         : std::runtime_error(message), line_(line), column_(column) {}
 
     /** @brief 1-based line number where the error occurred. */
-    int line() const { return line_; }
+    [[nodiscard]] int line() const { return line_; }
     /** @brief 1-based column number where the error occurred. */
-    int column() const { return column_; }
+    [[nodiscard]] int column() const { return column_; }
 
   private:
     int line_;
@@ -70,7 +70,7 @@ class Parser {
 
     // Token consumption
     Token advance();
-    bool check(TokenType type) const;
+    [[nodiscard]] bool check(TokenType type) const;
     bool match(TokenType type);
     Token expect(TokenType type, const std::string& message);
     void skip_newlines();

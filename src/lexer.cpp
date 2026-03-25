@@ -55,7 +55,7 @@ Token Lexer::readIdentifierOrKeyword() {
     std::string value;
 
     while (!isAtEnd() &&
-           (std::isalnum(static_cast<unsigned char>(current())) || current() == '_')) {
+           (std::isalnum(static_cast<unsigned char>(current())) != 0 || current() == '_')) {
         value += advance();
     }
 
@@ -89,7 +89,7 @@ Token Lexer::readIntegerLiteral() {
     int start_col = column_;
     std::string value;
 
-    while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(current()))) {
+    while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(current())) != 0) {
         value += advance();
     }
 
@@ -119,7 +119,7 @@ Token Lexer::nextToken() {
 
     char ch = current();
 
-    if (std::isalpha(static_cast<unsigned char>(ch)) || ch == '_') {
+    if (std::isalpha(static_cast<unsigned char>(ch)) != 0 || ch == '_') {
         return readIdentifierOrKeyword();
     }
 
@@ -127,7 +127,7 @@ Token Lexer::nextToken() {
         return readStringLiteral();
     }
 
-    if (std::isdigit(static_cast<unsigned char>(ch))) {
+    if (std::isdigit(static_cast<unsigned char>(ch)) != 0) {
         return readIntegerLiteral();
     }
 

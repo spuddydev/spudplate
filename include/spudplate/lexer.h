@@ -29,9 +29,9 @@ class Lexer {
     int line_;
     int column_;
 
-    char current() const;
+    [[nodiscard]] char current() const;
     char advance();
-    bool isAtEnd() const;
+    [[nodiscard]] bool isAtEnd() const;
     void skipWhitespace();
     Token readIdentifierOrKeyword();
     Token readStringLiteral();
