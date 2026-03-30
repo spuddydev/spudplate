@@ -423,3 +423,78 @@ TEST(LexerTest, CommentDoesNotConsumeNewline) {
     Token tok3 = lexer.nextToken();
     EXPECT_EQ(tok3.type, TokenType::LET);
 }
+
+TEST(LexerTest, LineContinuationTwoLines) {
+    Lexer lexer("ask \\\nname");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok2.value, "name");
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, LineContinuationThreeLines) {
+    Lexer lexer("ask \\\n\"prompt\" \\\nstring");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok2.value, "prompt");
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::STRING_TYPE);
+
+    Token tok4 = lexer.nextToken();
+    EXPECT_EQ(tok4.type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, LineContinuationNoNewline) {
+    // Backslash not followed by newline is an error token
+    Lexer lexer("ask \\name");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::ERROR);
+    EXPECT_EQ(tok2.value, "\\");
+}
+
+TEST(LexerTest, LineContinuationTrailingWhitespace) {
+    // Trailing spaces/tabs between `\` and newline are silently ignored
+    Lexer lexer("ask \\  \t\nname");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok2.value, "name");
+}
+
+TEST(LexerTest, LineContinuationInsideStringIsNotContinuation) {
+    // A backslash inside a string literal is just a character, not continuation
+    Lexer lexer("\"hello\\nworld\"");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok.value, "hello\\nworld");
+}
+
+TEST(LexerTest, LineContinuationLineTracking) {
+    // After a continuation, tokens on the next physical line have correct line numbers
+    Lexer lexer("ask \\\nname \\\n\"prompt\"");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::ASK);
+    EXPECT_EQ(tok1.line, 1);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok2.line, 2);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::STRING_LITERAL);
+    EXPECT_EQ(tok3.line, 3);
+}

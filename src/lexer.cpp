@@ -54,8 +54,8 @@ Token Lexer::readIdentifierOrKeyword() {
     int start_col = column_;
     std::string value;
 
-    while (!isAtEnd() &&
-           (std::isalnum(static_cast<unsigned char>(current())) != 0 || current() == '_')) {
+    while (!isAtEnd() && (std::isalnum(static_cast<unsigned char>(current())) != 0 ||
+                          current() == '_')) {
         value += advance();
     }
 
@@ -96,8 +96,26 @@ Token Lexer::readIntegerLiteral() {
     return Token(TokenType::INTEGER_LITERAL, value, start_line, start_col);
 }
 
+void Lexer::skipLineContinuation() {
+    while (!isAtEnd() && current() == '\\') {
+        std::size_t peek = pos_ + 1;
+        while (peek < source_.size() && (source_[peek] == ' ' || source_[peek] == '\t')) {
+            peek++;
+        }
+        if (peek < source_.size() && source_[peek] == '\n') {
+            while (pos_ <= peek) {
+                advance();
+            }
+            skipWhitespace();
+        } else {
+            break;
+        }
+    }
+}
+
 Token Lexer::nextToken() {
     skipWhitespace();
+    skipLineContinuation();
 
     if (isAtEnd()) {
         return Token(TokenType::EOF_TOKEN, "", line_, column_);

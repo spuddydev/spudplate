@@ -33,6 +33,7 @@ class Lexer {
     char advance();
     [[nodiscard]] bool isAtEnd() const;
     void skipWhitespace();
+    void skipLineContinuation();
     Token readIdentifierOrKeyword();
     Token readStringLiteral();
     Token readIntegerLiteral();
