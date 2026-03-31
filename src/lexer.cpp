@@ -166,6 +166,12 @@ Token Lexer::nextToken() {
             return Token(TokenType::LPAREN, "(", start_line, start_col);
         case ')':
             return Token(TokenType::RPAREN, ")", start_line, start_col);
+        case '{':
+            return Token(TokenType::LBRACE, "{", start_line, start_col);
+        case '}':
+            return Token(TokenType::RBRACE, "}", start_line, start_col);
+        case '.':
+            return Token(TokenType::DOT, ".", start_line, start_col);
         case '=':
             if (!isAtEnd() && current() == '=') {
                 advance();

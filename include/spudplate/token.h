@@ -59,6 +59,9 @@ enum class TokenType {
     NEWLINE,  ///< Logical line break (newline or semicolon)
     LPAREN,   ///< `(`
     RPAREN,   ///< `)`
+    LBRACE,   ///< `{` — open inline interpolation in path expressions
+    RBRACE,   ///< `}` — close inline interpolation in path expressions
+    DOT,      ///< `.` — separator in path expressions (e.g. `README.md`)
 
     // Special
     EOF_TOKEN,  ///< End of input
@@ -155,6 +158,12 @@ inline std::string tokenTypeToString(TokenType type) {
             return "LPAREN";
         case TokenType::RPAREN:
             return "RPAREN";
+        case TokenType::LBRACE:
+            return "LBRACE";
+        case TokenType::RBRACE:
+            return "RBRACE";
+        case TokenType::DOT:
+            return "DOT";
         case TokenType::EOF_TOKEN:
             return "EOF_TOKEN";
         case TokenType::ERROR:

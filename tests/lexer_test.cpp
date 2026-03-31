@@ -31,6 +31,9 @@ TEST(TokenTest, TypeToString) {
     EXPECT_EQ(tokenTypeToString(TokenType::ERROR), "ERROR");
     EXPECT_EQ(tokenTypeToString(TokenType::STRING_LITERAL), "STRING_LITERAL");
     EXPECT_EQ(tokenTypeToString(TokenType::ASSIGN), "ASSIGN");
+    EXPECT_EQ(tokenTypeToString(TokenType::DOT), "DOT");
+    EXPECT_EQ(tokenTypeToString(TokenType::LBRACE), "LBRACE");
+    EXPECT_EQ(tokenTypeToString(TokenType::RBRACE), "RBRACE");
 }
 
 TEST(LexerTest, EmptyInput) {
@@ -497,4 +500,143 @@ TEST(LexerTest, LineContinuationLineTracking) {
     Token tok3 = lexer.nextToken();
     EXPECT_EQ(tok3.type, TokenType::STRING_LITERAL);
     EXPECT_EQ(tok3.line, 3);
+}
+
+// --- DOT, LBRACE, RBRACE tokens ---
+
+TEST(LexerTest, DotToken) {
+    Lexer lexer(".");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::DOT);
+    EXPECT_EQ(tok.value, ".");
+    EXPECT_EQ(tok.line, 1);
+    EXPECT_EQ(tok.column, 1);
+}
+
+TEST(LexerTest, LbraceToken) {
+    Lexer lexer("{");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::LBRACE);
+    EXPECT_EQ(tok.value, "{");
+}
+
+TEST(LexerTest, RbraceToken) {
+    Lexer lexer("}");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::RBRACE);
+    EXPECT_EQ(tok.value, "}");
+}
+
+TEST(LexerTest, PathLikeSequence) {
+    // README.md → IDENTIFIER DOT IDENTIFIER
+    Lexer lexer("README.md");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok1.value, "README");
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::DOT);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok3.value, "md");
+
+    EXPECT_EQ(lexer.nextToken().type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, PathWithSlashAndDot) {
+    // src/main.cpp → IDENTIFIER SLASH IDENTIFIER DOT IDENTIFIER
+    Lexer lexer("src/main.cpp");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok1.value, "src");
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::SLASH);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok3.value, "main");
+
+    Token tok4 = lexer.nextToken();
+    EXPECT_EQ(tok4.type, TokenType::DOT);
+
+    Token tok5 = lexer.nextToken();
+    EXPECT_EQ(tok5.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok5.value, "cpp");
+
+    EXPECT_EQ(lexer.nextToken().type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, BraceInterpolation) {
+    // week_{n} → IDENTIFIER LBRACE IDENTIFIER RBRACE
+    Lexer lexer("week_{n}");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok1.value, "week_");
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::LBRACE);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok3.value, "n");
+
+    Token tok4 = lexer.nextToken();
+    EXPECT_EQ(tok4.type, TokenType::RBRACE);
+
+    EXPECT_EQ(lexer.nextToken().type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, BraceInterpolationInPath) {
+    // {prefix}/README.md → LBRACE IDENTIFIER RBRACE SLASH IDENTIFIER DOT IDENTIFIER
+    Lexer lexer("{prefix}/README.md");
+    EXPECT_EQ(lexer.nextToken().type, TokenType::LBRACE);
+
+    Token id1 = lexer.nextToken();
+    EXPECT_EQ(id1.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(id1.value, "prefix");
+
+    EXPECT_EQ(lexer.nextToken().type, TokenType::RBRACE);
+    EXPECT_EQ(lexer.nextToken().type, TokenType::SLASH);
+
+    Token id2 = lexer.nextToken();
+    EXPECT_EQ(id2.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(id2.value, "README");
+
+    EXPECT_EQ(lexer.nextToken().type, TokenType::DOT);
+
+    Token id3 = lexer.nextToken();
+    EXPECT_EQ(id3.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(id3.value, "md");
+
+    EXPECT_EQ(lexer.nextToken().type, TokenType::EOF_TOKEN);
+}
+
+TEST(LexerTest, DotColumnTracking) {
+    Lexer lexer("a.b");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.column, 1);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::DOT);
+    EXPECT_EQ(tok2.column, 2);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.column, 3);
+}
+
+TEST(LexerTest, BraceColumnTracking) {
+    Lexer lexer("{x}");
+    Token tok1 = lexer.nextToken();
+    EXPECT_EQ(tok1.type, TokenType::LBRACE);
+    EXPECT_EQ(tok1.column, 1);
+
+    Token tok2 = lexer.nextToken();
+    EXPECT_EQ(tok2.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok2.column, 2);
+
+    Token tok3 = lexer.nextToken();
+    EXPECT_EQ(tok3.type, TokenType::RBRACE);
+    EXPECT_EQ(tok3.column, 3);
 }
