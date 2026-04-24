@@ -293,6 +293,8 @@ StmtPtr Parser::parseMkdir() {
     stmt->data = MkdirStmt{.path = std::move(path),
                             .alias = std::move(alias),
                             .mkdir_p = true,
+                            .from_source = std::nullopt,
+                            .verbatim = false,
                             .mode = mode,
                             .when_clause = std::move(when_clause),
                             .line = start.line,
