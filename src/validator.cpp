@@ -1,14 +1,81 @@
 #include "spudplate/validator.h"
 
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
 namespace spudplate {
 
 namespace {
+
+ExprPtr make_expr(ExprData data) {
+    auto expr = std::make_unique<Expr>();
+    expr->data = std::move(data);
+    return expr;
+}
+
+bool is_bool_id(const Expr& e, const TypeMap& tm) {
+    if (const auto* id = std::get_if<IdentifierExpr>(&e.data); id != nullptr) {
+        auto it = tm.find(id->name);
+        return it != tm.end() && it->second == VarType::Bool;
+    }
+    return false;
+}
+
+// Apply a single top-level normalization rule. Sets `fired` if a rule matched.
+// Children are assumed already normalized.
+ExprPtr apply_rule_once(const Expr& expr, const TypeMap& tm, bool& fired) {
+    // Rule: `not not X` -> X
+    if (const auto* un = std::get_if<UnaryExpr>(&expr.data);
+        un != nullptr && un->op == TokenType::NOT) {
+        if (const auto* inner = std::get_if<UnaryExpr>(&un->operand->data);
+            inner != nullptr && inner->op == TokenType::NOT) {
+            fired = true;
+            return clone_expr(*inner->operand);
+        }
+    }
+
+    // Rules: `x == true` / `x == false` / `x != true` / `x != false` where x is bool.
+    // Symmetric: `true == x` etc. are also recognised.
+    if (const auto* bin = std::get_if<BinaryExpr>(&expr.data);
+        bin != nullptr &&
+        (bin->op == TokenType::EQUALS || bin->op == TokenType::NOT_EQUALS)) {
+        const Expr* id_side = nullptr;
+        const BoolLiteralExpr* lit = nullptr;
+        if (is_bool_id(*bin->left, tm)) {
+            if (const auto* l = std::get_if<BoolLiteralExpr>(&bin->right->data);
+                l != nullptr) {
+                id_side = bin->left.get();
+                lit = l;
+            }
+        }
+        if (id_side == nullptr && is_bool_id(*bin->right, tm)) {
+            if (const auto* l = std::get_if<BoolLiteralExpr>(&bin->left->data);
+                l != nullptr) {
+                id_side = bin->right.get();
+                lit = l;
+            }
+        }
+        if (id_side != nullptr && lit != nullptr) {
+            const bool positive = (bin->op == TokenType::EQUALS && lit->value) ||
+                                  (bin->op == TokenType::NOT_EQUALS && !lit->value);
+            fired = true;
+            if (positive) {
+                return clone_expr(*id_side);
+            }
+            return make_expr(UnaryExpr{.op = TokenType::NOT,
+                                       .operand = clone_expr(*id_side),
+                                       .line = bin->line,
+                                       .column = bin->column});
+        }
+    }
+
+    return clone_expr(expr);
+}
 
 // Scope stack. frames[0] is the program-level scope and is never popped. Each
 // `repeat` body pushes a new frame on entry and pops it on exit. Names that
@@ -171,6 +238,110 @@ void validate_stmt(const Stmt& stmt, Scope& scope) {
 }
 
 }  // namespace
+
+ExprPtr clone_expr(const Expr& expr) {
+    return std::visit(
+        [](const auto& n) -> ExprPtr {
+            using T = std::decay_t<decltype(n)>;
+            if constexpr (std::is_same_v<T, StringLiteralExpr>) {
+                return make_expr(StringLiteralExpr{
+                    .value = n.value, .line = n.line, .column = n.column});
+            } else if constexpr (std::is_same_v<T, IntegerLiteralExpr>) {
+                return make_expr(IntegerLiteralExpr{
+                    .value = n.value, .line = n.line, .column = n.column});
+            } else if constexpr (std::is_same_v<T, BoolLiteralExpr>) {
+                return make_expr(BoolLiteralExpr{
+                    .value = n.value, .line = n.line, .column = n.column});
+            } else if constexpr (std::is_same_v<T, IdentifierExpr>) {
+                return make_expr(
+                    IdentifierExpr{.name = n.name, .line = n.line, .column = n.column});
+            } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+                return make_expr(UnaryExpr{.op = n.op,
+                                           .operand = clone_expr(*n.operand),
+                                           .line = n.line,
+                                           .column = n.column});
+            } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+                return make_expr(BinaryExpr{.op = n.op,
+                                            .left = clone_expr(*n.left),
+                                            .right = clone_expr(*n.right),
+                                            .line = n.line,
+                                            .column = n.column});
+            } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                return make_expr(FunctionCallExpr{.name = n.name,
+                                                  .argument = clone_expr(*n.argument),
+                                                  .line = n.line,
+                                                  .column = n.column});
+            }
+        },
+        expr.data);
+}
+
+ExprPtr normalize(const Expr& expr, const TypeMap& tm) {
+    // Step 1: deep-clone and normalize children bottom-up.
+    ExprPtr out;
+    std::visit(
+        [&](const auto& n) {
+            using T = std::decay_t<decltype(n)>;
+            if constexpr (std::is_same_v<T, UnaryExpr>) {
+                out = make_expr(UnaryExpr{.op = n.op,
+                                          .operand = normalize(*n.operand, tm),
+                                          .line = n.line,
+                                          .column = n.column});
+            } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+                out = make_expr(BinaryExpr{.op = n.op,
+                                           .left = normalize(*n.left, tm),
+                                           .right = normalize(*n.right, tm),
+                                           .line = n.line,
+                                           .column = n.column});
+            } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                out = make_expr(FunctionCallExpr{.name = n.name,
+                                                 .argument = normalize(*n.argument, tm),
+                                                 .line = n.line,
+                                                 .column = n.column});
+            } else {
+                out = clone_expr(expr);
+            }
+        },
+        expr.data);
+
+    // Step 2: apply top-level rules to fixpoint.
+    while (true) {
+        bool fired = false;
+        out = apply_rule_once(*out, tm, fired);
+        if (!fired) {
+            break;
+        }
+    }
+    return out;
+}
+
+bool exprs_equal(const Expr& a, const Expr& b) {
+    if (a.data.index() != b.data.index()) {
+        return false;
+    }
+    return std::visit(
+        [&](const auto& ax) -> bool {
+            using T = std::decay_t<decltype(ax)>;
+            const auto& bx = std::get<T>(b.data);
+            if constexpr (std::is_same_v<T, StringLiteralExpr>) {
+                return ax.value == bx.value;
+            } else if constexpr (std::is_same_v<T, IntegerLiteralExpr>) {
+                return ax.value == bx.value;
+            } else if constexpr (std::is_same_v<T, BoolLiteralExpr>) {
+                return ax.value == bx.value;
+            } else if constexpr (std::is_same_v<T, IdentifierExpr>) {
+                return ax.name == bx.name;
+            } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+                return ax.op == bx.op && exprs_equal(*ax.operand, *bx.operand);
+            } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+                return ax.op == bx.op && exprs_equal(*ax.left, *bx.left) &&
+                       exprs_equal(*ax.right, *bx.right);
+            } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                return ax.name == bx.name && exprs_equal(*ax.argument, *bx.argument);
+            }
+        },
+        a.data);
+}
 
 void validate(const Program& program) {
     Scope scope;
