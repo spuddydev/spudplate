@@ -17,7 +17,6 @@ enum class TokenType {
     WHEN,      ///< `when` — conditional modifier
     REPEAT,    ///< `repeat` — begin a loop block
     END,       ///< `end` — close a repeat block
-    REQUIRED,  ///< `required` — mark an ask as mandatory
     VERBATIM,  ///< `verbatim` — suppress interpolation in from-file contents
     APPEND,    ///< `append` — append to file instead of overwriting
     MODE,      ///< `mode` — set file/directory permissions (octal)
@@ -104,8 +103,6 @@ inline std::string tokenTypeToString(TokenType type) {
             return "REPEAT";
         case TokenType::END:
             return "END";
-        case TokenType::REQUIRED:
-            return "REQUIRED";
         case TokenType::VERBATIM:
             return "VERBATIM";
         case TokenType::APPEND:
