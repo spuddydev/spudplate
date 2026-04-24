@@ -3,6 +3,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 #include "spudplate/ast.h"
 #include "spudplate/lexer.h"
@@ -67,6 +68,7 @@ class Parser {
   private:
     Lexer lexer_;
     Token current_;
+    std::unordered_set<std::string> aliases_;  ///< Names bound by `as <name>` in prior statements.
 
     // Token consumption
     Token advance();
@@ -79,6 +81,7 @@ class Parser {
     VarType parse_var_type();
     std::optional<ExprPtr> parse_when_clause();
     std::optional<int> parse_mode_clause();
+    PathExpr parse_path_expr();
     void expect_newline(const std::string& context);
 
     // Expression precedence climbing

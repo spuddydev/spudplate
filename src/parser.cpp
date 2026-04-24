@@ -75,6 +75,87 @@ void Parser::expect_newline(const std::string& context) {
     expect(TokenType::NEWLINE, "expected newline after " + context);
 }
 
+PathExpr Parser::parse_path_expr() {
+    PathExpr path;
+    path.line = current_.line;
+    path.column = current_.column;
+
+    // Quoted-string fallback for paths with spaces: `mkdir "my notes"`
+    if (check(TokenType::STRING_LITERAL)) {
+        Token tok = advance();
+        path.segments.push_back(
+            PathLiteral{.value = tok.value, .line = tok.line, .column = tok.column});
+        return path;
+    }
+
+    // Unquoted path: greedily consume IDENTIFIER / SLASH / DOT / INTEGER_LITERAL
+    // and `{expr}` interpolation blocks. Adjacent non-alias, non-interpolation
+    // tokens coalesce into a single PathLiteral via a text buffer.
+    std::string buffer;
+    int buf_line = 0;
+    int buf_col = 0;
+
+    auto flush_buffer = [&]() {
+        if (!buffer.empty()) {
+            path.segments.push_back(PathLiteral{
+                .value = std::move(buffer), .line = buf_line, .column = buf_col});
+            buffer.clear();
+        }
+    };
+
+    auto start_buffer = [&](int line, int col) {
+        if (buffer.empty()) {
+            buf_line = line;
+            buf_col = col;
+        }
+    };
+
+    while (true) {
+        if (check(TokenType::IDENTIFIER)) {
+            Token tok = advance();
+            if (aliases_.contains(tok.value)) {
+                flush_buffer();
+                path.segments.push_back(
+                    PathVar{.name = tok.value, .line = tok.line, .column = tok.column});
+            } else {
+                start_buffer(tok.line, tok.column);
+                buffer += tok.value;
+            }
+        } else if (check(TokenType::SLASH)) {
+            start_buffer(current_.line, current_.column);
+            buffer += '/';
+            advance();
+        } else if (check(TokenType::DOT)) {
+            start_buffer(current_.line, current_.column);
+            buffer += '.';
+            advance();
+        } else if (check(TokenType::INTEGER_LITERAL)) {
+            Token tok = advance();
+            start_buffer(tok.line, tok.column);
+            buffer += tok.value;
+        } else if (check(TokenType::LBRACE)) {
+            int line = current_.line;
+            int col = current_.column;
+            advance();
+            flush_buffer();
+            auto expr = parseExpression();
+            expect(TokenType::RBRACE, "expected '}' to close path interpolation");
+            path.segments.push_back(PathInterp{
+                .expression = std::move(expr), .line = line, .column = col});
+        } else {
+            break;
+        }
+    }
+
+    flush_buffer();
+
+    if (path.segments.empty()) {
+        throw ParseError("expected path expression", current_.line, current_.column);
+    }
+
+    return path;
+}
+
 // Statement parsers
 
 StmtPtr Parser::parseAsk() {
@@ -114,13 +195,23 @@ StmtPtr Parser::parseLet() {
 
 StmtPtr Parser::parseMkdir() {
     Token start = expect(TokenType::MKDIR, "expected 'mkdir'");
-    Token path = expect(TokenType::STRING_LITERAL, "expected path string after 'mkdir'");
+    PathExpr path = parse_path_expr();
     auto mode = parse_mode_clause();
     auto when_clause = parse_when_clause();
+
+    std::optional<std::string> alias;
+    if (match(TokenType::AS)) {
+        Token alias_tok = expect(TokenType::IDENTIFIER, "expected alias name after 'as'");
+        alias = alias_tok.value;
+        aliases_.insert(*alias);
+    }
+
     expect_newline("mkdir statement");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->data = MkdirStmt{.path = path.value,
+    stmt->data = MkdirStmt{.path = std::move(path),
+                            .alias = std::move(alias),
+                            .mkdir_p = true,
                             .mode = mode,
                             .when_clause = std::move(when_clause),
                             .line = start.line,
@@ -130,16 +221,15 @@ StmtPtr Parser::parseMkdir() {
 
 StmtPtr Parser::parseFile() {
     Token start = expect(TokenType::FILE, "expected 'file'");
-    Token path = expect(TokenType::STRING_LITERAL, "expected path string after 'file'");
+    PathExpr path = parse_path_expr();
 
     bool append = match(TokenType::APPEND);
 
     FileSource source = [&]() -> FileSource {
         if (match(TokenType::FROM)) {
-            Token src =
-                expect(TokenType::STRING_LITERAL, "expected source path after 'from'");
+            PathExpr src = parse_path_expr();
             bool verbatim = match(TokenType::VERBATIM);
-            return FileFromSource{.path = src.value, .verbatim = verbatim};
+            return FileFromSource{.path = std::move(src), .verbatim = verbatim};
         }
         if (match(TokenType::CONTENT)) {
             auto value = parseExpression();
@@ -151,10 +241,19 @@ StmtPtr Parser::parseFile() {
 
     auto mode = parse_mode_clause();
     auto when_clause = parse_when_clause();
+
+    std::optional<std::string> alias;
+    if (match(TokenType::AS)) {
+        Token alias_tok = expect(TokenType::IDENTIFIER, "expected alias name after 'as'");
+        alias = alias_tok.value;
+        aliases_.insert(*alias);
+    }
+
     expect_newline("file statement");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->data = FileStmt{.path = path.value,
+    stmt->data = FileStmt{.path = std::move(path),
+                          .alias = std::move(alias),
                           .source = std::move(source),
                           .append = append,
                           .mode = mode,
