@@ -87,3 +87,110 @@ TEST(ValidatorTest, RepeatBodyWithNonAskStatementsValidates) {
         "end\n");
     EXPECT_NO_THROW(validate(program));
 }
+
+// --- Scope stack tests ---
+
+TEST(ValidatorTest, LetInsideRepeatReferencedOutsideIsError) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "  let x = i\n"
+        "end\n"
+        "let y = x\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, IteratorVarReferencedOutsideIsError) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "end\n"
+        "let y = i\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AliasBoundInsideRepeatReferencedOutsideIsError) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "  mkdir \"foo\" as bar\n"
+        "end\n"
+        "mkdir bar/sub\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, NestedRepeatsIsolateInnerScope) {
+    // Inner-declared `x` must not be visible to the outer body after inner pops.
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "  repeat n as j\n"
+        "    let x = 1\n"
+        "  end\n"
+        "  let y = x\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, OuterNamesVisibleFromInsideNestedRepeat) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "let base = 5\n"
+        "repeat n as i\n"
+        "  repeat n as j\n"
+        "    let x = base + i + j\n"
+        "  end\n"
+        "end\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, SameScopeReferencesInsideRepeatAreValid) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "  let x = i\n"
+        "  let y = x\n"
+        "end\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, ShadowingTopLevelLetFromInsideRepeatIsError) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "let x = 1\n"
+        "repeat n as i\n"
+        "  let x = i\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, WhenClauseReferencingPoppedBindingIsError) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "  let x = 1\n"
+        "end\n"
+        "mkdir stuff when x\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, PathInterpReferencingPoppedIteratorIsError) {
+    // Unquoted path so `{i}` is parsed as a PathInterp segment.
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "end\n"
+        "mkdir week_{i}\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, CollectionVarReferencingPoppedNameIsError) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as k\n"
+        "  let x = 1\n"
+        "end\n"
+        "repeat x as j\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
