@@ -11,6 +11,7 @@ using spudplate::BoolLiteralExpr;
 using spudplate::ExprPtr;
 using spudplate::FileContentSource;
 using spudplate::FileFromSource;
+using spudplate::CopyStmt;
 using spudplate::FileStmt;
 using spudplate::FunctionCallExpr;
 using spudplate::IdentifierExpr;
@@ -735,6 +736,84 @@ TEST(ParserTest, MkdirAsWithNonIdentifier) {
 
 TEST(ParserTest, MkdirEmptyPath) {
     EXPECT_THROW(parse_mkdir("mkdir\n"), ParseError);
+}
+
+// --- Copy and mkdir-from tests ---
+
+static StmtPtr parse_copy(const std::string& input) {
+    Lexer lexer(input);
+    Parser parser(std::move(lexer));
+    return parser.parseCopy();
+}
+
+TEST(ParserTest, CopyBasic) {
+    auto stmt = parse_copy("copy standard_templates into templatepath\n");
+    auto& cp = std::get<CopyStmt>(stmt->data);
+    ASSERT_EQ(cp.source.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(cp.source.segments[0]).value, "standard_templates");
+    ASSERT_EQ(cp.destination.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(cp.destination.segments[0]).value, "templatepath");
+    EXPECT_FALSE(cp.verbatim);
+    EXPECT_FALSE(cp.when_clause.has_value());
+}
+
+TEST(ParserTest, CopyWithWhen) {
+    auto stmt =
+        parse_copy("copy philosophy_templates into templatepath when use_philosophy\n");
+    auto& cp = std::get<CopyStmt>(stmt->data);
+    ASSERT_TRUE(cp.when_clause.has_value());
+    auto& cond = std::get<IdentifierExpr>((*cp.when_clause)->data);
+    EXPECT_EQ(cond.name, "use_philosophy");
+}
+
+TEST(ParserTest, CopyVerbatimWithNestedDestination) {
+    auto program = parse_program(
+        "mkdir static as staticpath\n"
+        "copy assets into staticpath/assets verbatim\n");
+    ASSERT_EQ(program.statements.size(), 2u);
+    auto& cp = std::get<CopyStmt>(program.statements[1]->data);
+    EXPECT_TRUE(cp.verbatim);
+    ASSERT_EQ(cp.destination.segments.size(), 2u);
+    EXPECT_EQ(std::get<PathVar>(cp.destination.segments[0]).name, "staticpath");
+    EXPECT_EQ(std::get<PathLiteral>(cp.destination.segments[1]).value, "/assets");
+}
+
+TEST(ParserTest, CopyMissingInto) {
+    EXPECT_THROW(parse_copy("copy src dest\n"), ParseError);
+}
+
+TEST(ParserTest, CopyMissingSource) {
+    EXPECT_THROW(parse_copy("copy into dest\n"), ParseError);
+}
+
+TEST(ParserTest, CopyMissingDestination) {
+    EXPECT_THROW(parse_copy("copy src into\n"), ParseError);
+}
+
+TEST(ParserTest, MkdirFromBasic) {
+    auto stmt = parse_mkdir("mkdir templates from base_templates\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "templates");
+    ASSERT_TRUE(mk.from_source.has_value());
+    ASSERT_EQ(mk.from_source->segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.from_source->segments[0]).value, "base_templates");
+    EXPECT_FALSE(mk.verbatim);
+}
+
+TEST(ParserTest, MkdirFromVerbatimWhenAs) {
+    auto stmt = parse_mkdir(
+        "mkdir templates from base_templates verbatim when use_templates as templatepath\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_TRUE(mk.from_source.has_value());
+    EXPECT_TRUE(mk.verbatim);
+    ASSERT_TRUE(mk.when_clause.has_value());
+    ASSERT_TRUE(mk.alias.has_value());
+    EXPECT_EQ(*mk.alias, "templatepath");
+}
+
+TEST(ParserTest, MkdirFromMissingSourcePath) {
+    EXPECT_THROW(parse_mkdir("mkdir templates from\n"), ParseError);
 }
 
 // --- Program parsing tests ---
