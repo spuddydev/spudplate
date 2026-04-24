@@ -888,6 +888,53 @@ TEST(ParserTest, RepeatNested) {
     std::get<MkdirStmt>(inner.body[0]->data);
 }
 
+TEST(ParserTest, RepeatWithWhenClause) {
+    auto program = parse_program(
+        "repeat n as i when use_weeks\n"
+        "  mkdir \"week_{i}\"\n"
+        "end\n");
+    ASSERT_EQ(program.statements.size(), 1);
+    auto& rep = std::get<RepeatStmt>(program.statements[0]->data);
+    ASSERT_TRUE(rep.when_clause.has_value());
+    auto& cond = std::get<IdentifierExpr>((*rep.when_clause)->data);
+    EXPECT_EQ(cond.name, "use_weeks");
+    ASSERT_EQ(rep.body.size(), 1);
+}
+
+TEST(ParserTest, RepeatHeaderWhenWithBodyStatementWhen) {
+    // Proves the header when binds to repeat and the body statement's when
+    // binds to the body statement — no lexical collision.
+    auto program = parse_program(
+        "repeat n as i when outer\n"
+        "  mkdir \"x\" when inner\n"
+        "end\n");
+    auto& rep = std::get<RepeatStmt>(program.statements[0]->data);
+    ASSERT_TRUE(rep.when_clause.has_value());
+    EXPECT_EQ(std::get<IdentifierExpr>((*rep.when_clause)->data).name, "outer");
+    ASSERT_EQ(rep.body.size(), 1);
+    auto& mk = std::get<MkdirStmt>(rep.body[0]->data);
+    ASSERT_TRUE(mk.when_clause.has_value());
+    EXPECT_EQ(std::get<IdentifierExpr>((*mk.when_clause)->data).name, "inner");
+}
+
+TEST(ParserTest, RepeatWithoutWhenClauseHasEmptyOptional) {
+    auto program = parse_program(
+        "repeat n as i\n"
+        "  mkdir \"x\"\n"
+        "end\n");
+    auto& rep = std::get<RepeatStmt>(program.statements[0]->data);
+    EXPECT_FALSE(rep.when_clause.has_value());
+}
+
+TEST(ParserTest, RepeatBareWhenRaisesError) {
+    // `repeat n as i when\n ... end` — bare when with no expression.
+    // parseExpression sees NEWLINE and throws.
+    EXPECT_THROW(parse_program("repeat n as i when\n"
+                               "  mkdir \"x\"\n"
+                               "end\n"),
+                 ParseError);
+}
+
 // --- Full integration test ---
 
 TEST(ParserTest, FullSpudFile) {
