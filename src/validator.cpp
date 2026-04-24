@@ -111,15 +111,48 @@ struct Scope {
     [[nodiscard]] bool inside_repeat() const { return frames.size() > 1; }
 };
 
+// AliasCtx carries state that accumulates as the walker moves through the
+// program: the alias registry (populated for mkdir/file aliases declared
+// outside any repeat, Part E) and the type map used to normalize when clauses
+// (Part D).
+struct AliasCtx {
+    std::unordered_map<std::string, std::optional<ExprPtr>> registry;
+    TypeMap type_map;
+};
+
 void walk_expr(const Expr& expr, const Scope& scope);
-void walk_path(const PathExpr& path, const Scope& scope);
-void validate_stmt(const Stmt& stmt, Scope& scope);
+void walk_path(const PathExpr& path, const Scope& scope, const AliasCtx& ctx,
+               const std::optional<ExprPtr>& current_when);
+void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx);
 
 void check_reference(const std::string& name, int line, int column,
                      const Scope& scope) {
     if (scope.out_of_scope(name)) {
         throw SemanticError("reference to out-of-scope name '" + name + "'", line,
                             column);
+    }
+}
+
+void check_alias(const PathVar& pv, const std::optional<ExprPtr>& current_when,
+                 const AliasCtx& ctx) {
+    auto it = ctx.registry.find(pv.name);
+    if (it == ctx.registry.end()) {
+        return;  // Not a registered alias (for example one rejected by Part C).
+    }
+    const auto& stored = it->second;
+    if (!stored.has_value()) {
+        return;  // Unconditional binding — references are unrestricted.
+    }
+    if (!current_when.has_value()) {
+        throw SemanticError("alias '" + pv.name +
+                                "' is conditional; reference requires a matching when clause",
+                            pv.line, pv.column);
+    }
+    auto normalized_current = normalize(**current_when, ctx.type_map);
+    if (!exprs_equal(**stored, *normalized_current)) {
+        throw SemanticError(
+            "alias '" + pv.name + "' referenced under a different condition than its binding",
+            pv.line, pv.column);
     }
 }
 
@@ -142,13 +175,15 @@ void walk_expr(const Expr& expr, const Scope& scope) {
         expr.data);
 }
 
-void walk_path(const PathExpr& path, const Scope& scope) {
+void walk_path(const PathExpr& path, const Scope& scope, const AliasCtx& ctx,
+               const std::optional<ExprPtr>& current_when) {
     for (const auto& seg : path.segments) {
         std::visit(
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, PathVar>) {
                     check_reference(s.name, s.line, s.column, scope);
+                    check_alias(s, current_when, ctx);
                 } else if constexpr (std::is_same_v<T, PathInterp>) {
                     walk_expr(*s.expression, scope);
                 }
@@ -171,7 +206,22 @@ void check_shadowing(const std::string& name, int line, int column,
     }
 }
 
-void validate_stmt(const Stmt& stmt, Scope& scope) {
+// Called by mkdir/file to record an alias binding in the registry if the
+// binding is outside any repeat body.
+void register_alias_binding(const std::string& name,
+                            const std::optional<ExprPtr>& when_clause,
+                            const Scope& scope, AliasCtx& ctx) {
+    if (scope.inside_repeat()) {
+        return;  // Part C already rejects out-of-repeat references to these.
+    }
+    std::optional<ExprPtr> stored;
+    if (when_clause.has_value()) {
+        stored = normalize(**when_clause, ctx.type_map);
+    }
+    ctx.registry[name] = std::move(stored);
+}
+
+void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
     std::visit(
         [&](const auto& s) {
             using T = std::decay_t<decltype(s)>;
@@ -187,27 +237,29 @@ void validate_stmt(const Stmt& stmt, Scope& scope) {
                     walk_expr(*opt, scope);
                 }
                 walk_optional_expr(s.when_clause, scope);
+                ctx.type_map[s.name] = s.var_type;
             } else if constexpr (std::is_same_v<T, LetStmt>) {
                 walk_expr(*s.value, scope);
                 check_shadowing(s.name, s.line, s.column, scope);
                 scope.declare(s.name);
             } else if constexpr (std::is_same_v<T, MkdirStmt>) {
-                walk_path(s.path, scope);
+                walk_path(s.path, scope, ctx, s.when_clause);
                 if (s.from_source.has_value()) {
-                    walk_path(*s.from_source, scope);
+                    walk_path(*s.from_source, scope, ctx, s.when_clause);
                 }
                 walk_optional_expr(s.when_clause, scope);
                 if (s.alias.has_value()) {
                     check_shadowing(*s.alias, s.line, s.column, scope);
                     scope.declare(*s.alias);
+                    register_alias_binding(*s.alias, s.when_clause, scope, ctx);
                 }
             } else if constexpr (std::is_same_v<T, FileStmt>) {
-                walk_path(s.path, scope);
+                walk_path(s.path, scope, ctx, s.when_clause);
                 std::visit(
                     [&](const auto& src) {
                         using ST = std::decay_t<decltype(src)>;
                         if constexpr (std::is_same_v<ST, FileFromSource>) {
-                            walk_path(src.path, scope);
+                            walk_path(src.path, scope, ctx, s.when_clause);
                         } else if constexpr (std::is_same_v<ST, FileContentSource>) {
                             walk_expr(*src.value, scope);
                         }
@@ -217,10 +269,11 @@ void validate_stmt(const Stmt& stmt, Scope& scope) {
                 if (s.alias.has_value()) {
                     check_shadowing(*s.alias, s.line, s.column, scope);
                     scope.declare(*s.alias);
+                    register_alias_binding(*s.alias, s.when_clause, scope, ctx);
                 }
             } else if constexpr (std::is_same_v<T, CopyStmt>) {
-                walk_path(s.source, scope);
-                walk_path(s.destination, scope);
+                walk_path(s.source, scope, ctx, s.when_clause);
+                walk_path(s.destination, scope, ctx, s.when_clause);
                 walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, RepeatStmt>) {
                 check_reference(s.collection_var, s.line, s.column, scope);
@@ -229,7 +282,7 @@ void validate_stmt(const Stmt& stmt, Scope& scope) {
                 scope.push();
                 scope.declare(s.iterator_var);
                 for (const auto& inner : s.body) {
-                    validate_stmt(*inner, scope);
+                    validate_stmt(*inner, scope, ctx);
                 }
                 scope.pop();
             }
@@ -346,8 +399,9 @@ bool exprs_equal(const Expr& a, const Expr& b) {
 void validate(const Program& program) {
     Scope scope;
     scope.push();  // program-level frame, never popped.
+    AliasCtx ctx;
     for (const auto& stmt : program.statements) {
-        validate_stmt(*stmt, scope);
+        validate_stmt(*stmt, scope, ctx);
     }
 }
 
