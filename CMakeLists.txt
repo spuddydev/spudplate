@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Library
-add_library(spudplate_lib src/lexer.cpp src/parser.cpp)
+add_library(spudplate_lib src/lexer.cpp src/parser.cpp src/validator.cpp)
 target_include_directories(spudplate_lib PUBLIC include)
 
 # Executable
