@@ -277,6 +277,14 @@ StmtPtr Parser::parseLet() {
 StmtPtr Parser::parseMkdir() {
     Token start = expect(TokenType::MKDIR, "expected 'mkdir'");
     PathExpr path = parse_path_expr();
+
+    std::optional<PathExpr> from_source;
+    bool verbatim = false;
+    if (match(TokenType::FROM)) {
+        from_source = parse_path_expr();
+        verbatim = match(TokenType::VERBATIM);
+    }
+
     auto mode = parse_mode_clause();
     auto when_clause = parse_when_clause();
 
@@ -293,6 +301,8 @@ StmtPtr Parser::parseMkdir() {
     stmt->data = MkdirStmt{.path = std::move(path),
                             .alias = std::move(alias),
                             .mkdir_p = true,
+                            .from_source = std::move(from_source),
+                            .verbatim = verbatim,
                             .mode = mode,
                             .when_clause = std::move(when_clause),
                             .line = start.line,
@@ -338,6 +348,27 @@ StmtPtr Parser::parseFile() {
                           .source = std::move(source),
                           .append = append,
                           .mode = mode,
+                          .when_clause = std::move(when_clause),
+                          .line = start.line,
+                          .column = start.column};
+    return stmt;
+}
+
+// Copy statement parser
+
+StmtPtr Parser::parseCopy() {
+    Token start = expect(TokenType::COPY, "expected 'copy'");
+    PathExpr source = parse_path_expr();
+    expect(TokenType::INTO, "expected 'into' after copy source path");
+    PathExpr destination = parse_path_expr();
+    bool verbatim = match(TokenType::VERBATIM);
+    auto when_clause = parse_when_clause();
+    expect_newline("copy statement");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->data = CopyStmt{.source = std::move(source),
+                          .destination = std::move(destination),
+                          .verbatim = verbatim,
                           .when_clause = std::move(when_clause),
                           .line = start.line,
                           .column = start.column};
@@ -391,6 +422,9 @@ StmtPtr Parser::parseStatement() {
     }
     if (check(TokenType::REPEAT)) {
         return parseRepeat();
+    }
+    if (check(TokenType::COPY)) {
+        return parseCopy();
     }
     throw ParseError("unexpected token: " + current_.value, current_.line,
                      current_.column);

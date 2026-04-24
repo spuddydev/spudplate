@@ -183,12 +183,17 @@ struct LetStmt {
 /**
  * @brief A `mkdir` statement — creates a directory.
  *
- * Example: `mkdir "{slug}/src" mode 0755`
+ * Example: `mkdir src/modules mode 0755`
+ *
+ * With a `from <source>` clause, the directory is created and populated from
+ * the source directory atomically. Without `from`, an empty directory is made.
  */
 struct MkdirStmt {
     PathExpr path;                         ///< Directory path expression.
     std::optional<std::string> alias;      ///< Optional `as <name>` binding; empty if no `as` clause.
     bool mkdir_p;                          ///< Always true — create intermediate directories.
+    std::optional<PathExpr> from_source;   ///< Optional source directory to populate from.
+    bool verbatim;                         ///< If true with from_source, suppress interpolation.
     std::optional<int> mode;               ///< Optional permission bits (e.g. 0755).
     std::optional<ExprPtr> when_clause;    ///< Optional condition guarding creation.
     int line;
@@ -234,8 +239,27 @@ struct RepeatStmt {
     int column;
 };
 
+/**
+ * @brief A `copy` statement — copies contents from a source directory into
+ * an existing destination directory.
+ *
+ * Example: `copy standard_templates/ into templatepath`
+ *
+ * Unlike `mkdir ... from`, the destination directory must already exist. Use
+ * `copy` to merge multiple sources into a single destination.
+ */
+struct CopyStmt {
+    PathExpr source;                     ///< Source directory path.
+    PathExpr destination;                ///< Existing destination directory path.
+    bool verbatim;                       ///< If true, suppress `{var}` interpolation.
+    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the copy.
+    int line;
+    int column;
+};
+
 /** @brief Discriminated union of all statement node types. */
-using StmtData = std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt>;
+using StmtData =
+    std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt, CopyStmt>;
 
 /** @brief A statement node wrapping a StmtData variant. */
 struct Stmt {

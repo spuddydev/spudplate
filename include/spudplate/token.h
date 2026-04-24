@@ -23,6 +23,8 @@ enum class TokenType {
     AS,        ///< `as` — bind loop iterator variable in repeat
     DEFAULT,   ///< `default` — fallback value for an ask when the user skips it
     OPTIONS,   ///< `options` — restrict an ask to a bounded list of literals
+    COPY,      ///< `copy` — copy a source directory into an existing destination
+    INTO,      ///< `into` — destination marker used by `copy`
 
     // Logical operators (keywords)
     AND,  ///< `and` — logical AND
@@ -117,6 +119,10 @@ inline std::string tokenTypeToString(TokenType type) {
             return "DEFAULT";
         case TokenType::OPTIONS:
             return "OPTIONS";
+        case TokenType::COPY:
+            return "COPY";
+        case TokenType::INTO:
+            return "INTO";
         case TokenType::AND:
             return "AND";
         case TokenType::OR:

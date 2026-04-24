@@ -67,10 +67,15 @@ let total_days = num_weeks * 7
 ### `mkdir` — Create a directory
 
 ```
-mkdir "<path>" [mode <octal>] [when <condition>]
+mkdir <path> [from <source> [verbatim]] [mode <octal>] [when <condition>] [as <name>]
 ```
 
-Creates a directory at the given path. The path may contain `{variable}` interpolation.
+Creates a directory at the given path. Intermediate directories are created as needed. The path may contain `{variable}` interpolation.
+
+- `from <source>` — creates the directory by copying the contents of the source directory. The source is embedded at compile time. `{var}` interpolation is applied at runtime unless `verbatim` is specified.
+- `mode <octal>` — sets the directory's permissions (e.g., `mode 0755`).
+- `when <condition>` — only creates the directory if the condition is true.
+- `as <name>` — binds the path to an alias that later statements can reuse.
 
 **Examples:**
 
@@ -78,6 +83,28 @@ Creates a directory at the given path. The path may contain `{variable}` interpo
 mkdir "{dir}/src"
 mkdir "{dir}/tests" when use_tests
 mkdir "{dir}/private" mode 0700
+mkdir templates from base_templates verbatim when use_templates as templatepath
+```
+
+---
+
+### `copy` — Copy a directory into an existing destination
+
+```
+copy <source> into <destination> [verbatim] [when <condition>]
+```
+
+Copies the contents of `<source>` into an already existing `<destination>` directory. Unlike `mkdir ... from`, which creates the destination, `copy into` requires the destination to exist — use it when merging several sources into one directory.
+
+- `verbatim` — suppress `{var}` interpolation when copying source file contents.
+- `when <condition>` — only perform the copy if the condition is true.
+
+**Examples:**
+
+```
+copy standard_templates into templatepath
+copy philosophy_templates into templatepath when use_philosophy
+copy assets into staticpath/assets verbatim
 ```
 
 ---
