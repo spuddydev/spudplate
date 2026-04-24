@@ -20,7 +20,9 @@ using spudplate::MkdirStmt;
 using spudplate::ParseError;
 using spudplate::Parser;
 using spudplate::PathExpr;
+using spudplate::PathInterp;
 using spudplate::PathLiteral;
+using spudplate::PathVar;
 using spudplate::Program;
 using spudplate::RepeatStmt;
 using spudplate::StmtPtr;
@@ -223,6 +225,12 @@ static StmtPtr parse_file(const std::string& input) {
     Lexer lexer(input);
     Parser parser(std::move(lexer));
     return parser.parseFile();
+}
+
+static Program parse_program(const std::string& input) {
+    Lexer lexer(input);
+    Parser parser(std::move(lexer));
+    return parser.parse();
 }
 
 // --- Ask statement tests ---
@@ -503,12 +511,151 @@ TEST(ParserTest, FileWithoutAppendDefaultsFalse) {
     EXPECT_FALSE(file.append);
 }
 
-// --- Repeat and program parsing helpers ---
+// --- Path expression tests ---
 
-static Program parse_program(const std::string& input) {
-    Lexer lexer(input);
-    Parser parser(std::move(lexer));
-    return parser.parse();
+TEST(ParserTest, MkdirUnquotedSimplePath) {
+    auto stmt = parse_mkdir("mkdir static\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "static");
+    EXPECT_FALSE(mk.alias.has_value());
+    EXPECT_TRUE(mk.mkdir_p);
+}
+
+TEST(ParserTest, MkdirUnquotedSlashSeparated) {
+    auto stmt = parse_mkdir("mkdir static/notes\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "static/notes");
+}
+
+TEST(ParserTest, MkdirWithAlias) {
+    auto stmt = parse_mkdir("mkdir static as staticpath\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "static");
+    ASSERT_TRUE(mk.alias.has_value());
+    EXPECT_EQ(*mk.alias, "staticpath");
+}
+
+TEST(ParserTest, MkdirPathWithAlias) {
+    auto stmt = parse_mkdir("mkdir static/notes as notespath\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "static/notes");
+    ASSERT_TRUE(mk.alias.has_value());
+    EXPECT_EQ(*mk.alias, "notespath");
+}
+
+TEST(ParserTest, MkdirAliasReferenceInLaterPath) {
+    auto program = parse_program(
+        "mkdir static as staticpath\n"
+        "mkdir staticpath/notes\n");
+    ASSERT_EQ(program.statements.size(), 2u);
+    auto& mk2 = std::get<MkdirStmt>(program.statements[1]->data);
+    ASSERT_EQ(mk2.path.segments.size(), 2u);
+    EXPECT_EQ(std::get<PathVar>(mk2.path.segments[0]).name, "staticpath");
+    EXPECT_EQ(std::get<PathLiteral>(mk2.path.segments[1]).value, "/notes");
+}
+
+TEST(ParserTest, MkdirInterpolation) {
+    auto stmt = parse_mkdir("mkdir week_{n}\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 2u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "week_");
+    auto& interp = std::get<PathInterp>(mk.path.segments[1]);
+    EXPECT_EQ(std::get<IdentifierExpr>(interp.expression->data).name, "n");
+}
+
+TEST(ParserTest, MkdirAliasAndInterpolationInSamePath) {
+    auto program = parse_program(
+        "mkdir static as staticpath\n"
+        "mkdir notes as notespath\n"
+        "mkdir staticpath/notespath/week_{n}\n");
+    ASSERT_EQ(program.statements.size(), 3u);
+    auto& mk3 = std::get<MkdirStmt>(program.statements[2]->data);
+    ASSERT_EQ(mk3.path.segments.size(), 5u);
+    EXPECT_EQ(std::get<PathVar>(mk3.path.segments[0]).name, "staticpath");
+    EXPECT_EQ(std::get<PathLiteral>(mk3.path.segments[1]).value, "/");
+    EXPECT_EQ(std::get<PathVar>(mk3.path.segments[2]).name, "notespath");
+    EXPECT_EQ(std::get<PathLiteral>(mk3.path.segments[3]).value, "/week_");
+    auto& interp = std::get<PathInterp>(mk3.path.segments[4]);
+    EXPECT_EQ(std::get<IdentifierExpr>(interp.expression->data).name, "n");
+}
+
+TEST(ParserTest, MkdirQuotedPathWithSpaces) {
+    auto stmt = parse_mkdir("mkdir \"my notes\"\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "my notes");
+}
+
+TEST(ParserTest, MkdirAliasAfterWhenClause) {
+    auto stmt = parse_mkdir("mkdir static when use_static as staticpath\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_TRUE(mk.when_clause.has_value());
+    ASSERT_TRUE(mk.alias.has_value());
+    EXPECT_EQ(*mk.alias, "staticpath");
+}
+
+TEST(ParserTest, FileContentUnquotedPath) {
+    auto stmt = parse_file("file static/notes/README.md content \"\"\n");
+    auto& file = std::get<FileStmt>(stmt->data);
+    ASSERT_EQ(file.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(file.path.segments[0]).value,
+              "static/notes/README.md");
+    std::get<FileContentSource>(file.source);  // NOLINT — just verifying variant
+}
+
+TEST(ParserTest, FileFromUnquotedPath) {
+    auto stmt = parse_file("file static/notes/README.md from base/README.md\n");
+    auto& file = std::get<FileStmt>(stmt->data);
+    ASSERT_EQ(file.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(file.path.segments[0]).value,
+              "static/notes/README.md");
+    auto& src = std::get<FileFromSource>(file.source);
+    ASSERT_EQ(src.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(src.path.segments[0]).value, "base/README.md");
+}
+
+TEST(ParserTest, FileWithAlias) {
+    auto stmt = parse_file("file readme.md content \"# hi\" as readme\n");
+    auto& file = std::get<FileStmt>(stmt->data);
+    ASSERT_TRUE(file.alias.has_value());
+    EXPECT_EQ(*file.alias, "readme");
+}
+
+TEST(ParserTest, FileAppendViaAlias) {
+    auto program = parse_program(
+        "file project_dir/README.md content \"# Project\" as readme\n"
+        "file readme append content \"## Notes\" when use_notes\n"
+        "file readme append content \"## Testing\" when use_tests\n");
+    ASSERT_EQ(program.statements.size(), 3u);
+    auto& f1 = std::get<FileStmt>(program.statements[0]->data);
+    ASSERT_TRUE(f1.alias.has_value());
+    EXPECT_EQ(*f1.alias, "readme");
+
+    auto& f2 = std::get<FileStmt>(program.statements[1]->data);
+    ASSERT_EQ(f2.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathVar>(f2.path.segments[0]).name, "readme");
+    EXPECT_TRUE(f2.append);
+    ASSERT_TRUE(f2.when_clause.has_value());
+
+    auto& f3 = std::get<FileStmt>(program.statements[2]->data);
+    EXPECT_EQ(std::get<PathVar>(f3.path.segments[0]).name, "readme");
+    EXPECT_TRUE(f3.append);
+}
+
+TEST(ParserTest, MkdirAsMissingName) {
+    EXPECT_THROW(parse_mkdir("mkdir static as\n"), ParseError);
+}
+
+TEST(ParserTest, MkdirAsWithNonIdentifier) {
+    EXPECT_THROW(parse_mkdir("mkdir static as \"foo\"\n"), ParseError);
+}
+
+TEST(ParserTest, MkdirEmptyPath) {
+    EXPECT_THROW(parse_mkdir("mkdir\n"), ParseError);
 }
 
 // --- Program parsing tests ---
