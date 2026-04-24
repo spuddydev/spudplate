@@ -83,10 +83,51 @@ struct Expr {
 /** @brief The type of a variable declared by an `ask` statement. */
 enum class VarType { String, Bool, Int };
 
+// ---------------------------------------------------------------------------
+// Path expression types
+// ---------------------------------------------------------------------------
+
+/** @brief A literal component of a path expression, e.g. `src` or `README.md`. */
+struct PathLiteral {
+    std::string value;  ///< Literal text (identifiers, dots, slashes already joined).
+    int line;
+    int column;
+};
+
+/** @brief A reference to a previously-bound path alias, e.g. `staticpath` in `staticpath/notes`. */
+struct PathVar {
+    std::string name;  ///< The alias name.
+    int line;
+    int column;
+};
+
+/** @brief An inline `{expr}` interpolation inside a path, e.g. `week_{n}`. */
+struct PathInterp {
+    ExprPtr expression;  ///< The expression whose string value is substituted at runtime.
+    int line;
+    int column;
+};
+
+/** @brief Discriminated union of the three path segment kinds. */
+using PathSegment = std::variant<PathLiteral, PathVar, PathInterp>;
+
+/**
+ * @brief A path expression — an ordered sequence of segments.
+ *
+ * Used by `mkdir`, `file`, and `file ... from` for destination and source paths.
+ * Segments are concatenated at runtime, with literals inserted verbatim and
+ * interpolations/aliases resolved from the current scope.
+ */
+struct PathExpr {
+    std::vector<PathSegment> segments;  ///< Ordered path components.
+    int line;                           ///< Line of the first segment.
+    int column;                         ///< Column of the first segment.
+};
+
 /** @brief File source: content comes from an embedded source file. */
 struct FileFromSource {
-    std::string path;  ///< Path to the source file (resolved at compile time).
-    bool verbatim;     ///< If true, suppress `{var}` interpolation at runtime.
+    PathExpr path;  ///< Path to the source file (resolved at compile time).
+    bool verbatim;  ///< If true, suppress `{var}` interpolation at runtime.
 };
 
 /** @brief File source: content comes from an inline expression. */
@@ -134,9 +175,11 @@ struct LetStmt {
  * Example: `mkdir "{slug}/src" mode 0755`
  */
 struct MkdirStmt {
-    std::string path;         ///< Directory path (supports `{var}` interpolation).
-    std::optional<int> mode;  ///< Optional permission bits (e.g. 0755).
-    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding creation.
+    PathExpr path;                         ///< Directory path expression.
+    std::optional<std::string> alias;      ///< Optional `as <name>` binding; empty if no `as` clause.
+    bool mkdir_p;                          ///< Always true — create intermediate directories.
+    std::optional<int> mode;               ///< Optional permission bits (e.g. 0755).
+    std::optional<ExprPtr> when_clause;    ///< Optional condition guarding creation.
     int line;
     int column;
 };
@@ -147,11 +190,12 @@ struct MkdirStmt {
  * Example: `file "{slug}/README.md" content "# " + name`
  */
 struct FileStmt {
-    std::string path;                    ///< File path (supports `{var}` interpolation).
-    FileSource source;                   ///< Where the file content comes from.
-    bool append;                         ///< If true, append; otherwise create/overwrite.
-    std::optional<int> mode;             ///< Optional permission bits.
-    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding creation.
+    PathExpr path;                        ///< File path expression.
+    std::optional<std::string> alias;     ///< Optional `as <name>` binding; empty if no `as` clause.
+    FileSource source;                    ///< Where the file content comes from.
+    bool append;                          ///< If true, append; otherwise create/overwrite.
+    std::optional<int> mode;              ///< Optional permission bits.
+    std::optional<ExprPtr> when_clause;   ///< Optional condition guarding creation.
     int line;
     int column;
 };
