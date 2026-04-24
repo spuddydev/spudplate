@@ -25,6 +25,13 @@ struct IntegerLiteralExpr {
     int column;
 };
 
+/** @brief A bool literal expression node, e.g. `true` or `false`. */
+struct BoolLiteralExpr {
+    bool value;  ///< The literal boolean value.
+    int line;
+    int column;
+};
+
 /** @brief A variable reference expression node, e.g. `project_name`. */
 struct IdentifierExpr {
     std::string name;  ///< The variable name.
@@ -72,8 +79,8 @@ struct FunctionCallExpr {
 };
 
 /** @brief Discriminated union of all expression node types. */
-using ExprData = std::variant<StringLiteralExpr, IntegerLiteralExpr, IdentifierExpr,
-                              UnaryExpr, BinaryExpr, FunctionCallExpr>;
+using ExprData = std::variant<StringLiteralExpr, IntegerLiteralExpr, BoolLiteralExpr,
+                              IdentifierExpr, UnaryExpr, BinaryExpr, FunctionCallExpr>;
 
 /** @brief An expression node wrapping an ExprData variant. */
 struct Expr {
@@ -145,14 +152,18 @@ using FileSource = std::variant<FileFromSource, FileContentSource>;
 /**
  * @brief An `ask` statement — declares a variable and prompts the user.
  *
- * Example: `ask name "Your name?" string required`
+ * Example: `ask license "License?" string default "MIT"`
+ *
+ * Without a `default` clause the prompt is required; with one, the answer
+ * may be skipped and the default literal is used in its place.
  */
 struct AskStmt {
-    std::string name;                    ///< Variable name to bind the answer to.
-    std::string prompt;                  ///< The prompt string shown to the user.
-    VarType var_type;                    ///< Expected type of the answer.
-    bool required;                       ///< Whether a non-empty answer is required.
-    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the prompt.
+    std::string name;                         ///< Variable name to bind the answer to.
+    std::string prompt;                       ///< The prompt string shown to the user.
+    VarType var_type;                         ///< Expected type of the answer.
+    std::optional<ExprPtr> default_value;     ///< Literal used when the user skips the prompt.
+    std::vector<ExprPtr> options;             ///< Allowed literal values; empty means any.
+    std::optional<ExprPtr> when_clause;       ///< Optional condition guarding the prompt.
     int line;
     int column;
 };

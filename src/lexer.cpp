@@ -9,12 +9,14 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"mkdir", TokenType::MKDIR},       {"file", TokenType::FILE},
     {"from", TokenType::FROM},         {"content", TokenType::CONTENT},
     {"when", TokenType::WHEN},         {"repeat", TokenType::REPEAT},
-    {"end", TokenType::END},           {"required", TokenType::REQUIRED},
-    {"verbatim", TokenType::VERBATIM}, {"append", TokenType::APPEND},
+    {"end", TokenType::END},           {"verbatim", TokenType::VERBATIM},
+    {"append", TokenType::APPEND},
     {"mode", TokenType::MODE},         {"as", TokenType::AS},
+    {"default", TokenType::DEFAULT},   {"options", TokenType::OPTIONS},
     {"and", TokenType::AND},           {"or", TokenType::OR},
     {"not", TokenType::NOT},           {"string", TokenType::STRING_TYPE},
     {"bool", TokenType::BOOL_TYPE},    {"int", TokenType::INT_TYPE},
+    {"true", TokenType::TRUE},         {"false", TokenType::FALSE},
 };
 
 Lexer::Lexer(std::string source)

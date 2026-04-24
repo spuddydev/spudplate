@@ -93,7 +93,6 @@ TEST(LexerTest, AllKeywords) {
         {"when", TokenType::WHEN},
         {"repeat", TokenType::REPEAT},
         {"end", TokenType::END},
-        {"required", TokenType::REQUIRED},
         {"verbatim", TokenType::VERBATIM},
         {"mode", TokenType::MODE},
         {"as", TokenType::AS},
