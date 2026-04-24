@@ -21,6 +21,8 @@ enum class TokenType {
     APPEND,    ///< `append` — append to file instead of overwriting
     MODE,      ///< `mode` — set file/directory permissions (octal)
     AS,        ///< `as` — bind loop iterator variable in repeat
+    DEFAULT,   ///< `default` — fallback value for an ask when the user skips it
+    OPTIONS,   ///< `options` — restrict an ask to a bounded list of literals
 
     // Logical operators (keywords)
     AND,  ///< `and` — logical AND
@@ -111,6 +113,10 @@ inline std::string tokenTypeToString(TokenType type) {
             return "MODE";
         case TokenType::AS:
             return "AS";
+        case TokenType::DEFAULT:
+            return "DEFAULT";
+        case TokenType::OPTIONS:
+            return "OPTIONS";
         case TokenType::AND:
             return "AND";
         case TokenType::OR:

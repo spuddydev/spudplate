@@ -82,6 +82,7 @@ class Parser {
     std::optional<ExprPtr> parse_when_clause();
     std::optional<int> parse_mode_clause();
     PathExpr parse_path_expr();
+    ExprPtr parse_literal();
     void expect_newline(const std::string& context);
 
     // Expression precedence climbing

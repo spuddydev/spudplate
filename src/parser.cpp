@@ -75,6 +75,32 @@ void Parser::expect_newline(const std::string& context) {
     expect(TokenType::NEWLINE, "expected newline after " + context);
 }
 
+ExprPtr Parser::parse_literal() {
+    if (check(TokenType::STRING_LITERAL)) {
+        Token tok = advance();
+        auto expr = std::make_unique<Expr>();
+        expr->data =
+            StringLiteralExpr{.value = tok.value, .line = tok.line, .column = tok.column};
+        return expr;
+    }
+    if (check(TokenType::INTEGER_LITERAL)) {
+        Token tok = advance();
+        auto expr = std::make_unique<Expr>();
+        expr->data = IntegerLiteralExpr{
+            .value = std::stoi(tok.value), .line = tok.line, .column = tok.column};
+        return expr;
+    }
+    if (check(TokenType::TRUE) || check(TokenType::FALSE)) {
+        Token tok = advance();
+        auto expr = std::make_unique<Expr>();
+        expr->data = BoolLiteralExpr{.value = tok.type == TokenType::TRUE,
+                                     .line = tok.line,
+                                     .column = tok.column};
+        return expr;
+    }
+    throw ParseError("expected literal value", current_.line, current_.column);
+}
+
 PathExpr Parser::parse_path_expr() {
     PathExpr path;
     path.line = current_.line;
@@ -163,7 +189,61 @@ StmtPtr Parser::parseAsk() {
     Token name = expect(TokenType::IDENTIFIER, "expected variable name after 'ask'");
     Token prompt = expect(TokenType::STRING_LITERAL, "expected prompt string after name");
     VarType var_type = parse_var_type();
-    bool required = match(TokenType::REQUIRED);
+
+    auto is_literal_start = [this]() {
+        return check(TokenType::STRING_LITERAL) || check(TokenType::INTEGER_LITERAL) ||
+               check(TokenType::TRUE) || check(TokenType::FALSE);
+    };
+
+    auto type_matches = [&](const Expr& lit) {
+        switch (var_type) {
+            case VarType::String:
+                return std::holds_alternative<StringLiteralExpr>(lit.data);
+            case VarType::Bool:
+                return std::holds_alternative<BoolLiteralExpr>(lit.data);
+            case VarType::Int:
+                return std::holds_alternative<IntegerLiteralExpr>(lit.data);
+        }
+        return false;
+    };
+
+    auto ensure_type_match = [&](const Expr& lit) {
+        if (type_matches(lit)) {
+            return;
+        }
+        int l = 0;
+        int c = 0;
+        std::visit([&](const auto& n) {
+            l = n.line;
+            c = n.column;
+        }, lit.data);
+        throw ParseError("literal type does not match ask type", l, c);
+    };
+
+    std::vector<ExprPtr> options;
+    if (match(TokenType::OPTIONS)) {
+        if (!is_literal_start()) {
+            throw ParseError("expected at least one literal after 'options'",
+                             current_.line, current_.column);
+        }
+        while (is_literal_start()) {
+            auto lit = parse_literal();
+            ensure_type_match(*lit);
+            options.push_back(std::move(lit));
+        }
+    }
+
+    std::optional<ExprPtr> default_value;
+    if (match(TokenType::DEFAULT)) {
+        if (!is_literal_start()) {
+            throw ParseError("expected literal after 'default'", current_.line,
+                             current_.column);
+        }
+        auto lit = parse_literal();
+        ensure_type_match(*lit);
+        default_value = std::move(lit);
+    }
+
     auto when_clause = parse_when_clause();
     expect_newline("ask statement");
 
@@ -171,7 +251,8 @@ StmtPtr Parser::parseAsk() {
     stmt->data = AskStmt{.name = name.value,
                          .prompt = prompt.value,
                          .var_type = var_type,
-                         .required = required,
+                         .default_value = std::move(default_value),
+                         .options = std::move(options),
                          .when_clause = std::move(when_clause),
                          .line = start.line,
                          .column = start.column};
