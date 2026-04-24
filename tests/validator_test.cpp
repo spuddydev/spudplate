@@ -2,14 +2,87 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+#include <utility>
+
+#include "spudplate/ast.h"
 #include "spudplate/lexer.h"
 #include "spudplate/parser.h"
+#include "spudplate/token.h"
 
+using spudplate::BinaryExpr;
+using spudplate::BoolLiteralExpr;
+using spudplate::clone_expr;
+using spudplate::Expr;
+using spudplate::ExprData;
+using spudplate::ExprPtr;
+using spudplate::exprs_equal;
+using spudplate::FunctionCallExpr;
+using spudplate::IdentifierExpr;
+using spudplate::IntegerLiteralExpr;
 using spudplate::Lexer;
+using spudplate::normalize;
 using spudplate::Parser;
 using spudplate::Program;
 using spudplate::SemanticError;
+using spudplate::StringLiteralExpr;
+using spudplate::TokenType;
+using spudplate::TypeMap;
+using spudplate::UnaryExpr;
 using spudplate::validate;
+using spudplate::VarType;
+
+// AST builder helpers used by the normalization tests.
+static ExprPtr wrap(ExprData data, int line = 1, int column = 1) {
+    auto e = std::make_unique<Expr>();
+    e->data = std::move(data);
+    (void)line;
+    (void)column;
+    return e;
+}
+
+static ExprPtr id(const std::string& name, int line = 1, int column = 1) {
+    return wrap(IdentifierExpr{.name = name, .line = line, .column = column});
+}
+
+static ExprPtr bool_lit(bool value, int line = 1, int column = 1) {
+    return wrap(BoolLiteralExpr{.value = value, .line = line, .column = column});
+}
+
+static ExprPtr int_lit(int value, int line = 1, int column = 1) {
+    return wrap(IntegerLiteralExpr{.value = value, .line = line, .column = column});
+}
+
+static ExprPtr str_lit(const std::string& value, int line = 1, int column = 1) {
+    return wrap(StringLiteralExpr{.value = value, .line = line, .column = column});
+}
+
+static ExprPtr not_of(ExprPtr operand) {
+    return wrap(UnaryExpr{.op = TokenType::NOT,
+                          .operand = std::move(operand),
+                          .line = 1,
+                          .column = 1});
+}
+
+static ExprPtr bin(TokenType op, ExprPtr left, ExprPtr right) {
+    return wrap(BinaryExpr{.op = op,
+                           .left = std::move(left),
+                           .right = std::move(right),
+                           .line = 1,
+                           .column = 1});
+}
+
+static ExprPtr call(const std::string& name, ExprPtr arg) {
+    return wrap(FunctionCallExpr{
+        .name = name, .argument = std::move(arg), .line = 1, .column = 1});
+}
+
+// Equivalent under the given type map iff normalized forms compare equal.
+static bool equivalent(const Expr& a, const Expr& b, const TypeMap& tm) {
+    auto na = normalize(a, tm);
+    auto nb = normalize(b, tm);
+    return exprs_equal(*na, *nb);
+}
 
 static Program parse(const std::string& input) {
     Lexer lexer(input);
@@ -193,4 +266,101 @@ TEST(ValidatorTest, CollectionVarReferencingPoppedNameIsError) {
         "repeat x as j\n"
         "end\n");
     EXPECT_THROW(validate(program), SemanticError);
+}
+
+// --- Expression normalization tests ---
+
+TEST(NormalizeTest, BoolIdEqualsTrueCollapsesToId) {
+    TypeMap tm{{"x", VarType::Bool}};
+    auto a = id("x");
+    auto b = bin(TokenType::EQUALS, id("x"), bool_lit(true));
+    EXPECT_TRUE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, NotBoolIdEqualsXEqualsFalse) {
+    TypeMap tm{{"x", VarType::Bool}};
+    auto a = not_of(id("x"));
+    auto b = bin(TokenType::EQUALS, id("x"), bool_lit(false));
+    EXPECT_TRUE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, NotBoolIdEqualsXNotEqualsTrue) {
+    TypeMap tm{{"x", VarType::Bool}};
+    auto a = not_of(id("x"));
+    auto b = bin(TokenType::NOT_EQUALS, id("x"), bool_lit(true));
+    EXPECT_TRUE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, NotNotBoolIdCollapsesToId) {
+    TypeMap tm{{"x", VarType::Bool}};
+    auto a = id("x");
+    auto b = not_of(not_of(id("x")));
+    EXPECT_TRUE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, ArbitraryDepthNotNormalizes) {
+    TypeMap tm{{"x", VarType::Bool}};
+    auto a = not_of(id("x"));  // canonical negative
+    auto b = not_of(not_of(not_of(id("x"))));  // three nots collapses to one
+    EXPECT_TRUE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, RecursesUnderFunctionAndComparison) {
+    TypeMap tm{{"x", VarType::Bool}};
+    // lower(not not x) == "y"   vs   lower(x) == "y"
+    auto a = bin(TokenType::EQUALS,
+                 call("lower", not_of(not_of(id("x")))), str_lit("y"));
+    auto b = bin(TokenType::EQUALS, call("lower", id("x")), str_lit("y"));
+    EXPECT_TRUE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, LineColumnIgnoredInEquality) {
+    // Two identifiers with the same name at wildly different positions.
+    auto a = id("x", 1, 1);
+    auto b = id("x", 42, 7);
+    EXPECT_TRUE(exprs_equal(*a, *b));
+}
+
+TEST(NormalizeTest, FunctionCallRecursiveEquality) {
+    auto a = call("lower", id("a"));
+    auto b = call("lower", id("a"));
+    EXPECT_TRUE(exprs_equal(*a, *b));
+}
+
+TEST(NormalizeTest, DifferentIdentifiersNotEqual) {
+    TypeMap tm{{"x", VarType::Bool}, {"y", VarType::Bool}};
+    auto a = id("x");
+    auto b = id("y");
+    EXPECT_FALSE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, PositiveAndNegativeBoolNotEqual) {
+    TypeMap tm{{"x", VarType::Bool}};
+    auto a = id("x");
+    auto b = not_of(id("x"));
+    EXPECT_FALSE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, CommutativityNotApplied) {
+    // `a and b` vs `b and a` — known limitation per TODO.
+    TypeMap tm{{"a", VarType::Bool}, {"b", VarType::Bool}};
+    auto left = bin(TokenType::AND, id("a"), id("b"));
+    auto right = bin(TokenType::AND, id("b"), id("a"));
+    EXPECT_FALSE(equivalent(*left, *right, tm));
+}
+
+TEST(NormalizeTest, UnknownIdentifierKeepsStructuralForm) {
+    // `x` is NOT in the type map — bool simplification skipped.
+    // `x == true` stays as the binary form; `x` stays as the identifier.
+    TypeMap tm;  // empty
+    auto a = id("x");
+    auto b = bin(TokenType::EQUALS, id("x"), bool_lit(true));
+    EXPECT_FALSE(equivalent(*a, *b, tm));
+}
+
+TEST(NormalizeTest, IntComparisonDiffersFromBoolComparison) {
+    TypeMap tm{{"x", VarType::Bool}, {"n", VarType::Int}};
+    auto a = bin(TokenType::EQUALS, id("n"), int_lit(1));
+    auto b = bin(TokenType::EQUALS, id("x"), bool_lit(true));
+    EXPECT_FALSE(equivalent(*a, *b, tm));
 }
