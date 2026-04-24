@@ -7,6 +7,7 @@
 
 using spudplate::AskStmt;
 using spudplate::BinaryExpr;
+using spudplate::BoolLiteralExpr;
 using spudplate::ExprPtr;
 using spudplate::FileContentSource;
 using spudplate::FileFromSource;
@@ -241,7 +242,8 @@ TEST(ParserTest, AskBasicString) {
     EXPECT_EQ(ask.name, "name");
     EXPECT_EQ(ask.prompt, "What is your name?");
     EXPECT_EQ(ask.var_type, VarType::String);
-    EXPECT_FALSE(ask.required);
+    EXPECT_FALSE(ask.default_value.has_value());
+    EXPECT_TRUE(ask.options.empty());
     EXPECT_FALSE(ask.when_clause.has_value());
     EXPECT_EQ(ask.line, 1);
 }
@@ -258,12 +260,6 @@ TEST(ParserTest, AskIntType) {
     EXPECT_EQ(ask.var_type, VarType::Int);
 }
 
-TEST(ParserTest, AskRequired) {
-    auto stmt = parse_ask("ask name \"Name?\" string required\n");
-    auto& ask = std::get<AskStmt>(stmt->data);
-    EXPECT_TRUE(ask.required);
-}
-
 TEST(ParserTest, AskWhenClause) {
     auto stmt = parse_ask("ask port \"Port?\" int when use_server\n");
     auto& ask = std::get<AskStmt>(stmt->data);
@@ -272,11 +268,94 @@ TEST(ParserTest, AskWhenClause) {
     EXPECT_EQ(cond.name, "use_server");
 }
 
-TEST(ParserTest, AskRequiredAndWhen) {
-    auto stmt = parse_ask("ask port \"Port?\" int required when use_server\n");
+TEST(ParserTest, AskStringDefault) {
+    auto stmt = parse_ask("ask license \"License?\" string default \"MIT\"\n");
     auto& ask = std::get<AskStmt>(stmt->data);
-    EXPECT_TRUE(ask.required);
+    ASSERT_TRUE(ask.default_value.has_value());
+    auto& lit = std::get<StringLiteralExpr>((*ask.default_value)->data);
+    EXPECT_EQ(lit.value, "MIT");
+    EXPECT_TRUE(ask.options.empty());
+}
+
+TEST(ParserTest, AskBoolDefaultFalse) {
+    auto stmt = parse_ask("ask use_git \"Use git?\" bool default false\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_TRUE(ask.default_value.has_value());
+    auto& lit = std::get<BoolLiteralExpr>((*ask.default_value)->data);
+    EXPECT_FALSE(lit.value);
+}
+
+TEST(ParserTest, AskBoolDefaultTrue) {
+    auto stmt = parse_ask("ask use_git \"Use git?\" bool default true\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_TRUE(ask.default_value.has_value());
+    auto& lit = std::get<BoolLiteralExpr>((*ask.default_value)->data);
+    EXPECT_TRUE(lit.value);
+}
+
+TEST(ParserTest, AskIntDefault) {
+    auto stmt = parse_ask("ask count \"How many?\" int default 3\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_TRUE(ask.default_value.has_value());
+    auto& lit = std::get<IntegerLiteralExpr>((*ask.default_value)->data);
+    EXPECT_EQ(lit.value, 3);
+}
+
+TEST(ParserTest, AskStringOptions) {
+    auto stmt =
+        parse_ask("ask format \"Format?\" string options \"pdf\" \"html\" \"latex\"\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_EQ(ask.options.size(), 3u);
+    EXPECT_EQ(std::get<StringLiteralExpr>(ask.options[0]->data).value, "pdf");
+    EXPECT_EQ(std::get<StringLiteralExpr>(ask.options[1]->data).value, "html");
+    EXPECT_EQ(std::get<StringLiteralExpr>(ask.options[2]->data).value, "latex");
+    EXPECT_FALSE(ask.default_value.has_value());
+}
+
+TEST(ParserTest, AskIntOptionsWithDefault) {
+    auto stmt = parse_ask("ask version \"PG version?\" int options 15 16 17 default 17\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_EQ(ask.options.size(), 3u);
+    EXPECT_EQ(std::get<IntegerLiteralExpr>(ask.options[0]->data).value, 15);
+    EXPECT_EQ(std::get<IntegerLiteralExpr>(ask.options[1]->data).value, 16);
+    EXPECT_EQ(std::get<IntegerLiteralExpr>(ask.options[2]->data).value, 17);
+    ASSERT_TRUE(ask.default_value.has_value());
+    EXPECT_EQ(std::get<IntegerLiteralExpr>((*ask.default_value)->data).value, 17);
+}
+
+TEST(ParserTest, AskOptionsAndWhen) {
+    auto stmt = parse_ask(
+        "ask format \"Format?\" string options \"pdf\" \"html\" when use_docs\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_EQ(ask.options.size(), 2u);
     ASSERT_TRUE(ask.when_clause.has_value());
+}
+
+TEST(ParserTest, AskDefaultAndWhen) {
+    auto stmt =
+        parse_ask("ask license \"License?\" string default \"MIT\" when use_license\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_TRUE(ask.default_value.has_value());
+    ASSERT_TRUE(ask.when_clause.has_value());
+}
+
+TEST(ParserTest, AskDefaultWrongTypeLiteral) {
+    EXPECT_THROW(parse_ask("ask count \"How many?\" int default \"three\"\n"),
+                 ParseError);
+}
+
+TEST(ParserTest, AskOptionsWrongTypeLiteral) {
+    EXPECT_THROW(parse_ask("ask version \"Version?\" int options 1 \"two\"\n"),
+                 ParseError);
+}
+
+TEST(ParserTest, AskOptionsWithNoValues) {
+    EXPECT_THROW(parse_ask("ask format \"Format?\" string options\n"), ParseError);
+}
+
+TEST(ParserTest, AskRequiredKeywordRejected) {
+    // `required` is no longer a keyword and must not parse.
+    EXPECT_THROW(parse_ask("ask name \"Name?\" string required\n"), ParseError);
 }
 
 TEST(ParserTest, AskWhenExpression) {
@@ -736,7 +815,7 @@ TEST(ParserTest, FullSpudFile) {
     auto program = parse_program(
         "# Project scaffolding\n"
         "\n"
-        "ask name \"Project name?\" string required\n"
+        "ask name \"Project name?\" string\n"
         "ask use_ci \"Enable CI?\" bool\n"
         "ask num_modules \"How many modules?\" int\n"
         "\n"
