@@ -61,6 +61,8 @@ class Parser {
     StmtPtr parseFile();
     /** @brief Parses a `repeat` block. */
     StmtPtr parseRepeat();
+    /** @brief Parses a `copy` statement. */
+    StmtPtr parseCopy();
     /** @brief Dispatches to the appropriate statement parser based on the current token.
      */
     StmtPtr parseStatement();
