@@ -364,3 +364,145 @@ TEST(NormalizeTest, IntComparisonDiffersFromBoolComparison) {
     auto b = bin(TokenType::EQUALS, id("x"), bool_lit(true));
     EXPECT_FALSE(equivalent(*a, *b, tm));
 }
+
+// --- Conditional alias scoping tests ---
+
+TEST(ValidatorTest, AliasBoundWhenXReferencedWhenXValid) {
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir bar/sub when x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AliasBoundWhenXReferencedWhenXEqualsTrueValid) {
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir bar/sub when x == true\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AliasBoundWhenXEqualsTrueReferencedWhenXValid) {
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x == true as bar\n"
+        "mkdir bar/sub when x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AliasBoundWhenXReferencedWhenXEqualsFalseIsError) {
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir bar/sub when x == false\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AliasBoundWhenXReferencedWhenNotXIsError) {
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir bar/sub when not x\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AliasBoundWhenAAndBReferencedWhenBAndAIsError) {
+    // Commutativity is a known limitation of normalization.
+    auto program = parse(
+        "ask a \"a?\" bool\n"
+        "ask b \"b?\" bool\n"
+        "mkdir foo when a and b as bar\n"
+        "mkdir bar/sub when b and a\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AliasBoundWhenXReferencedWithNoWhenIsError) {
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir bar/sub\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, UnconditionalAliasReferencedWhenXValid) {
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo as bar\n"
+        "mkdir bar/sub when x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, UnconditionalAliasReferencedUnconditionallyValid) {
+    auto program = parse(
+        "mkdir foo as bar\n"
+        "mkdir bar/sub\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, ConditionalAliasReferenceInFilePath) {
+    // Exercises the file.path reference site.
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "file bar/readme content \"hi\" when x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, ConditionalAliasReferenceInCopySource) {
+    // Exercises the copy.source reference site.
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir dest\n"
+        "copy bar into dest when x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, ConditionalAliasReferenceInCopyDestinationMismatch) {
+    // Exercises copy.destination + mismatched condition.
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir src\n"
+        "copy src into bar when not x\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, ConditionalAliasReferenceInMkdirFromSource) {
+    // Exercises mkdir.from_source reference site.
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "mkdir foo when x as bar\n"
+        "mkdir new from bar when x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, RepeatWhenNotFoldedIntoAliasCondition) {
+    // The enclosing repeat's when clause is NOT silently combined with the
+    // inner statement's condition. An inner statement without its own when
+    // still mismatches a conditional alias, even if the repeat's own when
+    // matches the alias's binding condition.
+    auto program = parse(
+        "ask x \"x?\" bool\n"
+        "ask n \"n?\" int\n"
+        "mkdir foo when x as bar\n"
+        "repeat n as i when x\n"
+        "  mkdir bar/dup_{i}\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, ComposedRulesEndToEnd) {
+    // Exercises Part A (repeat when), Part B (no ask-in-repeat — valid case),
+    // Part C (nested let scoping), and Part E (bool-equivalent alias when).
+    auto program = parse(
+        "ask use_ci \"use ci?\" bool\n"
+        "ask n \"n?\" int\n"
+        "mkdir ci_dir when use_ci as ci_path\n"
+        "repeat n as i when use_ci\n"
+        "  let j = i + 1\n"
+        "end\n"
+        "mkdir ci_path/out when use_ci == true\n");
+    EXPECT_NO_THROW(validate(program));
+}
