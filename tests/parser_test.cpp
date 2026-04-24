@@ -19,6 +19,8 @@ using spudplate::Lexer;
 using spudplate::MkdirStmt;
 using spudplate::ParseError;
 using spudplate::Parser;
+using spudplate::PathExpr;
+using spudplate::PathLiteral;
 using spudplate::Program;
 using spudplate::RepeatStmt;
 using spudplate::StmtPtr;
@@ -26,6 +28,14 @@ using spudplate::StringLiteralExpr;
 using spudplate::TokenType;
 using spudplate::UnaryExpr;
 using spudplate::VarType;
+
+// Asserts a PathExpr is a single literal segment equal to the expected text.
+// Used by legacy tests that previously compared `.path` against a string.
+static void expect_simple_path(const PathExpr& path, const std::string& expected) {
+    ASSERT_EQ(path.segments.size(), 1u);
+    const auto& lit = std::get<PathLiteral>(path.segments[0]);
+    EXPECT_EQ(lit.value, expected);
+}
 
 static ExprPtr parse_expr(const std::string& input) {
     Lexer lexer(input);
@@ -331,7 +341,7 @@ TEST(ParserTest, LetMissingName) {
 TEST(ParserTest, MkdirBasic) {
     auto stmt = parse_mkdir("mkdir \"src\"\n");
     auto& mk = std::get<MkdirStmt>(stmt->data);
-    EXPECT_EQ(mk.path, "src");
+    expect_simple_path(mk.path, "src");
     EXPECT_FALSE(mk.mode.has_value());
     EXPECT_FALSE(mk.when_clause.has_value());
 }
@@ -339,7 +349,7 @@ TEST(ParserTest, MkdirBasic) {
 TEST(ParserTest, MkdirWithMode) {
     auto stmt = parse_mkdir("mkdir \"bin\" mode 0755\n");
     auto& mk = std::get<MkdirStmt>(stmt->data);
-    EXPECT_EQ(mk.path, "bin");
+    expect_simple_path(mk.path, "bin");
     ASSERT_TRUE(mk.mode.has_value());
     EXPECT_EQ(*mk.mode, 0755);
 }
@@ -363,7 +373,7 @@ TEST(ParserTest, MkdirWithModeAndWhen) {
 TEST(ParserTest, MkdirAtEof) {
     auto stmt = parse_mkdir("mkdir \"src\"");
     auto& mk = std::get<MkdirStmt>(stmt->data);
-    EXPECT_EQ(mk.path, "src");
+    expect_simple_path(mk.path, "src");
 }
 
 TEST(ParserTest, MkdirMissingPath) {
@@ -375,10 +385,10 @@ TEST(ParserTest, MkdirMissingPath) {
 TEST(ParserTest, FileFromBasic) {
     auto stmt = parse_file("file \"out.txt\" from \"template.txt\"\n");
     auto& file = std::get<FileStmt>(stmt->data);
-    EXPECT_EQ(file.path, "out.txt");
+    expect_simple_path(file.path, "out.txt");
     EXPECT_FALSE(file.append);
     auto& src = std::get<FileFromSource>(file.source);
-    EXPECT_EQ(src.path, "template.txt");
+    expect_simple_path(src.path, "template.txt");
     EXPECT_FALSE(src.verbatim);
 }
 
@@ -432,7 +442,7 @@ TEST(ParserTest, FileContentWithMode) {
 TEST(ParserTest, FileAtEof) {
     auto stmt = parse_file("file \"out.txt\" from \"in.txt\"");
     auto& file = std::get<FileStmt>(stmt->data);
-    EXPECT_EQ(file.path, "out.txt");
+    expect_simple_path(file.path, "out.txt");
 }
 
 TEST(ParserTest, FileMissingSource) {
@@ -452,10 +462,10 @@ TEST(ParserTest, FileFromMissingSourcePath) {
 TEST(ParserTest, FileAppendFrom) {
     auto stmt = parse_file("file \"log.txt\" append from \"entry.txt\"\n");
     auto& file = std::get<FileStmt>(stmt->data);
-    EXPECT_EQ(file.path, "log.txt");
+    expect_simple_path(file.path, "log.txt");
     EXPECT_TRUE(file.append);
     auto& src = std::get<FileFromSource>(file.source);
-    EXPECT_EQ(src.path, "entry.txt");
+    expect_simple_path(src.path, "entry.txt");
     EXPECT_FALSE(src.verbatim);
 }
 
@@ -481,7 +491,7 @@ TEST(ParserTest, FileAppendFromModeWhen) {
     auto& file = std::get<FileStmt>(stmt->data);
     EXPECT_TRUE(file.append);
     auto& src = std::get<FileFromSource>(file.source);
-    EXPECT_EQ(src.path, "src");
+    expect_simple_path(src.path, "src");
     ASSERT_TRUE(file.mode.has_value());
     EXPECT_EQ(*file.mode, 0644);
     ASSERT_TRUE(file.when_clause.has_value());
