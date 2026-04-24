@@ -36,6 +36,8 @@ enum class TokenType {
     // Literals
     STRING_LITERAL,   ///< Quoted string literal, e.g. `"hello"`
     INTEGER_LITERAL,  ///< Integer literal, e.g. `42`
+    TRUE,             ///< `true` boolean literal
+    FALSE,            ///< `false` boolean literal
     IDENTIFIER,       ///< Variable or function name
 
     // Comparison operators
@@ -128,6 +130,10 @@ inline std::string tokenTypeToString(TokenType type) {
             return "STRING_LITERAL";
         case TokenType::INTEGER_LITERAL:
             return "INTEGER_LITERAL";
+        case TokenType::TRUE:
+            return "TRUE";
+        case TokenType::FALSE:
+            return "FALSE";
         case TokenType::IDENTIFIER:
             return "IDENTIFIER";
         case TokenType::EQUALS:

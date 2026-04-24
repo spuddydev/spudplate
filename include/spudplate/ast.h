@@ -25,6 +25,13 @@ struct IntegerLiteralExpr {
     int column;
 };
 
+/** @brief A bool literal expression node, e.g. `true` or `false`. */
+struct BoolLiteralExpr {
+    bool value;  ///< The literal boolean value.
+    int line;
+    int column;
+};
+
 /** @brief A variable reference expression node, e.g. `project_name`. */
 struct IdentifierExpr {
     std::string name;  ///< The variable name.
@@ -72,8 +79,8 @@ struct FunctionCallExpr {
 };
 
 /** @brief Discriminated union of all expression node types. */
-using ExprData = std::variant<StringLiteralExpr, IntegerLiteralExpr, IdentifierExpr,
-                              UnaryExpr, BinaryExpr, FunctionCallExpr>;
+using ExprData = std::variant<StringLiteralExpr, IntegerLiteralExpr, BoolLiteralExpr,
+                              IdentifierExpr, UnaryExpr, BinaryExpr, FunctionCallExpr>;
 
 /** @brief An expression node wrapping an ExprData variant. */
 struct Expr {

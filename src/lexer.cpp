@@ -15,6 +15,7 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"and", TokenType::AND},           {"or", TokenType::OR},
     {"not", TokenType::NOT},           {"string", TokenType::STRING_TYPE},
     {"bool", TokenType::BOOL_TYPE},    {"int", TokenType::INT_TYPE},
+    {"true", TokenType::TRUE},         {"false", TokenType::FALSE},
 };
 
 Lexer::Lexer(std::string source)

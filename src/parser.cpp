@@ -479,6 +479,15 @@ ExprPtr Parser::parse_primary() {
         return expr;
     }
 
+    if (check(TokenType::TRUE) || check(TokenType::FALSE)) {
+        Token tok = advance();
+        auto expr = std::make_unique<Expr>();
+        expr->data = BoolLiteralExpr{.value = tok.type == TokenType::TRUE,
+                                     .line = tok.line,
+                                     .column = tok.column};
+        return expr;
+    }
+
     if (check(TokenType::IDENTIFIER)) {
         Token tok = advance();
 
