@@ -232,9 +232,10 @@ using StmtPtr = std::unique_ptr<Stmt>;
  * @endcode
  */
 struct RepeatStmt {
-    std::string collection_var;  ///< Name of the int variable holding the count.
-    std::string iterator_var;    ///< Name of the loop index variable (0-based).
-    std::vector<StmtPtr> body;   ///< Statements inside the loop body.
+    std::string collection_var;          ///< Name of the int variable holding the count.
+    std::string iterator_var;            ///< Name of the loop index variable (0-based).
+    std::vector<StmtPtr> body;           ///< Statements inside the loop body.
+    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the whole loop.
     int line;
     int column;
 };

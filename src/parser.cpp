@@ -384,6 +384,7 @@ StmtPtr Parser::parseRepeat() {
     expect(TokenType::AS, "expected 'as' after collection variable");
     Token iterator =
         expect(TokenType::IDENTIFIER, "expected iterator variable after 'as'");
+    auto when_clause = parse_when_clause();
     expect_newline("repeat header");
 
     std::vector<StmtPtr> body;
@@ -400,6 +401,7 @@ StmtPtr Parser::parseRepeat() {
     stmt->data = RepeatStmt{.collection_var = collection.value,
                              .iterator_var = iterator.value,
                              .body = std::move(body),
+                             .when_clause = std::move(when_clause),
                              .line = start.line,
                              .column = start.column};
     return stmt;

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Library
-add_library(spudplate_lib src/lexer.cpp src/parser.cpp)
+add_library(spudplate_lib src/lexer.cpp src/parser.cpp src/validator.cpp)
 target_include_directories(spudplate_lib PUBLIC include)
 
 # Executable
@@ -24,7 +24,8 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_executable(spudplate_tests tests/lexer_test.cpp tests/parser_test.cpp)
+add_executable(spudplate_tests tests/lexer_test.cpp tests/parser_test.cpp
+               tests/validator_test.cpp)
 target_link_libraries(spudplate_tests PRIVATE spudplate_lib GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(spudplate_tests)
