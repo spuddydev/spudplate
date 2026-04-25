@@ -14,29 +14,29 @@ namespace spudplate {
 /** @brief A string literal expression node, e.g. `"hello"`. */
 struct StringLiteralExpr {
     std::string value;  ///< The literal string value (without quotes).
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief An integer literal expression node, e.g. `42`. */
 struct IntegerLiteralExpr {
     int value;  ///< The literal integer value.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief A bool literal expression node, e.g. `true` or `false`. */
 struct BoolLiteralExpr {
     bool value;  ///< The literal boolean value.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief A variable reference expression node, e.g. `project_name`. */
 struct IdentifierExpr {
     std::string name;  ///< The variable name.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 // Forward declare Expr so recursive types can hold pointers to it
@@ -48,8 +48,8 @@ using ExprPtr = std::unique_ptr<Expr>;
 struct UnaryExpr {
     TokenType op;     ///< The operator token (NOT).
     ExprPtr operand;  ///< The operand expression.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /**
@@ -61,8 +61,8 @@ struct BinaryExpr {
     TokenType op;   ///< The operator token.
     ExprPtr left;   ///< Left-hand operand.
     ExprPtr right;  ///< Right-hand operand.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /**
@@ -74,8 +74,8 @@ struct BinaryExpr {
 struct FunctionCallExpr {
     std::string name;                  ///< Function name.
     std::vector<ExprPtr> arguments;    ///< Argument expressions.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief Discriminated union of all expression node types. */
@@ -84,7 +84,7 @@ using ExprData = std::variant<StringLiteralExpr, IntegerLiteralExpr, BoolLiteral
 
 /** @brief An expression node wrapping an ExprData variant. */
 struct Expr {
-    ExprData data;
+    ExprData data;  ///< The concrete expression alternative.
 };
 
 /** @brief The type of a variable declared by an `ask` statement. */
@@ -97,22 +97,22 @@ enum class VarType { String, Bool, Int };
 /** @brief A literal component of a path expression, e.g. `src` or `README.md`. */
 struct PathLiteral {
     std::string value;  ///< Literal text (identifiers, dots, slashes already joined).
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief A reference to a previously-bound path alias, e.g. `staticpath` in `staticpath/notes`. */
 struct PathVar {
     std::string name;  ///< The alias name.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief An inline `{expr}` interpolation inside a path, e.g. `week_{n}`. */
 struct PathInterp {
     ExprPtr expression;  ///< The expression whose string value is substituted at runtime.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief Discriminated union of the three path segment kinds. */
@@ -164,8 +164,8 @@ struct AskStmt {
     std::optional<ExprPtr> default_value;     ///< Expression evaluated when the user skips the prompt.
     std::vector<ExprPtr> options;             ///< Allowed literal values; empty means any.
     std::optional<ExprPtr> when_clause;       ///< Optional condition guarding the prompt.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /**
@@ -176,8 +176,8 @@ struct AskStmt {
 struct LetStmt {
     std::string name;  ///< Variable name to bind.
     ExprPtr value;     ///< Expression whose value is assigned.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /**
@@ -196,8 +196,8 @@ struct MkdirStmt {
     bool verbatim;                         ///< If true with from_source, suppress interpolation.
     std::optional<int> mode;               ///< Optional permission bits (e.g. 0755).
     std::optional<ExprPtr> when_clause;    ///< Optional condition guarding creation.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /**
@@ -212,8 +212,8 @@ struct FileStmt {
     bool append;                          ///< If true, append; otherwise create/overwrite.
     std::optional<int> mode;              ///< Optional permission bits.
     std::optional<ExprPtr> when_clause;   ///< Optional condition guarding creation.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 // Forward declare Stmt so RepeatStmt can hold a vector of them
@@ -236,8 +236,8 @@ struct RepeatStmt {
     std::string iterator_var;            ///< Name of the loop index variable (0-based).
     std::vector<StmtPtr> body;           ///< Statements inside the loop body.
     std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the whole loop.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /**
@@ -254,8 +254,8 @@ struct CopyStmt {
     PathExpr destination;                ///< Existing destination directory path.
     bool verbatim;                       ///< If true, suppress `{var}` interpolation.
     std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the copy.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /**
@@ -269,8 +269,8 @@ struct CopyStmt {
 struct IncludeStmt {
     std::string name;                    ///< Name of the installed template to run.
     std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the include.
-    int line;
-    int column;
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
 };
 
 /** @brief Discriminated union of all statement node types. */
@@ -279,7 +279,7 @@ using StmtData = std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt,
 
 /** @brief A statement node wrapping a StmtData variant. */
 struct Stmt {
-    StmtData data;
+    StmtData data;  ///< The concrete statement alternative.
 };
 
 /** @brief The top-level AST node representing a complete `.spud` program. */
