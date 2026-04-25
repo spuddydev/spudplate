@@ -159,6 +159,15 @@ PathExpr Parser::parse_path_expr() {
             Token tok = advance();
             start_buffer(tok.line, tok.column);
             buffer += tok.value;
+        } else if (check(TokenType::MINUS)) {
+            // Interior `-` is part of the path (e.g. `my-project`). Reject a
+            // leading `-` so `mkdir -foo` is not confused with subtraction.
+            if (buffer.empty() && path.segments.empty()) {
+                break;
+            }
+            start_buffer(current_.line, current_.column);
+            buffer += '-';
+            advance();
         } else if (check(TokenType::LBRACE)) {
             int line = current_.line;
             int col = current_.column;

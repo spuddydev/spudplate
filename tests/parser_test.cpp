@@ -705,6 +705,39 @@ TEST(ParserTest, MkdirAliasAndInterpolationInSamePath) {
     EXPECT_EQ(std::get<IdentifierExpr>(interp.expression->data).name, "n");
 }
 
+TEST(ParserTest, MkdirHyphenInPath) {
+    auto stmt = parse_mkdir("mkdir my-project\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "my-project");
+}
+
+TEST(ParserTest, MkdirMultipleHyphens) {
+    auto stmt = parse_mkdir("mkdir pre-commit-hooks\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "pre-commit-hooks");
+}
+
+TEST(ParserTest, MkdirHyphenAfterSlash) {
+    auto stmt = parse_mkdir("mkdir src/my-lib\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[0]).value, "src/my-lib");
+}
+
+TEST(ParserTest, MkdirHyphenAfterInterpolation) {
+    auto stmt = parse_mkdir("mkdir {slug}-app\n");
+    auto& mk = std::get<MkdirStmt>(stmt->data);
+    ASSERT_EQ(mk.path.segments.size(), 2u);
+    EXPECT_TRUE(std::holds_alternative<PathInterp>(mk.path.segments[0]));
+    EXPECT_EQ(std::get<PathLiteral>(mk.path.segments[1]).value, "-app");
+}
+
+TEST(ParserTest, MkdirLeadingHyphenRejected) {
+    EXPECT_THROW(parse_mkdir("mkdir -foo\n"), ParseError);
+}
+
 TEST(ParserTest, MkdirQuotedPathWithSpaces) {
     auto stmt = parse_mkdir("mkdir \"my notes\"\n");
     auto& mk = std::get<MkdirStmt>(stmt->data);
