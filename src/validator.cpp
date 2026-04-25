@@ -228,10 +228,6 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
         [&](const auto& s) {
             using T = std::decay_t<decltype(s)>;
             if constexpr (std::is_same_v<T, AskStmt>) {
-                if (scope.inside_repeat()) {
-                    throw SemanticError("'ask' not allowed inside 'repeat'", s.line,
-                                        s.column);
-                }
                 if (s.default_value.has_value()) {
                     walk_expr(**s.default_value, scope);
                 }
@@ -239,6 +235,8 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                     walk_expr(*opt, scope);
                 }
                 walk_optional_expr(s.when_clause, scope);
+                check_shadowing(s.name, s.line, s.column, scope);
+                scope.declare(s.name);
                 ctx.type_map[s.name] = s.var_type;
             } else if constexpr (std::is_same_v<T, LetStmt>) {
                 walk_expr(*s.value, scope);

@@ -98,8 +98,8 @@ TEST(CliTest, ParseErrorExitsTwo) {
 TEST(CliTest, SemanticErrorExitsThree) {
     TmpDir td;
     auto file = td.path() / "bad.spud";
-    // `ask` inside `repeat` is a semantic error, not a parse error.
-    write_file(file, "let n = 1\nrepeat n as i\n  ask x \"X?\" string\nend\n");
+    // Shadowing a name inside `repeat` is a semantic error, not a parse error.
+    write_file(file, "let x = 1\nlet n = 1\nrepeat n as i\n  let x = 2\nend\n");
     Argv args({"spudplate", "run", file.string()});
     std::stringstream out;
     std::stringstream err;

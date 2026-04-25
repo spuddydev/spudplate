@@ -799,6 +799,66 @@ TEST(AskTest, EmptyOnRequiredQuestionPropagatesError) {
               "this question is required");
 }
 
+TEST(AskTest, AskInsideRepeatRunsPerIteration) {
+    TmpDir td;
+    auto p = parse(R"(ask n "Count?" int
+repeat n as i
+  ask name "Module name?" string
+  mkdir {name}
+end
+)");
+    ScriptedPrompter prompter({"3", "alpha", "beta", "gamma"});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "alpha"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "beta"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "gamma"));
+}
+
+TEST(AskTest, AskInsideRepeatGetsNoCounter) {
+    auto p = parse(R"(ask n "Count?" int
+repeat n as i
+  ask name "Module?" string
+end
+)");
+    ScriptedPrompter prompter({"1", "x"});
+    run_for_tests(p, prompter);
+    ASSERT_TRUE(prompter.last_request().has_value());
+    EXPECT_EQ(prompter.last_request()->question_index, 0);
+    EXPECT_EQ(prompter.last_request()->question_total, 0);
+    EXPECT_EQ(prompter.last_request()->indent_level, 1);
+}
+
+TEST(AskTest, NestedAskGetsDoubleIndent) {
+    auto p = parse(R"(ask n "Outer count?" int
+ask m "Inner count?" int
+repeat n as i
+  repeat m as j
+    ask name "Inner?" string
+  end
+end
+)");
+    ScriptedPrompter prompter({"1", "1", "leaf"});
+    run_for_tests(p, prompter);
+    EXPECT_EQ(prompter.last_request()->indent_level, 2);
+}
+
+TEST(AskTest, TopLevelCounterUnaffectedByRepeatAsks) {
+    // Three top-level asks. The ask inside repeat must not increment the
+    // running counter.
+    auto p = parse(R"(ask a "A?" string
+ask n "Count?" int
+repeat n as i
+  ask in_loop "In?" string
+end
+ask z "Z?" string
+)");
+    ScriptedPrompter prompter({"av", "1", "loopv", "zv"});
+    run_for_tests(p, prompter);
+    // Last presented prompt is `ask z` — top-level, should be (3/3).
+    EXPECT_EQ(prompter.last_request()->question_index, 3);
+    EXPECT_EQ(prompter.last_request()->question_total, 3);
+}
+
 TEST(AskTest, OffOptionPropagatesError) {
     auto p = parse(R"(ask format "Format?" string options "pdf" "html"
 )");
@@ -841,6 +901,60 @@ TEST(StdinPrompterTest, CounterPrefixWhenSet) {
     };
     p.prompt(req);
     EXPECT_EQ(out.str(), "(1/3) Project name?: ");
+}
+
+TEST(StdinPrompterTest, IndentLevelShiftsPrompt) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Module name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+        .question_index = 0,
+        .question_total = 0,
+        .indent_level = 1,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "  Module name?: ");
+}
+
+TEST(StdinPrompterTest, NestedIndentDoublesShift) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Inner?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+        .indent_level = 2,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "    Inner?: ");
+}
+
+TEST(StdinPrompterTest, IndentAppliesToOptions) {
+    std::stringstream in("1\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Format?",
+        .type = VarType::String,
+        .options = {"pdf", "html"},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+        .indent_level = 1,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(),
+              "  Format?\n"
+              "    [1] pdf\n"
+              "    [2] html\n"
+              "  : ");
 }
 
 TEST(StdinPrompterTest, CounterSuppressedWhenZero) {

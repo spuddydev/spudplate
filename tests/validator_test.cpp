@@ -116,36 +116,44 @@ TEST(ValidatorTest, EmptyRepeatBodyValidates) {
     EXPECT_NO_THROW(validate(program));
 }
 
-TEST(ValidatorTest, AskInsideSingleRepeatIsError) {
+TEST(ValidatorTest, AskInsideSingleRepeatValidates) {
     auto program = parse(
         "ask n \"Count?\" int\n"
         "repeat n as i\n"
         "  ask use_extra \"Extra?\" bool\n"
         "end\n");
-    try {
-        validate(program);
-        FAIL() << "expected SemanticError";
-    } catch (const SemanticError& e) {
-        // The offending ask is on line 3 (ask n ... is line 1, repeat is line 2).
-        EXPECT_EQ(e.line(), 3);
-    }
+    EXPECT_NO_THROW(validate(program));
 }
 
-TEST(ValidatorTest, AskInsideNestedRepeatPointsAtAskLine) {
+TEST(ValidatorTest, AskInsideNestedRepeatValidates) {
     auto program = parse(
-        "ask n \"Count?\" int\n"       // line 1
-        "ask m \"Count?\" int\n"       // line 2
-        "repeat n as i\n"              // line 3 (outer)
-        "  repeat m as j\n"            // line 4 (inner)
-        "    ask bad \"bad?\" bool\n"  // line 5 — the offender
+        "ask n \"Count?\" int\n"
+        "ask m \"Count?\" int\n"
+        "repeat n as i\n"
+        "  repeat m as j\n"
+        "    ask name \"name?\" string\n"
         "  end\n"
         "end\n");
-    try {
-        validate(program);
-        FAIL() << "expected SemanticError";
-    } catch (const SemanticError& e) {
-        EXPECT_EQ(e.line(), 5);
-    }
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AskInRepeatShadowingOuterIsError) {
+    auto program = parse(
+        "ask name \"Name?\" string\n"
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "  ask name \"Module name?\" string\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AskInRepeatShadowingIteratorIsError) {
+    auto program = parse(
+        "ask n \"Count?\" int\n"
+        "repeat n as i\n"
+        "  ask i \"i?\" int\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
 }
 
 TEST(ValidatorTest, RepeatBodyWithNonAskStatementsValidates) {
