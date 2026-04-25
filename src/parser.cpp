@@ -235,13 +235,13 @@ StmtPtr Parser::parseAsk() {
 
     std::optional<ExprPtr> default_value;
     if (match(TokenType::DEFAULT)) {
-        if (!is_literal_start()) {
-            throw ParseError("expected literal after 'default'", current_.line,
-                             current_.column);
+        auto expr = parseExpression();
+        if (std::holds_alternative<StringLiteralExpr>(expr->data) ||
+            std::holds_alternative<IntegerLiteralExpr>(expr->data) ||
+            std::holds_alternative<BoolLiteralExpr>(expr->data)) {
+            ensure_type_match(*expr);
         }
-        auto lit = parse_literal();
-        ensure_type_match(*lit);
-        default_value = std::move(lit);
+        default_value = std::move(expr);
     }
 
     auto when_clause = parse_when_clause();
