@@ -225,19 +225,6 @@ TEST(InterpreterTest, EmptyProgramRunsCleanly) {
 
 // --- Every statement type throws "not yet supported" ---
 
-TEST(InterpreterTest, RepeatThrowsNotYetSupported) {
-    auto program = parse(R"(repeat n as i
-end
-)");
-    NullPrompter prompter;
-    try {
-        run(program, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("repeat"), std::string::npos);
-    }
-}
-
 TEST(InterpreterTest, CopyThrowsNotYetSupported) {
     auto program = parse(R"(copy src into dst
 )");
@@ -944,4 +931,114 @@ file foo.txt content "hi" when use_f
     ScriptedPrompter prompter({"false"});
     run(p, prompter);
     EXPECT_FALSE(std::filesystem::exists(td.path() / "foo.txt"));
+}
+
+// --- Repeat (Part 7) ---
+
+TEST(RepeatTest, ZeroCountBodyNeverRuns) {
+    TmpDir td;
+    auto p = parse(R"(let n = 0
+repeat n as i
+    mkdir x_{i}
+end
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_empty(td.path()));
+}
+
+TEST(RepeatTest, ThreeIterationsCreateThreeDirs) {
+    TmpDir td;
+    auto p = parse(R"(let n = 3
+repeat n as i
+    mkdir week_{i}
+end
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "week_0"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "week_1"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "week_2"));
+}
+
+TEST(RepeatTest, WhenFalseSkipsLoop) {
+    TmpDir td;
+    auto p = parse(R"(ask use_loop "Use loop?" bool
+let n = 3
+repeat n as i when use_loop
+    mkdir week_{i}
+end
+)");
+    ScriptedPrompter prompter({"false"});
+    run(p, prompter);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "week_0"));
+}
+
+TEST(RepeatTest, NegativeCountIsZeroIterations) {
+    TmpDir td;
+    auto p = parse(R"(let n = 0 - 5
+repeat n as i
+    mkdir x_{i}
+end
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_empty(td.path()));
+}
+
+TEST(RepeatTest, InnerLetReferencesIterator) {
+    TmpDir td;
+    // `let doubled = i + i` reads the iterator inside the body and binds a
+    // new value; `mkdir d_{doubled}` proves it was both bound and visible.
+    auto p = parse(R"(let n = 3
+repeat n as i
+    let doubled = i + i
+    mkdir d_{doubled}
+end
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "d_0"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "d_2"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "d_4"));
+}
+
+TEST(RepeatTest, NestedRepeatsCreateGrid) {
+    TmpDir td;
+    auto p = parse(R"(let n = 2
+let m = 2
+repeat n as i
+    repeat m as j
+        mkdir x_{i}_{j}
+    end
+end
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "x_0_0"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "x_0_1"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "x_1_0"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "x_1_1"));
+}
+
+TEST(RepeatTest, InnerAliasDoesNotLeak) {
+    TmpDir td;
+    // `wk` is rebound each iteration to that iteration's `week_{i}` path;
+    // the inner `mkdir wk/sub_{i}` resolves through the per-iteration alias.
+    // Each iteration must see only its own binding — no bleed across
+    // iterations and no escape after the loop.
+    auto p = parse(R"(let n = 2
+repeat n as i
+    mkdir week_{i} as wk
+    mkdir wk/sub_{i}
+end
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "week_0" / "sub_0"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "week_1" / "sub_1"));
+    // Crucially, week_0/sub_1 and week_1/sub_0 must NOT exist — they would
+    // if the alias from iteration 0 leaked into iteration 1 or vice versa.
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "week_0" / "sub_1"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "week_1" / "sub_0"));
 }
