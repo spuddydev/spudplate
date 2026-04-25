@@ -277,6 +277,9 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                 walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, IncludeStmt>) {
                 walk_optional_expr(s.when_clause, scope);
+            } else if constexpr (std::is_same_v<T, RunStmt>) {
+                walk_expr(*s.command, scope);
+                walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, RepeatStmt>) {
                 check_reference(s.collection_var, s.line, s.column, scope);
                 walk_optional_expr(s.when_clause, scope);

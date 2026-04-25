@@ -1443,7 +1443,8 @@ file f append content "B"
 
 TEST(FileTest, ModeApplied) {
     TmpDir td;
-    auto p = parse(R"(file run.sh content "echo hi" mode 0755
+    // `run` is a reserved keyword; quote the path to use it as a filename.
+    auto p = parse(R"(file "run.sh" content "echo hi" mode 0755
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
