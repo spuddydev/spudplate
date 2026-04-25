@@ -73,8 +73,10 @@ static ExprPtr bin(TokenType op, ExprPtr left, ExprPtr right) {
 }
 
 static ExprPtr call(const std::string& name, ExprPtr arg) {
+    std::vector<ExprPtr> args;
+    args.push_back(std::move(arg));
     return wrap(FunctionCallExpr{
-        .name = name, .argument = std::move(arg), .line = 1, .column = 1});
+        .name = name, .arguments = std::move(args), .line = 1, .column = 1});
 }
 
 // Equivalent under the given type map iff normalized forms compare equal.
