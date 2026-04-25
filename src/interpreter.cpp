@@ -322,11 +322,19 @@ Value eval_binary(const BinaryExpr& bin, const Environment& env) {
                                  std::get<std::int64_t>(right))};
     }
 
-    // Arithmetic — `+` accepts both int+int and string+string; the others
+    // Arithmetic — `+` accepts string+string, string+int, and int+int.
+    // A string-and-int combination stringifies the int side; the others
     // are int-only.
     if (bin.op == TokenType::PLUS && std::holds_alternative<std::string>(left) &&
         std::holds_alternative<std::string>(right)) {
         return Value{std::get<std::string>(left) + std::get<std::string>(right)};
+    }
+    if (bin.op == TokenType::PLUS &&
+        ((std::holds_alternative<std::string>(left) &&
+          std::holds_alternative<std::int64_t>(right)) ||
+         (std::holds_alternative<std::int64_t>(left) &&
+          std::holds_alternative<std::string>(right)))) {
+        return Value{value_to_string(left) + value_to_string(right)};
     }
     if (!std::holds_alternative<std::int64_t>(left) ||
         !std::holds_alternative<std::int64_t>(right)) {
