@@ -307,7 +307,7 @@ const char* expected_message(VarType type) {
 }
 
 void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
-                 int question_index, int question_total) {
+                 int question_index, int question_total, int indent_level) {
     if (!when_passes(stmt.when_clause, env)) {
         return;
     }
@@ -334,6 +334,7 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
         .previous_error = std::nullopt,
         .question_index = question_index,
         .question_total = question_total,
+        .indent_level = indent_level,
     };
 
     while (true) {
@@ -463,8 +464,11 @@ class Interpreter {
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, AskStmt>) {
-                    int index = ask_total_ > 0 ? ++ask_index_ : 0;
-                    execute_ask(s, env_, prompter_, index, ask_total_);
+                    bool show_counter = ask_total_ > 0 && repeat_depth_ == 0;
+                    int index = show_counter ? ++ask_index_ : 0;
+                    int total = show_counter ? ask_total_ : 0;
+                    execute_ask(s, env_, prompter_, index, total,
+                                repeat_depth_);
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
@@ -521,6 +525,7 @@ class Interpreter {
 
             env_.push();
             env_.declare(s.iterator_var, Value{i});
+            ++repeat_depth_;
             try {
                 for (const auto& stmt : s.body) {
                     execute(*stmt);
@@ -534,6 +539,7 @@ class Interpreter {
                         ++it;
                     }
                 }
+                --repeat_depth_;
                 env_.pop();
                 throw;
             }
@@ -545,6 +551,7 @@ class Interpreter {
                     ++it;
                 }
             }
+            --repeat_depth_;
             env_.pop();
         }
     }
@@ -652,6 +659,7 @@ class Interpreter {
     std::unordered_set<std::string> created_during_run_;
     int ask_total_{0};
     int ask_index_{0};
+    int repeat_depth_{0};
 };
 
 int count_ask_statements(const Program& program) {
@@ -711,13 +719,18 @@ std::string bool_hint(const std::optional<std::string>& default_value) {
 
 void render_request(std::ostream& out, const PromptRequest& req,
                     bool use_colour) {
+    std::string indent(static_cast<std::size_t>(req.indent_level) * 2, ' ');
+
     if (req.previous_error.has_value()) {
-        out << wrap("! " + *req.previous_error, kRed, use_colour) << '\n';
+        out << indent
+            << wrap("! " + *req.previous_error, kRed, use_colour) << '\n';
     }
 
     bool has_options = !req.options.empty();
     bool is_bool_inline = req.type == VarType::Bool && !has_options;
     std::string colon = wrap(":", kAccent, use_colour);
+
+    out << indent;
 
     if (req.question_total > 0 && req.question_index > 0) {
         std::string counter = "(" + std::to_string(req.question_index) + "/" +
@@ -731,9 +744,10 @@ void render_request(std::ostream& out, const PromptRequest& req,
         out << '\n';
         for (std::size_t i = 0; i < req.options.size(); ++i) {
             std::string marker = "[" + std::to_string(i + 1) + "]";
-            out << "  " << wrap(marker, kAccent, use_colour) << ' '
+            out << indent << "  " << wrap(marker, kAccent, use_colour) << ' '
                 << req.options[i] << '\n';
         }
+        out << indent;
         if (req.default_value.has_value()) {
             out << wrap("[" + *req.default_value + "]", kDim,
                         use_colour);
