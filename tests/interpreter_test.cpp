@@ -22,7 +22,9 @@ using spudplate::AliasMap;
 using spudplate::BinaryExpr;
 using spudplate::BoolLiteralExpr;
 using spudplate::Environment;
+using spudplate::dry_run;
 using spudplate::evaluate_expr;
+using spudplate::locale_is_utf8;
 using spudplate::evaluate_path;
 using spudplate::PathExpr;
 using spudplate::PathInterp;
@@ -1905,6 +1907,66 @@ TEST(DryRunTest, MissingFromSourceStillThrows) {
     ScriptedPrompter prompter({});
     std::stringstream out;
     EXPECT_THROW(dry_run(p, prompter, out), RuntimeError);
+}
+
+TEST(DryRunTest, AsciiGlyphsWhenRequested) {
+    TmpDir td;
+    // Two top-level siblings ensure the `|   ` continuation glyph shows
+    // up under the non-last sibling.
+    auto p = parse(R"(mkdir foo
+file foo/bar.txt content "hi"
+file foo/baz.txt content "hi"
+mkdir last
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out, /*ascii_only=*/true);
+    const std::string& s = out.str();
+    EXPECT_NE(s.find("|-- "), std::string::npos);
+    EXPECT_NE(s.find("\\-- "), std::string::npos);
+    EXPECT_NE(s.find("|   "), std::string::npos);
+    // No UTF-8 box-drawing bytes leaked through.
+    EXPECT_EQ(s.find("\xe2\x94"), std::string::npos);
+}
+
+TEST(DryRunTest, Utf8GlyphsByDefault) {
+    TmpDir td;
+    auto p = parse(R"(mkdir foo
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    EXPECT_NE(out.str().find("\xe2\x94\x94"), std::string::npos);
+}
+
+TEST(LocaleIsUtf8Test, EnUsUtf8Detected) {
+    setenv("LC_ALL", "", 1);
+    setenv("LC_CTYPE", "", 1);
+    setenv("LANG", "en_US.UTF-8", 1);
+    EXPECT_TRUE(locale_is_utf8());
+}
+
+TEST(LocaleIsUtf8Test, CLocaleNotDetected) {
+    setenv("LC_ALL", "C", 1);
+    setenv("LC_CTYPE", "", 1);
+    setenv("LANG", "", 1);
+    EXPECT_FALSE(locale_is_utf8());
+}
+
+TEST(LocaleIsUtf8Test, NoEnvVarsSetReturnsFalse) {
+    unsetenv("LC_ALL");
+    unsetenv("LC_CTYPE");
+    unsetenv("LANG");
+    EXPECT_FALSE(locale_is_utf8());
+}
+
+TEST(LocaleIsUtf8Test, FirstSetWinsOverLaterUtf8) {
+    // POSIX precedence: LC_ALL overrides everything. A non-UTF-8 LC_ALL
+    // means the user wants ASCII even if LANG happens to be UTF-8.
+    setenv("LC_ALL", "POSIX", 1);
+    setenv("LANG", "en_US.UTF-8", 1);
+    EXPECT_FALSE(locale_is_utf8());
+    unsetenv("LC_ALL");
 }
 
 TEST(DryRunTest, PromptsRunBeforeRendering) {
