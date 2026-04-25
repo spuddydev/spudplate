@@ -63,15 +63,97 @@ struct PendingFile {
     int column;
 };
 
-using PendingOp = std::variant<PendingMkdir, PendingFile>;
+// Verifies a path exists as a directory at flush time. Used by `copy` to
+// enforce its "destination must already exist" rule, where "exist" means
+// either pre-run or queued by an earlier `mkdir`/`mkdir from` op.
+struct PendingCheckDir {
+    std::string path;
+    int line;
+    int column;
+};
 
-// Until Part 4 lands, the Prompter forward-declared in the header has no
-// concrete implementation. The skeleton interpreter never reaches a code
-// path that calls it (every statement throws "not yet supported" first).
-void unsupported(const std::string& stmt_name, int line, int column) {
-    throw RuntimeError("statement '" + stmt_name +
-                           "' not yet supported in this build",
-                       line, column);
+using PendingOp = std::variant<PendingMkdir, PendingFile, PendingCheckDir>;
+
+// Read a regular file (cwd-relative) into a string. The position arguments
+// point at the *.spud* statement that triggered the read so error messages
+// surface there rather than at some unhelpful internal site.
+std::string read_source_file(const std::string& path, int line, int column) {
+    std::error_code ec;
+    auto status = std::filesystem::status(path, ec);
+    if (ec) {
+        throw RuntimeError("cannot stat source '" + path + "': " + ec.message(),
+                           line, column);
+    }
+    if (!std::filesystem::exists(status)) {
+        throw RuntimeError("source file '" + path + "' does not exist", line,
+                           column);
+    }
+    if (!std::filesystem::is_regular_file(status)) {
+        throw RuntimeError("source '" + path + "' is not a regular file", line,
+                           column);
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw RuntimeError("cannot open source '" + path + "' for reading", line,
+                           column);
+    }
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    return content;
+}
+
+// Substitute `{ident}` occurrences in `content` with the stringified value
+// of `ident` looked up in `env`. The grammar is deliberately narrow for v1
+// — only bare identifiers are accepted; arbitrary expressions are not. Use
+// `verbatim` to copy file contents byte-for-byte without substitution.
+std::string interpolate_content(const std::string& content,
+                                const Environment& env, int line, int column) {
+    std::string out;
+    out.reserve(content.size());
+    std::size_t i = 0;
+    while (i < content.size()) {
+        char c = content[i];
+        if (c != '{') {
+            out.push_back(c);
+            ++i;
+            continue;
+        }
+        std::size_t close = content.find('}', i + 1);
+        if (close == std::string::npos) {
+            throw RuntimeError(
+                "unclosed '{' in source content; use 'verbatim' to suppress "
+                "interpolation",
+                line, column);
+        }
+        std::string name = content.substr(i + 1, close - i - 1);
+        if (name.empty()) {
+            throw RuntimeError("empty '{}' in source content", line, column);
+        }
+        auto is_ident_char = [](char ch) {
+            return std::isalnum(static_cast<unsigned char>(ch)) != 0 ||
+                   ch == '_';
+        };
+        bool head_ok = !name.empty() &&
+                       (std::isalpha(static_cast<unsigned char>(name[0])) != 0 ||
+                        name[0] == '_');
+        bool body_ok = std::all_of(name.begin(), name.end(), is_ident_char);
+        if (!head_ok || !body_ok) {
+            throw RuntimeError(
+                "source content interpolation only supports bare identifiers; "
+                "got '{" +
+                    name + "}' (use 'verbatim' to copy braces literally)",
+                line, column);
+        }
+        auto v = env.lookup(name);
+        if (!v.has_value()) {
+            throw RuntimeError(
+                "undefined variable '" + name + "' in source content", line,
+                column);
+        }
+        out += value_to_string(*v);
+        i = close + 1;
+    }
+    return out;
 }
 
 // Lower-case ASCII copy used for case-insensitive bool parsing.
@@ -479,9 +561,11 @@ class Interpreter {
                 } else if constexpr (std::is_same_v<T, RepeatStmt>) {
                     execute_repeat(s);
                 } else if constexpr (std::is_same_v<T, CopyStmt>) {
-                    unsupported("copy", s.line, s.column);
+                    execute_copy(s);
                 } else if constexpr (std::is_same_v<T, IncludeStmt>) {
-                    unsupported("include", s.line, s.column);
+                    throw RuntimeError(
+                        "statement 'include' not yet supported in this build",
+                        s.line, s.column);
                 }
             },
             stmt.data);
@@ -560,19 +644,81 @@ class Interpreter {
         if (!when_passes(s.when_clause, env_)) {
             return;
         }
-        if (s.from_source.has_value() || s.verbatim) {
-            throw RuntimeError(
-                "'mkdir from' / 'verbatim' not yet supported in this build",
-                s.line, s.column);
-        }
-        std::string path_str = evaluate_path(s.path, env_, alias_map_);
+        std::string dst = evaluate_path(s.path, env_, alias_map_);
         if (s.alias.has_value()) {
-            alias_map_[*s.alias] = path_str;
+            alias_map_[*s.alias] = dst;
         }
-        pending_.push_back(PendingMkdir{.path = std::move(path_str),
+        pending_.push_back(PendingMkdir{.path = dst,
                                         .mode = s.mode,
                                         .line = s.line,
                                         .column = s.column});
+        if (s.from_source.has_value()) {
+            std::string src = evaluate_path(*s.from_source, env_, alias_map_);
+            walk_source_into_pending(src, dst, s.verbatim, s.line, s.column);
+        }
+    }
+
+    void execute_copy(const CopyStmt& s) {
+        if (!when_passes(s.when_clause, env_)) {
+            return;
+        }
+        std::string dst = evaluate_path(s.destination, env_, alias_map_);
+        std::string src = evaluate_path(s.source, env_, alias_map_);
+        pending_.push_back(
+            PendingCheckDir{.path = dst, .line = s.line, .column = s.column});
+        walk_source_into_pending(src, dst, s.verbatim, s.line, s.column);
+    }
+
+    // Walks a source directory and pushes pending mkdir/file ops mirroring
+    // its tree under `dst_root`. recursive_directory_iterator visits parents
+    // before children, so the queued ops naturally satisfy create-parent-
+    // first ordering at flush time. Symlinks and other non-regular entries
+    // are skipped — v1 has no defined behaviour for them.
+    void walk_source_into_pending(const std::string& src,
+                                  const std::string& dst_root, bool verbatim,
+                                  int line, int column) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        auto src_status = fs::status(src, ec);
+        if (ec) {
+            throw RuntimeError(
+                "cannot stat source '" + src + "': " + ec.message(), line,
+                column);
+        }
+        if (!fs::exists(src_status)) {
+            throw RuntimeError("source directory '" + src + "' does not exist",
+                               line, column);
+        }
+        if (!fs::is_directory(src_status)) {
+            throw RuntimeError("source '" + src + "' is not a directory", line,
+                               column);
+        }
+        fs::path src_path{src};
+        fs::path dst_path{dst_root};
+        for (auto it = fs::recursive_directory_iterator(src_path);
+             it != fs::recursive_directory_iterator{}; ++it) {
+            auto rel = fs::relative(it->path(), src_path);
+            auto target = (dst_path / rel).string();
+            if (it->is_directory()) {
+                pending_.push_back(PendingMkdir{.path = std::move(target),
+                                                .mode = std::nullopt,
+                                                .line = line,
+                                                .column = column});
+            } else if (it->is_regular_file()) {
+                std::string content =
+                    read_source_file(it->path().string(), line, column);
+                if (!verbatim) {
+                    content = interpolate_content(content, env_, line, column);
+                }
+                pending_.push_back(PendingFile{.path = std::move(target),
+                                               .content = std::move(content),
+                                               .append = false,
+                                               .mode = std::nullopt,
+                                               .line = line,
+                                               .column = column});
+            }
+            // symlinks, fifos, etc. are silently skipped for v1
+        }
     }
 
     void check_pre_existing(const std::string& path, int line, int col) {
@@ -602,14 +748,18 @@ class Interpreter {
         if (!when_passes(s.when_clause, env_)) {
             return;
         }
-        // Reject `from` first so a thrown statement leaves no stale alias.
+        std::string content;
         if (std::holds_alternative<FileFromSource>(s.source)) {
-            throw RuntimeError("'file from' not yet supported in this build",
-                               s.line, s.column);
+            const auto& fs = std::get<FileFromSource>(s.source);
+            std::string src_path = evaluate_path(fs.path, env_, alias_map_);
+            content = read_source_file(src_path, s.line, s.column);
+            if (!fs.verbatim) {
+                content = interpolate_content(content, env_, s.line, s.column);
+            }
+        } else {
+            const auto& content_src = std::get<FileContentSource>(s.source);
+            content = value_to_string(evaluate_expr(*content_src.value, env_));
         }
-        const auto& content_src = std::get<FileContentSource>(s.source);
-        std::string content =
-            value_to_string(evaluate_expr(*content_src.value, env_));
 
         std::string path_str = evaluate_path(s.path, env_, alias_map_);
         if (s.alias.has_value()) {
@@ -622,6 +772,15 @@ class Interpreter {
                                        .mode = s.mode,
                                        .line = s.line,
                                        .column = s.column});
+    }
+
+    void run_op(const PendingCheckDir& op) const {
+        if (!std::filesystem::is_directory(op.path)) {
+            throw RuntimeError(
+                "destination '" + op.path +
+                    "' does not exist (use 'mkdir from' to create it)",
+                op.line, op.column);
+        }
     }
 
     void run_op(const PendingFile& op) {
