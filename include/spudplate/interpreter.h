@@ -114,6 +114,16 @@ class Prompter {
      * Implementations deliver one raw line per call.
      */
     virtual std::string prompt(const PromptRequest& req) = 0;
+
+    /**
+     * @brief Display a security summary and return whether to proceed.
+     *
+     * Called once, before any statement runs, when the program contains
+     * `run` clauses. The summary is multi-line and lists every literal
+     * command that may execute. Returning `false` aborts the run cleanly
+     * with no side effects.
+     */
+    virtual bool authorize(const std::string& summary) = 0;
 };
 
 /**
@@ -132,6 +142,7 @@ class StdinPrompter : public Prompter {
     StdinPrompter(std::istream& in, std::ostream& out, bool use_colour);
 
     std::string prompt(const PromptRequest& req) override;
+    bool authorize(const std::string& summary) override;
 
   private:
     std::istream& in_;
@@ -153,16 +164,27 @@ class ScriptedPrompter : public Prompter {
         : answers_(std::move(answers)) {}
 
     std::string prompt(const PromptRequest& req) override;
+    bool authorize(const std::string& summary) override;
 
     /** @brief Most recent request seen, for assertions on rendering inputs. */
     [[nodiscard]] const std::optional<PromptRequest>& last_request() const {
         return last_;
     }
 
+    /** @brief Set what `authorize` returns. Defaults to true (accept). */
+    void set_authorize_response(bool value) { authorize_response_ = value; }
+
+    /** @brief Most recent authorize summary seen, for assertions. */
+    [[nodiscard]] const std::optional<std::string>& last_authorize_summary() const {
+        return last_authorize_summary_;
+    }
+
   private:
     std::vector<std::string> answers_;
     std::size_t index_{0};
     std::optional<PromptRequest> last_;
+    bool authorize_response_{true};
+    std::optional<std::string> last_authorize_summary_;
 };
 
 /**
@@ -171,8 +193,16 @@ class ScriptedPrompter : public Prompter {
  * Walks `program.statements` top-to-bottom, prompting through `prompter` for
  * `ask` statements and queueing filesystem operations to be flushed at the
  * end of the run. Throws `RuntimeError` on the first failure.
+ *
+ * If the program contains any `run` statements, `prompter.authorize` is
+ * called once before any statement executes, with a summary of every
+ * literal command. A `false` return aborts the run cleanly with no side
+ * effects. The `skip_authorization` flag bypasses the prompt for non-
+ * interactive callers — they take responsibility for having vetted the
+ * source.
  */
-void run(const Program& program, Prompter& prompter);
+void run(const Program& program, Prompter& prompter,
+         bool skip_authorization = false);
 
 /**
  * @brief Test-only entry point: like `run`, but returns the final environment.

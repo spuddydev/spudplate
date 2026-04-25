@@ -63,6 +63,9 @@ class NullPrompter : public Prompter {
     std::string prompt(const PromptRequest& /*req*/) override {
         throw std::logic_error("NullPrompter should not be called");
     }
+    bool authorize(const std::string& /*summary*/) override {
+        throw std::logic_error("NullPrompter::authorize should not be called");
+    }
 };
 
 Program parse(const std::string& source) {
