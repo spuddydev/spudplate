@@ -31,16 +31,21 @@ void print_usage(std::ostream& err) {
         << "  uninstall <name>                remove an installed template\n";
 }
 
-// Resolve the directory templates are installed into. Honours
-// `SPUDPLATE_HOME` for tests and ad-hoc overrides; otherwise falls back to
-// `$HOME/.spudplate`. Returns an empty path if neither is set so the
-// caller can surface a usable error.
+// Resolve the directory templates are installed into. Honours, in order:
+//   1. `SPUDPLATE_HOME` — explicit override (used by tests and dev setups).
+//   2. `XDG_DATA_HOME/spudplate` — the XDG Base Directory standard.
+//   3. `$HOME/.local/share/spudplate` — XDG default when the env var is unset.
+// Returns an empty path if none of those sources is available so the caller
+// can surface a usable error.
 std::filesystem::path install_dir() {
     if (const char* env = std::getenv("SPUDPLATE_HOME"); env != nullptr && *env != '\0') {
         return env;
     }
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') {
+        return std::filesystem::path(xdg) / "spudplate";
+    }
     if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
-        return std::filesystem::path(home) / ".spudplate";
+        return std::filesystem::path(home) / ".local" / "share" / "spudplate";
     }
     return {};
 }
@@ -74,7 +79,8 @@ std::filesystem::path resolve_template_arg(const std::string& arg,
     }
     auto dir = install_dir();
     if (dir.empty()) {
-        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        err << "cannot determine install directory: set SPUDPLATE_HOME, "
+           "XDG_DATA_HOME, or HOME\n";
         return {};
     }
     return dir / arg / "template.spud";
@@ -130,7 +136,8 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 
     std::filesystem::path home = install_dir();
     if (home.empty()) {
-        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        err << "cannot determine install directory: set SPUDPLATE_HOME, "
+           "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
 
@@ -181,7 +188,8 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
     std::filesystem::path home = install_dir();
     if (home.empty()) {
-        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        err << "cannot determine install directory: set SPUDPLATE_HOME, "
+           "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
     if (!std::filesystem::is_directory(home)) {
@@ -210,7 +218,8 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::string name{argv[2]};
     std::filesystem::path home = install_dir();
     if (home.empty()) {
-        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        err << "cannot determine install directory: set SPUDPLATE_HOME, "
+           "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
     std::filesystem::path file_path = home / name / "template.spud";
@@ -231,7 +240,8 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
     std::string name{argv[2]};
     std::filesystem::path home = install_dir();
     if (home.empty()) {
-        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        err << "cannot determine install directory: set SPUDPLATE_HOME, "
+           "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
     std::filesystem::path target = home / name;
