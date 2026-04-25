@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -64,6 +66,36 @@ void unsupported(const std::string& stmt_name, int line, int column) {
     throw RuntimeError("statement '" + stmt_name +
                            "' not yet supported in this build",
                        line, column);
+}
+
+// Lower-case ASCII copy used for case-insensitive bool parsing.
+std::string ascii_lower(std::string s) {
+    for (auto& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+}
+
+// Evaluate an optional `when` clause; returns true if it passes (clause
+// absent or evaluates to true). Throws if the clause's value is non-bool.
+bool when_passes(const std::optional<ExprPtr>& clause, const Environment& env) {
+    if (!clause.has_value()) {
+        return true;
+    }
+    Value v = evaluate_expr(**clause, env);
+    if (!std::holds_alternative<bool>(v)) {
+        const auto& expr = **clause;
+        int line = 0;
+        int col = 0;
+        std::visit(
+            [&](const auto& e) {
+                line = e.line;
+                col = e.column;
+            },
+            expr.data);
+        throw RuntimeError("'when' condition must be bool", line, col);
+    }
+    return std::get<bool>(v);
 }
 
 // Names a Value's variant alternative for error messages.
@@ -202,6 +234,100 @@ Value eval_binary(const BinaryExpr& bin, const Environment& env) {
     }
 }
 
+// Parse a raw answer string into a Value of the requested type.
+// Returns nullopt when the input is invalid (caller re-prompts).
+std::optional<Value> parse_answer(const std::string& raw, VarType type) {
+    if (type == VarType::String) {
+        return Value{raw};
+    }
+    if (type == VarType::Bool) {
+        std::string lc = ascii_lower(raw);
+        if (lc == "true") {
+            return Value{true};
+        }
+        if (lc == "false") {
+            return Value{false};
+        }
+        return std::nullopt;
+    }
+    // VarType::Int
+    try {
+        std::size_t consumed = 0;
+        long long v = std::stoll(raw, &consumed);
+        // Reject if any non-whitespace remains after the number.
+        for (std::size_t i = consumed; i < raw.size(); ++i) {
+            if (std::isspace(static_cast<unsigned char>(raw[i])) == 0) {
+                return std::nullopt;
+            }
+        }
+        return Value{static_cast<std::int64_t>(v)};
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter) {
+    if (!when_passes(stmt.when_clause, env)) {
+        return;
+    }
+
+    std::optional<Value> default_value;
+    if (stmt.default_value.has_value()) {
+        default_value = evaluate_expr(**stmt.default_value, env);
+    }
+
+    std::vector<std::string> option_strings;
+    option_strings.reserve(stmt.options.size());
+    for (const auto& opt : stmt.options) {
+        option_strings.push_back(value_to_string(evaluate_expr(*opt, env)));
+    }
+
+    std::string message = stmt.prompt;
+    if (!option_strings.empty()) {
+        message += " [";
+        for (std::size_t i = 0; i < option_strings.size(); ++i) {
+            if (i != 0) {
+                message += ", ";
+            }
+            message += option_strings[i];
+        }
+        message += "]";
+    }
+    if (default_value.has_value()) {
+        message += " (default: " + value_to_string(*default_value) + ")";
+    }
+
+    while (true) {
+        std::string raw = prompter.prompt(message, stmt.var_type);
+        if (raw.empty()) {
+            if (default_value.has_value()) {
+                env.declare(stmt.name, *default_value);
+                return;
+            }
+            continue;  // required question, re-prompt
+        }
+        auto parsed = parse_answer(raw, stmt.var_type);
+        if (!parsed.has_value()) {
+            continue;
+        }
+        if (!option_strings.empty()) {
+            std::string parsed_str = value_to_string(*parsed);
+            bool match = false;
+            for (const auto& s : option_strings) {
+                if (s == parsed_str) {
+                    match = true;
+                    break;
+                }
+            }
+            if (!match) {
+                continue;
+            }
+        }
+        env.declare(stmt.name, std::move(*parsed));
+        return;
+    }
+}
+
 Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
     Value arg = evaluate_expr(*fc.argument, env);
     if (!std::holds_alternative<std::string>(arg)) {
@@ -242,14 +368,17 @@ Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
 
 class Interpreter {
   public:
+    explicit Interpreter(Prompter& prompter) : prompter_(prompter) {}
+
     void execute(const Stmt& stmt) {
         std::visit(
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, AskStmt>) {
-                    unsupported("ask", s.line, s.column);
+                    execute_ask(s, env_, prompter_);
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
-                    unsupported("let", s.line, s.column);
+                    Value v = evaluate_expr(*s.value, env_);
+                    env_.declare(s.name, std::move(v));
                 } else if constexpr (std::is_same_v<T, MkdirStmt>) {
                     unsupported("mkdir", s.line, s.column);
                 } else if constexpr (std::is_same_v<T, FileStmt>) {
@@ -269,17 +398,33 @@ class Interpreter {
 
   private:
     Environment env_;
+    Prompter& prompter_;
     std::vector<PendingOp> pending_;
 };
 
-void run_program(const Program& program, Prompter& /*prompter*/,
-                 Interpreter& interp) {
+void run_program(const Program& program, Interpreter& interp) {
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
 }
 
 }  // namespace
+
+std::string StdinPrompter::prompt(const std::string& message,
+                                  VarType /*type*/) {
+    std::cout << message << ": " << std::flush;
+    std::string line;
+    std::getline(std::cin, line);
+    return line;
+}
+
+std::string ScriptedPrompter::prompt(const std::string& /*message*/,
+                                     VarType /*type*/) {
+    if (index_ >= answers_.size()) {
+        throw std::logic_error("ScriptedPrompter exhausted");
+    }
+    return answers_[index_++];
+}
 
 Value evaluate_expr(const Expr& expr, const Environment& env) {
     return std::visit(
@@ -351,13 +496,13 @@ std::string value_to_string(const Value& value) {
 }
 
 void run(const Program& program, Prompter& prompter) {
-    Interpreter interp;
-    run_program(program, prompter, interp);
+    Interpreter interp(prompter);
+    run_program(program, interp);
 }
 
 Environment run_for_tests(const Program& program, Prompter& prompter) {
-    Interpreter interp;
-    run_program(program, prompter, interp);
+    Interpreter interp(prompter);
+    run_program(program, interp);
     return std::move(interp.env());
 }
 
