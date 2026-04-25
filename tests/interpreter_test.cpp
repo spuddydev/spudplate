@@ -14,10 +14,17 @@
 #include "spudplate/parser.h"
 #include "spudplate/token.h"
 
+using spudplate::AliasMap;
 using spudplate::BinaryExpr;
 using spudplate::BoolLiteralExpr;
 using spudplate::Environment;
 using spudplate::evaluate_expr;
+using spudplate::evaluate_path;
+using spudplate::PathExpr;
+using spudplate::PathInterp;
+using spudplate::PathLiteral;
+using spudplate::PathSegment;
+using spudplate::PathVar;
 using spudplate::Expr;
 using spudplate::ExprData;
 using spudplate::ExprPtr;
@@ -92,6 +99,20 @@ ExprPtr fn(const std::string& name, ExprPtr arg) {
                                  .argument = std::move(arg),
                                  .line = 1,
                                  .column = 1});
+}
+
+// Path-segment builders.
+PathSegment plit(const std::string& v) {
+    return PathLiteral{.value = v, .line = 1, .column = 1};
+}
+PathSegment pvar(const std::string& name) {
+    return PathVar{.name = name, .line = 1, .column = 1};
+}
+PathSegment pinterp(ExprPtr e) {
+    return PathInterp{.expression = std::move(e), .line = 1, .column = 1};
+}
+PathExpr path(std::vector<PathSegment> segs) {
+    return PathExpr{.segments = std::move(segs), .line = 1, .column = 1};
 }
 
 }  // namespace
@@ -480,4 +501,87 @@ TEST(ValueToStringTest, BoolTrue) {
 
 TEST(ValueToStringTest, BoolFalse) {
     EXPECT_EQ(value_to_string(Value{false}), "false");
+}
+
+// --- Path evaluator ---
+
+TEST(EvalPathTest, PureLiteralPath) {
+    Environment env;
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(plit("static/notes/README.md"));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "static/notes/README.md");
+}
+
+TEST(EvalPathTest, PathVarFromAliasMap) {
+    Environment env;
+    AliasMap aliases{{"project", "my-project"}};
+    std::vector<PathSegment> segs;
+    segs.push_back(pvar("project"));
+    segs.push_back(plit("/src"));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "my-project/src");
+}
+
+TEST(EvalPathTest, PathInterpAgainstEnvString) {
+    Environment env;
+    env.declare("prefix", Value{std::string{"x"}});
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(pinterp(ident("prefix")));
+    segs.push_back(plit("/sub"));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "x/sub");
+}
+
+TEST(EvalPathTest, PathInterpWithArithmetic) {
+    Environment env;
+    env.declare("n", Value{std::int64_t{3}});
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(plit("week_"));
+    segs.push_back(pinterp(binop(TokenType::PLUS, ident("n"), int_lit(1))));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "week_4");
+}
+
+TEST(EvalPathTest, PathInterpStringifiesBool) {
+    Environment env;
+    env.declare("use_x", Value{true});
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(plit("flag_"));
+    segs.push_back(pinterp(ident("use_x")));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "flag_true");
+}
+
+TEST(EvalPathTest, UnboundAliasThrows) {
+    Environment env;
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(PathVar{.name = "ghost", .line = 5, .column = 9});
+    auto pe = path(std::move(segs));
+    try {
+        evaluate_path(pe, env, aliases);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& ex) {
+        EXPECT_NE(std::string(ex.what()).find("ghost"), std::string::npos);
+        EXPECT_EQ(ex.line(), 5);
+        EXPECT_EQ(ex.column(), 9);
+    }
+}
+
+TEST(EvalPathTest, MixedSegments) {
+    Environment env;
+    env.declare("i", Value{std::int64_t{2}});
+    AliasMap aliases{{"project", "my-app"}};
+    std::vector<PathSegment> segs;
+    segs.push_back(pvar("project"));
+    segs.push_back(plit("/week_"));
+    segs.push_back(pinterp(ident("i")));
+    segs.push_back(plit("/notes.md"));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "my-app/week_2/notes.md");
 }
