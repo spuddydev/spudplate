@@ -1113,3 +1113,54 @@ TEST(ParserTest, IncludeAtTopLevelInProgram) {
 TEST(ParserTest, UnexpectedTokenAtTopLevel) {
     EXPECT_THROW(parse_program("42\n"), ParseError);
 }
+
+// --- Run statement tests ---
+
+static StmtPtr parse_run(const std::string& input) {
+    Lexer lexer(input);
+    Parser parser(std::move(lexer));
+    return parser.parseRun();
+}
+
+TEST(ParserTest, RunStringLiteral) {
+    auto stmt = parse_run("run \"git init\"\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    auto& cmd = std::get<StringLiteralExpr>(r.command->data);
+    EXPECT_EQ(cmd.value, "git init");
+    EXPECT_FALSE(r.when_clause.has_value());
+    EXPECT_EQ(r.line, 1);
+    EXPECT_EQ(r.column, 1);
+}
+
+TEST(ParserTest, RunWithWhen) {
+    auto stmt = parse_run("run \"git init\" when use_git\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    ASSERT_TRUE(r.when_clause.has_value());
+    auto& cond = std::get<IdentifierExpr>((*r.when_clause)->data);
+    EXPECT_EQ(cond.name, "use_git");
+}
+
+TEST(ParserTest, RunConcatenatedExpression) {
+    // Commands can be assembled from runtime values so a template can
+    // interpolate ask answers into the command string.
+    auto stmt = parse_run("run \"git clone \" + url\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    EXPECT_EQ(std::get<BinaryExpr>(r.command->data).op, TokenType::PLUS);
+}
+
+TEST(ParserTest, RunMissingCommand) {
+    EXPECT_THROW(parse_run("run\n"), ParseError);
+}
+
+TEST(ParserTest, RunBareWhenRaisesError) {
+    EXPECT_THROW(parse_run("run \"x\" when\n"), ParseError);
+}
+
+TEST(ParserTest, RunAtTopLevelInProgram) {
+    auto program = parse_program(
+        "ask use_git \"Init git?\" bool\n"
+        "run \"git init\" when use_git\n");
+    ASSERT_EQ(program.statements.size(), 2u);
+    auto& r = std::get<spudplate::RunStmt>(program.statements[1]->data);
+    EXPECT_TRUE(r.when_clause.has_value());
+}
