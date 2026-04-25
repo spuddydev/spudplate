@@ -1788,3 +1788,132 @@ end
     EXPECT_FALSE(std::filesystem::exists(td.path() / "week_0" / "sub_1"));
     EXPECT_FALSE(std::filesystem::exists(td.path() / "week_1" / "sub_0"));
 }
+
+// --- Dry run ---
+
+TEST(DryRunTest, EmptyProgramRendersNothing) {
+    TmpDir td;
+    Program empty;
+    NullPrompter prompter;
+    std::stringstream out;
+    dry_run(empty, prompter, out);
+    EXPECT_EQ(out.str(), "Would create:\n  (nothing)\n");
+}
+
+TEST(DryRunTest, MkdirAndFileRender) {
+    TmpDir td;
+    auto p = parse(R"(mkdir foo
+file foo/bar.txt content "hi"
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    EXPECT_EQ(out.str(),
+              "Would create:\n"
+              "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 foo/\n"
+              "    \xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 bar.txt\n");
+}
+
+TEST(DryRunTest, AppendGetsAnnotation) {
+    TmpDir td;
+    auto p = parse(R"(file log.txt content "first"
+file log.txt append content "second"
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    // The file appears once (de-duplicated by path); since the second op is
+    // append the leaf carries the annotation.
+    EXPECT_NE(out.str().find("log.txt"), std::string::npos);
+    EXPECT_NE(out.str().find("(append)"), std::string::npos);
+}
+
+TEST(DryRunTest, SiblingsAreSortedAlphabetically) {
+    TmpDir td;
+    auto p = parse(R"(mkdir zeta
+mkdir alpha
+mkdir mu
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    auto idx_a = out.str().find("alpha");
+    auto idx_m = out.str().find("mu");
+    auto idx_z = out.str().find("zeta");
+    ASSERT_NE(idx_a, std::string::npos);
+    ASSERT_NE(idx_m, std::string::npos);
+    ASSERT_NE(idx_z, std::string::npos);
+    EXPECT_LT(idx_a, idx_m);
+    EXPECT_LT(idx_m, idx_z);
+}
+
+TEST(DryRunTest, MkdirFromExpandsTree) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src" / "sub");
+    {
+        std::ofstream(td.path() / "src" / "top.txt") << "x";
+    }
+    {
+        std::ofstream(td.path() / "src" / "sub" / "deep.txt") << "y";
+    }
+    auto p = parse(R"(mkdir dst from src
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    EXPECT_NE(out.str().find("dst/"), std::string::npos);
+    EXPECT_NE(out.str().find("sub/"), std::string::npos);
+    EXPECT_NE(out.str().find("top.txt"), std::string::npos);
+    EXPECT_NE(out.str().find("deep.txt"), std::string::npos);
+}
+
+TEST(DryRunTest, NoFilesystemSideEffects) {
+    TmpDir td;
+    auto p = parse(R"(mkdir foo
+file foo/bar.txt content "hi"
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo" / "bar.txt"));
+}
+
+TEST(DryRunTest, CopyToMissingDestStillRendersTree) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "f.txt") << "x";
+    }
+    // `copy` into a non-existent `dst` would be a runtime error during a
+    // real run; dry-run skips the existence check so the user still gets
+    // a useful preview.
+    auto p = parse(R"(copy src into dst
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    EXPECT_NO_THROW(dry_run(p, prompter, out));
+    EXPECT_NE(out.str().find("dst/"), std::string::npos);
+    EXPECT_NE(out.str().find("f.txt"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "dst"));
+}
+
+TEST(DryRunTest, MissingFromSourceStillThrows) {
+    TmpDir td;
+    auto p = parse(R"(mkdir dst from nope
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    EXPECT_THROW(dry_run(p, prompter, out), RuntimeError);
+}
+
+TEST(DryRunTest, PromptsRunBeforeRendering) {
+    TmpDir td;
+    auto p = parse(R"(ask name "Project?" string default "demo"
+mkdir {name}
+)");
+    ScriptedPrompter prompter({"hello"});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    EXPECT_NE(out.str().find("hello/"), std::string::npos);
+}
