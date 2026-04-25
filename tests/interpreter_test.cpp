@@ -1436,6 +1436,53 @@ file foo.txt content "hello, " + name
     EXPECT_EQ(read_file(td.path() / "foo.txt"), "hello, world");
 }
 
+TEST(FileTest, ContentBraceInterpolatesString) {
+    TmpDir td;
+    auto p = parse(R"(let name = "world"
+file foo.txt content "hello, {name}!"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "hello, world!");
+}
+
+TEST(FileTest, ContentBraceInterpolatesInt) {
+    TmpDir td;
+    auto p = parse(R"(let n = 7
+file foo.txt content "n={n}"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "n=7");
+}
+
+TEST(FileTest, ContentBraceInterpolatesMultipleVars) {
+    TmpDir td;
+    auto p = parse(R"(let a = "x"
+let b = "y"
+file foo.txt content "{a} and {b}"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "x and y");
+}
+
+TEST(FileTest, ContentBraceMissingVarErrors) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt content "{nope}"
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), spudplate::RuntimeError);
+}
+
+TEST(FileTest, ContentBraceUnclosedErrors) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt content "{name"
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), spudplate::RuntimeError);
+}
+
 TEST(FileTest, FileInsideQueuedDirectory) {
     TmpDir td;
     auto p = parse(R"(mkdir x

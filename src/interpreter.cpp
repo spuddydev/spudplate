@@ -942,6 +942,7 @@ class Interpreter {
         } else {
             const auto& content_src = std::get<FileContentSource>(s.source);
             content = value_to_string(evaluate_expr(*content_src.value, env_));
+            content = interpolate_content(content, env_, s.line, s.column);
         }
 
         std::string path_str = evaluate_path(s.path, env_, alias_map_);
