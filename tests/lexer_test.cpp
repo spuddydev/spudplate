@@ -102,6 +102,7 @@ TEST(LexerTest, AllKeywords) {
         {"repeat", TokenType::REPEAT},
         {"end", TokenType::END},
         {"verbatim", TokenType::VERBATIM},
+        {"run", TokenType::RUN},
         {"mode", TokenType::MODE},
         {"as", TokenType::AS},
         {"and", TokenType::AND},
