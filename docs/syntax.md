@@ -299,11 +299,10 @@ use_tests
 
 ## Variable Interpolation
 
-`{expr}` interpolation is available in:
+Interpolation appears in two places with slightly different grammars:
 
-- Path expressions (`mkdir week_{n}`, `file {prefix}/README.md`)
-- `content` expressions (via string concatenation)
-- Contents of **`from` source files** and files copied by `copy` (unless `verbatim` is used)
+- **Path expressions** and `content` values support full `{expr}` interpolation (`mkdir week_{n}`, `content "v" + version`).
+- **`from` source files** and files copied by `copy` support only bare `{ident}` substitution — no function calls, no arithmetic, no string concatenation. Use `verbatim` to copy file contents byte-for-byte without any substitution. A literal `{` or `}` in a non-verbatim source is a runtime error; switch the statement to `verbatim` if you need literal braces.
 
 ---
 
