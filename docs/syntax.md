@@ -64,6 +64,8 @@ Computes a new variable from an expression. Useful for transforming user input b
 
 **Integer operations:** `+`, `-`, `*`, `/`
 
+**Mixed:** `+` between a string and an int stringifies the int (`"week " + n` → `"week 3"`).
+
 **Examples:**
 
 ```
@@ -354,7 +356,7 @@ use_tests
 
 | Operator | Types         | Description              |
 |----------|---------------|--------------------------|
-| `+`      | string, int   | Concatenation / addition |
+| `+`      | string, int   | Concatenation / addition (mixed string-and-int stringifies the int) |
 | `-`      | int           | Subtraction              |
 | `*`      | int           | Multiplication           |
 | `/`      | int           | Division                 |
