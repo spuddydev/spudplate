@@ -384,6 +384,22 @@ StmtPtr Parser::parseCopy() {
     return stmt;
 }
 
+// Run statement parser
+
+StmtPtr Parser::parseRun() {
+    Token start = expect(TokenType::RUN, "expected 'run'");
+    auto command = parseExpression();
+    auto when_clause = parse_when_clause();
+    expect_newline("run statement");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->data = RunStmt{.command = std::move(command),
+                         .when_clause = std::move(when_clause),
+                         .line = start.line,
+                         .column = start.column};
+    return stmt;
+}
+
 // Include statement parser
 
 StmtPtr Parser::parseInclude() {
@@ -456,6 +472,9 @@ StmtPtr Parser::parseStatement() {
     }
     if (check(TokenType::INCLUDE)) {
         return parseInclude();
+    }
+    if (check(TokenType::RUN)) {
+        return parseRun();
     }
     throw ParseError("unexpected token: " + current_.value, current_.line,
                      current_.column);
