@@ -15,6 +15,7 @@ using spudplate::CopyStmt;
 using spudplate::FileStmt;
 using spudplate::FunctionCallExpr;
 using spudplate::IdentifierExpr;
+using spudplate::IncludeStmt;
 using spudplate::IntegerLiteralExpr;
 using spudplate::LetStmt;
 using spudplate::Lexer;
@@ -976,6 +977,63 @@ TEST(ParserTest, RepeatWithoutEnd) {
     EXPECT_THROW(parse_program("repeat items as item\n"
                                "  mkdir \"dir\"\n"),
                  ParseError);
+}
+
+// --- Include statement tests ---
+
+static StmtPtr parse_include(const std::string& input) {
+    Lexer lexer(input);
+    Parser parser(std::move(lexer));
+    return parser.parseInclude();
+}
+
+TEST(ParserTest, IncludeBasic) {
+    auto stmt = parse_include("include claude_setup\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    EXPECT_EQ(inc.name, "claude_setup");
+    EXPECT_FALSE(inc.when_clause.has_value());
+    EXPECT_EQ(inc.line, 1);
+    EXPECT_EQ(inc.column, 1);
+}
+
+TEST(ParserTest, IncludeWithWhenIdentifier) {
+    auto stmt = parse_include("include claude_setup when use_claude\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    EXPECT_EQ(inc.name, "claude_setup");
+    ASSERT_TRUE(inc.when_clause.has_value());
+    auto& cond = std::get<IdentifierExpr>((*inc.when_clause)->data);
+    EXPECT_EQ(cond.name, "use_claude");
+}
+
+TEST(ParserTest, IncludeWithWhenComparison) {
+    auto stmt = parse_include("include base when format == \"latex\"\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    EXPECT_EQ(inc.name, "base");
+    ASSERT_TRUE(inc.when_clause.has_value());
+    auto& cond = std::get<BinaryExpr>((*inc.when_clause)->data);
+    EXPECT_EQ(cond.op, TokenType::EQUALS);
+}
+
+TEST(ParserTest, IncludeMissingName) {
+    EXPECT_THROW(parse_include("include\n"), ParseError);
+}
+
+TEST(ParserTest, IncludeStringLiteralAsNameRejected) {
+    EXPECT_THROW(parse_include("include \"claude_setup\"\n"), ParseError);
+}
+
+TEST(ParserTest, IncludeBareWhenRaisesError) {
+    EXPECT_THROW(parse_include("include claude_setup when\n"), ParseError);
+}
+
+TEST(ParserTest, IncludeAtTopLevelInProgram) {
+    auto program = parse_program(
+        "ask use_claude \"Use Claude?\" bool\n"
+        "include claude_setup when use_claude\n");
+    ASSERT_EQ(program.statements.size(), 2u);
+    auto& inc = std::get<IncludeStmt>(program.statements[1]->data);
+    EXPECT_EQ(inc.name, "claude_setup");
+    EXPECT_TRUE(inc.when_clause.has_value());
 }
 
 TEST(ParserTest, UnexpectedTokenAtTopLevel) {
