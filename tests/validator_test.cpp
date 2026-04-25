@@ -503,6 +503,59 @@ TEST(ValidatorTest, RepeatWhenNotFoldedIntoAliasCondition) {
     EXPECT_THROW(validate(program), SemanticError);
 }
 
+TEST(ValidatorTest, RunReferencesKnownVariable) {
+    auto program = parse(
+        "ask repo_url \"Repo url?\" string\n"
+        "run \"git clone \" + repo_url\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, RunInsideRepeatSeesIterator) {
+    auto program = parse(
+        "let n = 1\n"
+        "repeat n as i\n"
+        "  run \"echo \" + i\n"
+        "end\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, RunReferencesIteratorOutsideRepeatIsError) {
+    // The iterator goes out of scope when the repeat ends; using it after
+    // is what walk_expr's check_reference catches.
+    auto program = parse(
+        "let n = 1\n"
+        "repeat n as i\n"
+        "end\n"
+        "run \"echo \" + i\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
+TEST(ValidatorTest, RunInClauseReferencesAlias) {
+    auto program = parse(
+        "mkdir myapp as proj\n"
+        "run \"git init\" in proj\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, RunInClauseReferencesPoppedAliasIsError) {
+    auto program = parse(
+        "let n = 1\n"
+        "repeat n as i\n"
+        "  mkdir foo as bar\n"
+        "end\n"
+        "run \"echo hi\" in bar\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
+TEST(ValidatorTest, RunWhenReferencesIteratorOutsideRepeatIsError) {
+    auto program = parse(
+        "let n = 1\n"
+        "repeat n as i\n"
+        "end\n"
+        "run \"x\" when i > 0\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
 TEST(ValidatorTest, ComposedRulesEndToEnd) {
     // Exercises Part A (repeat when), Part B (no ask-in-repeat — valid case),
     // Part C (nested let scoping), and Part E (bool-equivalent alias when).

@@ -277,6 +277,12 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                 walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, IncludeStmt>) {
                 walk_optional_expr(s.when_clause, scope);
+            } else if constexpr (std::is_same_v<T, RunStmt>) {
+                walk_expr(*s.command, scope);
+                if (s.cwd.has_value()) {
+                    walk_path(*s.cwd, scope, ctx, s.when_clause);
+                }
+                walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, RepeatStmt>) {
                 check_reference(s.collection_var, s.line, s.column, scope);
                 walk_optional_expr(s.when_clause, scope);

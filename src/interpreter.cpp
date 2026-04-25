@@ -20,6 +20,9 @@
 #include <variant>
 #include <vector>
 
+#include <cerrno>
+#include <cstring>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "spudplate/ast.h"
@@ -75,7 +78,22 @@ struct PendingCheckDir {
     int column;
 };
 
-using PendingOp = std::variant<PendingMkdir, PendingFile, PendingCheckDir>;
+// A `run` statement queued for flush-time execution. The command stored
+// here is the *evaluated* expression result — what /bin/sh -c will run.
+// `cwd` is the optional resolved working directory from the `in <path>`
+// clause. The user authorised the literal source at the start of the run,
+// before any expression evaluated. Source-vs-resolved drift (the shell-
+// injection surface for `run "git clone " + url` patterns) is documented
+// as a known caveat rather than mitigated at this layer.
+struct PendingRun {
+    std::string command;
+    std::optional<std::string> cwd;
+    int line;
+    int column;
+};
+
+using PendingOp =
+    std::variant<PendingMkdir, PendingFile, PendingCheckDir, PendingRun>;
 
 // Read a regular file (cwd-relative) into a string. The position arguments
 // point at the *.spud* statement that triggered the read so error messages
@@ -391,6 +409,129 @@ const char* expected_message(VarType type) {
     return "invalid input";
 }
 
+// Render an expression as a readable approximation of its source text. Used
+// only by the trust prompt — users see the *structure* of each `run`
+// command before authorising, even though the actual value executed at
+// flush time may differ (interpolated identifiers, computed strings, etc).
+std::string preview_expr(const Expr& expr) {
+    return std::visit(
+        [](const auto& e) -> std::string {
+            using T = std::decay_t<decltype(e)>;
+            if constexpr (std::is_same_v<T, StringLiteralExpr>) {
+                return "\"" + e.value + "\"";
+            } else if constexpr (std::is_same_v<T, IntegerLiteralExpr>) {
+                return std::to_string(e.value);
+            } else if constexpr (std::is_same_v<T, BoolLiteralExpr>) {
+                return e.value ? "true" : "false";
+            } else if constexpr (std::is_same_v<T, IdentifierExpr>) {
+                return e.name;
+            } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+                return "not " + preview_expr(*e.operand);
+            } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+                const char* sym = "?";
+                switch (e.op) {
+                    case TokenType::PLUS: sym = "+"; break;
+                    case TokenType::MINUS: sym = "-"; break;
+                    case TokenType::STAR: sym = "*"; break;
+                    case TokenType::SLASH: sym = "/"; break;
+                    case TokenType::EQUALS: sym = "=="; break;
+                    case TokenType::NOT_EQUALS: sym = "!="; break;
+                    case TokenType::GREATER: sym = ">"; break;
+                    case TokenType::LESS: sym = "<"; break;
+                    case TokenType::GREATER_EQUAL: sym = ">="; break;
+                    case TokenType::LESS_EQUAL: sym = "<="; break;
+                    case TokenType::AND: sym = "and"; break;
+                    case TokenType::OR: sym = "or"; break;
+                    default: break;
+                }
+                return preview_expr(*e.left) + " " + sym + " " +
+                       preview_expr(*e.right);
+            } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                std::string out = e.name + "(";
+                for (std::size_t i = 0; i < e.arguments.size(); ++i) {
+                    if (i != 0) {
+                        out += ", ";
+                    }
+                    out += preview_expr(*e.arguments[i]);
+                }
+                out += ")";
+                return out;
+            }
+            return "<unknown>";
+        },
+        expr.data);
+}
+
+// Walk every RunStmt in the program (top-level and inside repeat bodies)
+// and append a one-line preview of each command's source-form expression
+// to `out`. Repeat-internal commands are tagged so the user knows they
+// may run multiple times — or not at all.
+// Render a path expression as a readable approximation of its source. Used
+// by the trust prompt to surface the `in <path>` clause on `run` statements.
+std::string preview_path(const PathExpr& path) {
+    std::string out;
+    for (const auto& seg : path.segments) {
+        std::visit(
+            [&](const auto& s) {
+                using T = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<T, PathLiteral>) {
+                    out += s.value;
+                } else if constexpr (std::is_same_v<T, PathVar>) {
+                    out += s.name;
+                } else if constexpr (std::is_same_v<T, PathInterp>) {
+                    out += "{" + preview_expr(*s.expression) + "}";
+                }
+            },
+            seg);
+    }
+    return out;
+}
+
+void collect_run_previews(const std::vector<StmtPtr>& body,
+                          std::vector<std::string>& out, bool inside_repeat) {
+    for (const auto& stmt : body) {
+        std::visit(
+            [&](const auto& s) {
+                using T = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<T, RunStmt>) {
+                    std::string line = preview_expr(*s.command);
+                    if (s.cwd.has_value()) {
+                        line += " in " + preview_path(*s.cwd);
+                    }
+                    if (inside_repeat) {
+                        line += "  (inside repeat — may run 0 or many times)";
+                    }
+                    if (s.when_clause.has_value()) {
+                        line += "  (conditional)";
+                    }
+                    out.push_back(std::move(line));
+                } else if constexpr (std::is_same_v<T, RepeatStmt>) {
+                    collect_run_previews(s.body, out, /*inside_repeat=*/true);
+                }
+            },
+            stmt->data);
+    }
+}
+
+std::string build_authorize_summary(const Program& program) {
+    std::vector<std::string> previews;
+    collect_run_previews(program.statements, previews, /*inside_repeat=*/false);
+    if (previews.empty()) {
+        return {};
+    }
+    std::string summary =
+        "This template will execute the following shell command";
+    summary += previews.size() == 1 ? "" : "s";
+    summary += " via /bin/sh:\n";
+    for (std::size_t i = 0; i < previews.size(); ++i) {
+        summary += "  " + std::to_string(i + 1) + ". " + previews[i] + "\n";
+    }
+    summary +=
+        "\nValues interpolated from `ask`/`let` are not shown above and "
+        "execute verbatim.\n";
+    return summary;
+}
+
 void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
                  int question_index, int question_total, int indent_level) {
     if (!when_passes(stmt.when_clause, env)) {
@@ -569,6 +710,8 @@ class Interpreter {
                     throw RuntimeError(
                         "statement 'include' not yet supported in this build",
                         s.line, s.column);
+                } else if constexpr (std::is_same_v<T, RunStmt>) {
+                    execute_run(s);
                 }
             },
             stmt.data);
@@ -662,6 +805,25 @@ class Interpreter {
             std::string src = evaluate_path(*s.from_source, env_, alias_map_);
             walk_source_into_pending(src, dst, s.verbatim, s.line, s.column);
         }
+    }
+
+    void execute_run(const RunStmt& s) {
+        if (!when_passes(s.when_clause, env_)) {
+            return;
+        }
+        Value v = evaluate_expr(*s.command, env_);
+        if (!std::holds_alternative<std::string>(v)) {
+            throw RuntimeError("'run' command must evaluate to a string",
+                               s.line, s.column);
+        }
+        std::optional<std::string> cwd;
+        if (s.cwd.has_value()) {
+            cwd = evaluate_path(*s.cwd, env_, alias_map_);
+        }
+        pending_.push_back(PendingRun{.command = std::get<std::string>(v),
+                                      .cwd = std::move(cwd),
+                                      .line = s.line,
+                                      .column = s.column});
     }
 
     void execute_copy(const CopyStmt& s) {
@@ -778,6 +940,59 @@ class Interpreter {
                                        .mode = s.mode,
                                        .line = s.line,
                                        .column = s.column});
+    }
+
+    void run_op(const PendingRun& op) const {
+        // /bin/sh -c is what std::system invokes on POSIX. Output streams
+        // through to stdout/stderr inherited from the parent. A non-zero
+        // exit aborts the rest of the flush. If `op.cwd` is set, the chdir
+        // is restored on every exit path via the destructor.
+        struct ChdirScope {
+            std::filesystem::path saved;
+            bool active{false};
+            ~ChdirScope() {
+                if (active) {
+                    std::error_code ec;
+                    std::filesystem::current_path(saved, ec);
+                }
+            }
+        };
+        ChdirScope scope;
+        if (op.cwd.has_value()) {
+            std::error_code ec;
+            scope.saved = std::filesystem::current_path(ec);
+            if (ec) {
+                throw RuntimeError(
+                    "cannot read current directory: " + ec.message(), op.line,
+                    op.column);
+            }
+            std::filesystem::current_path(*op.cwd, ec);
+            if (ec) {
+                throw RuntimeError("cannot chdir to '" + *op.cwd + "' for run: " +
+                                       ec.message(),
+                                   op.line, op.column);
+            }
+            scope.active = true;
+        }
+        int rc = std::system(op.command.c_str());
+        if (rc == -1) {
+            throw RuntimeError("failed to invoke shell for command '" +
+                                   op.command + "': " +
+                                   std::strerror(errno),
+                               op.line, op.column);
+        }
+        if (WIFSIGNALED(rc)) {
+            throw RuntimeError("command killed by signal " +
+                                   std::to_string(WTERMSIG(rc)) + ": " +
+                                   op.command,
+                               op.line, op.column);
+        }
+        if (WIFEXITED(rc) && WEXITSTATUS(rc) != 0) {
+            throw RuntimeError("command exited with status " +
+                                   std::to_string(WEXITSTATUS(rc)) + ": " +
+                                   op.command,
+                               op.line, op.column);
+        }
     }
 
     void run_op(const PendingCheckDir& op) const {
@@ -947,12 +1162,30 @@ std::string StdinPrompter::prompt(const PromptRequest& req) {
     return line;
 }
 
+bool StdinPrompter::authorize(const std::string& summary) {
+    out_ << '\n' << summary;
+    out_ << "Authorise these commands? [y/N] " << std::flush;
+    std::string line;
+    std::getline(in_, line);
+    if (line.empty()) {
+        return false;
+    }
+    char first = static_cast<char>(
+        std::tolower(static_cast<unsigned char>(line[0])));
+    return first == 'y';
+}
+
 std::string ScriptedPrompter::prompt(const PromptRequest& req) {
     last_ = req;
     if (index_ >= answers_.size()) {
         throw std::logic_error("ScriptedPrompter exhausted");
     }
     return answers_[index_++];
+}
+
+bool ScriptedPrompter::authorize(const std::string& summary) {
+    last_authorize_summary_ = summary;
+    return authorize_response_;
 }
 
 Value evaluate_expr(const Expr& expr, const Environment& env) {
@@ -1024,7 +1257,13 @@ std::string value_to_string(const Value& value) {
         value);
 }
 
-void run(const Program& program, Prompter& prompter) {
+void run(const Program& program, Prompter& prompter, bool skip_authorization) {
+    if (!skip_authorization) {
+        std::string summary = build_authorize_summary(program);
+        if (!summary.empty() && !prompter.authorize(summary)) {
+            return;  // declined: clean exit, no side effects, no statements ran
+        }
+    }
     Interpreter interp(prompter);
     run_program(program, interp);
 }
@@ -1153,9 +1392,32 @@ void render_pending(std::ostream& out, const std::vector<PendingOp>& pending,
     out << "Would create:\n";
     if (root.children.empty()) {
         out << "  (nothing)\n";
+    } else {
+        render_node(out, root, "", glyphs);
+    }
+
+    bool has_run = false;
+    for (const auto& op : pending) {
+        if (std::holds_alternative<PendingRun>(op)) {
+            has_run = true;
+            break;
+        }
+    }
+    if (!has_run) {
         return;
     }
-    render_node(out, root, "", glyphs);
+    out << "\nWould execute:\n";
+    std::size_t i = 0;
+    for (const auto& op : pending) {
+        if (const auto* r = std::get_if<PendingRun>(&op)) {
+            ++i;
+            out << "  " << i << ". " << r->command;
+            if (r->cwd.has_value()) {
+                out << " (in " << *r->cwd << ")";
+            }
+            out << '\n';
+        }
+    }
 }
 
 }  // namespace

@@ -259,6 +259,27 @@ struct CopyStmt {
 };
 
 /**
+ * @brief A `run` statement — executes a shell command after user authorisation.
+ *
+ * Example: `run "git init" in {dir} when use_git`
+ *
+ * The command expression is evaluated to a string at runtime and dispatched
+ * via `/bin/sh -c`. The optional `in <path>` clause pins the working
+ * directory for the command — without it, the command inherits the cwd of
+ * the `spudplate` process. Each `spudplate run` invocation prompts the
+ * user once, up front, listing every literal command (and its `in <path>`,
+ * if any) before any statement executes; declining aborts cleanly with no
+ * side effects.
+ */
+struct RunStmt {
+    ExprPtr command;                     ///< Expression whose string value is the command.
+    std::optional<PathExpr> cwd;         ///< Optional `in <path>` working directory.
+    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding execution.
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
+};
+
+/**
  * @brief An `include` statement — runs another installed template as a subprocess.
  *
  * Example: `include claude_setup when use_claude`
@@ -275,7 +296,7 @@ struct IncludeStmt {
 
 /** @brief Discriminated union of all statement node types. */
 using StmtData = std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt,
-                              CopyStmt, IncludeStmt>;
+                              CopyStmt, IncludeStmt, RunStmt>;
 
 /** @brief A statement node wrapping a StmtData variant. */
 struct Stmt {

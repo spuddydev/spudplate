@@ -63,6 +63,9 @@ class NullPrompter : public Prompter {
     std::string prompt(const PromptRequest& /*req*/) override {
         throw std::logic_error("NullPrompter should not be called");
     }
+    bool authorize(const std::string& /*summary*/) override {
+        throw std::logic_error("NullPrompter::authorize should not be called");
+    }
 };
 
 Program parse(const std::string& source) {
@@ -1443,7 +1446,8 @@ file f append content "B"
 
 TEST(FileTest, ModeApplied) {
     TmpDir td;
-    auto p = parse(R"(file run.sh content "echo hi" mode 0755
+    // `run` is a reserved keyword; quote the path to use it as a filename.
+    auto p = parse(R"(file "run.sh" content "echo hi" mode 0755
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1789,6 +1793,205 @@ end
     // if the alias from iteration 0 leaked into iteration 1 or vice versa.
     EXPECT_FALSE(std::filesystem::exists(td.path() / "week_0" / "sub_1"));
     EXPECT_FALSE(std::filesystem::exists(td.path() / "week_1" / "sub_0"));
+}
+
+// --- Run statement ---
+
+TEST(RunTest, AuthorizedCommandExecutes) {
+    TmpDir td;
+    auto p = parse(R"(run "touch marker"
+)");
+    ScriptedPrompter prompter({});  // accept by default
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "marker"));
+}
+
+TEST(RunTest, DeclinedAbortsCleanly) {
+    TmpDir td;
+    auto p = parse(R"(mkdir foo
+run "touch foo/marker"
+)");
+    ScriptedPrompter prompter({});
+    prompter.set_authorize_response(false);
+    run(p, prompter);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo"));
+}
+
+TEST(RunTest, NonZeroExitAbortsRun) {
+    TmpDir td;
+    auto p = parse(R"(mkdir before
+run "false"
+mkdir after
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+    // `before` was queued in pending_ before `run`, so the flush has
+    // already created it by the time `false` errors.
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "before"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "after"));
+}
+
+TEST(RunTest, WhenFalseSkipsCommand) {
+    TmpDir td;
+    auto p = parse(R"(ask flag "Run?" bool default false
+run "touch should_not_exist" when flag
+)");
+    ScriptedPrompter prompter({"false"});
+    run(p, prompter);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "should_not_exist"));
+}
+
+TEST(RunTest, InterpolatedCommandExecutes) {
+    TmpDir td;
+    auto p = parse(R"(let name = "marker.txt"
+run "touch " + name
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "marker.txt"));
+}
+
+TEST(RunTest, NonStringCommandIsRuntimeError) {
+    TmpDir td;
+    auto p = parse(R"(run 42
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+}
+
+TEST(RunTest, ProgramWithoutRunDoesNotInvokeAuthorize) {
+    TmpDir td;
+    auto p = parse(R"(mkdir foo
+)");
+    ScriptedPrompter prompter({});
+    prompter.set_authorize_response(false);  // would abort if called
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "foo"));
+    EXPECT_FALSE(prompter.last_authorize_summary().has_value());
+}
+
+TEST(RunTest, AuthorizeSummaryListsLiteralCommands) {
+    TmpDir td;
+    auto p = parse(R"(run "git init"
+run "touch x"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    ASSERT_TRUE(prompter.last_authorize_summary().has_value());
+    const auto& s = *prompter.last_authorize_summary();
+    EXPECT_NE(s.find("git init"), std::string::npos);
+    EXPECT_NE(s.find("touch x"), std::string::npos);
+}
+
+TEST(RunTest, AuthorizeFlagsRepeatInternalCommands) {
+    TmpDir td;
+    auto p = parse(R"(let n = 1
+repeat n as i
+  run "echo loop"
+end
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    ASSERT_TRUE(prompter.last_authorize_summary().has_value());
+    EXPECT_NE(prompter.last_authorize_summary()->find("inside repeat"),
+              std::string::npos);
+}
+
+TEST(RunTest, SkipAuthorizationBypassesPrompt) {
+    TmpDir td;
+    auto p = parse(R"(run "touch from_skip"
+)");
+    ScriptedPrompter prompter({});
+    prompter.set_authorize_response(false);  // would abort if called
+    run(p, prompter, /*skip_authorization=*/true);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "from_skip"));
+    EXPECT_FALSE(prompter.last_authorize_summary().has_value());
+}
+
+TEST(RunTest, InClausePinsCwd) {
+    TmpDir td;
+    auto p = parse(R"(mkdir myapp
+run "touch marker" in myapp
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "myapp" / "marker"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "marker"));
+}
+
+TEST(RunTest, InClauseRestoresCwdAfterRun) {
+    TmpDir td;
+    auto saved = std::filesystem::current_path();
+    auto p = parse(R"(mkdir myapp
+run "touch marker" in myapp
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(std::filesystem::current_path(), saved);
+}
+
+TEST(RunTest, InClauseAcceptsAlias) {
+    TmpDir td;
+    auto p = parse(R"(mkdir myapp as proj
+run "touch marker" in proj
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "myapp" / "marker"));
+}
+
+TEST(RunTest, InClauseAcceptsInterpolation) {
+    TmpDir td;
+    auto p = parse(R"(let dir = "myapp"
+mkdir {dir}
+run "touch marker" in {dir}
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "myapp" / "marker"));
+}
+
+TEST(RunTest, InClauseMissingDirIsRuntimeError) {
+    TmpDir td;
+    auto p = parse(R"(run "echo hi" in nope
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+}
+
+TEST(RunTest, InClauseRestoresCwdOnCommandFailure) {
+    TmpDir td;
+    auto saved = std::filesystem::current_path();
+    auto p = parse(R"(mkdir myapp
+run "false" in myapp
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+    EXPECT_EQ(std::filesystem::current_path(), saved);
+}
+
+TEST(RunTest, AuthorizeSummaryIncludesInClause) {
+    TmpDir td;
+    auto p = parse(R"(mkdir myapp
+run "git init" in myapp
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    ASSERT_TRUE(prompter.last_authorize_summary().has_value());
+    EXPECT_NE(prompter.last_authorize_summary()->find("in myapp"),
+              std::string::npos);
+}
+
+TEST(RunTest, DryRunShowsCommandsButDoesNotExecute) {
+    TmpDir td;
+    auto p = parse(R"(run "touch should_not_exist"
+)");
+    ScriptedPrompter prompter({});
+    std::stringstream out;
+    dry_run(p, prompter, out);
+    EXPECT_NE(out.str().find("Would execute:"), std::string::npos);
+    EXPECT_NE(out.str().find("touch should_not_exist"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "should_not_exist"));
 }
 
 // --- Dry run ---

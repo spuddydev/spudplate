@@ -14,6 +14,8 @@ namespace spudplate {
  *   spudplate run <file.spud>             run a template (exit codes below)
  *   spudplate run --dry-run <file.spud>   prompt as normal, then print a
  *                                         tree of would-be writes to stdout
+ *   spudplate run --yes <file.spud>       skip the run-statement trust prompt
+ *                                         (caller has vetted the source)
  *
  * Exit codes:
  *   0 — success

@@ -172,6 +172,36 @@ TEST(CliTest, DryRunWithoutFileExitsOne) {
     EXPECT_NE(err.str().find("usage"), std::string::npos);
 }
 
+TEST(CliTest, RunWithYesSkipsAuthorization) {
+    TmpDir td;
+    auto file = td.path() / "ok.spud";
+    write_file(file, "run \"touch marker\"\n");
+    Argv args({"spudplate", "run", "--yes", file.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    prompter.set_authorize_response(false);  // would abort if --yes ignored
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "marker"));
+    EXPECT_FALSE(prompter.last_authorize_summary().has_value());
+}
+
+TEST(CliTest, RunWithoutYesAsksAuthorization) {
+    TmpDir td;
+    auto file = td.path() / "ok.spud";
+    write_file(file, "run \"touch should_not_exist\"\n");
+    Argv args({"spudplate", "run", file.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    prompter.set_authorize_response(false);
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "should_not_exist"));
+    EXPECT_TRUE(prompter.last_authorize_summary().has_value());
+}
+
 TEST(CliTest, MissingFileExitsFive) {
     TmpDir td;
     auto file = td.path() / "absent.spud";
