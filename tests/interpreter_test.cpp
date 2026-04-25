@@ -375,9 +375,21 @@ TEST(EvalExprTest, StringConcat) {
     EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "foobar");
 }
 
-TEST(EvalExprTest, StringPlusIntThrows) {
+TEST(EvalExprTest, StringPlusIntStringifies) {
     Environment env;
     auto e = binop(TokenType::PLUS, str_lit("a"), int_lit(1));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "a1");
+}
+
+TEST(EvalExprTest, IntPlusStringStringifies) {
+    Environment env;
+    auto e = binop(TokenType::PLUS, int_lit(42), str_lit("!"));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "42!");
+}
+
+TEST(EvalExprTest, StringPlusBoolStillThrows) {
+    Environment env;
+    auto e = binop(TokenType::PLUS, str_lit("a"), bool_lit(true));
     EXPECT_THROW(evaluate_expr(*e, env), RuntimeError);
 }
 
