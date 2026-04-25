@@ -34,6 +34,14 @@ TEST(TokenTest, TypeToString) {
     EXPECT_EQ(tokenTypeToString(TokenType::DOT), "DOT");
     EXPECT_EQ(tokenTypeToString(TokenType::LBRACE), "LBRACE");
     EXPECT_EQ(tokenTypeToString(TokenType::RBRACE), "RBRACE");
+    EXPECT_EQ(tokenTypeToString(TokenType::COMMA), "COMMA");
+}
+
+TEST(LexerTest, CommaToken) {
+    Lexer lexer(",");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::COMMA);
+    EXPECT_EQ(tok.value, ",");
 }
 
 TEST(LexerTest, EmptyInput) {

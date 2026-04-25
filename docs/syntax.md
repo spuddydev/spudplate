@@ -60,7 +60,7 @@ let <name> = <expression>
 
 Computes a new variable from an expression. Useful for transforming user input before using it in paths or file content.
 
-**String operations:** `lower()`, `upper()`, `trim()`, `+` (concatenation)
+**String operations:** `lower()`, `upper()`, `trim()`, `replace()`, `+` (concatenation)
 
 **Integer operations:** `+`, `-`, `*`, `/`
 
@@ -68,6 +68,7 @@ Computes a new variable from an expression. Useful for transforming user input b
 
 ```
 let slug = lower(trim(project_name))
+let kebab = lower(replace(trim(project_name), " ", "-"))
 let dir = slug + "-project"
 let total_days = num_weeks * 7
 ```
@@ -268,11 +269,12 @@ use_tests
 
 ### String functions
 
-| Function     | Description                        |
-|--------------|------------------------------------|
-| `lower(x)`   | Converts string to lowercase       |
-| `upper(x)`   | Converts string to uppercase       |
-| `trim(x)`    | Strips leading/trailing whitespace |
+| Function              | Description                                              |
+|-----------------------|----------------------------------------------------------|
+| `lower(x)`            | Converts string to lowercase                             |
+| `upper(x)`            | Converts string to uppercase                             |
+| `trim(x)`             | Strips leading/trailing whitespace                       |
+| `replace(s, from, to)`| Replaces every occurrence of `from` in `s` with `to`     |
 
 ### Operators
 

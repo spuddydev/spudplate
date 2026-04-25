@@ -165,9 +165,27 @@ TEST(ParserTest, FunctionCall) {
     auto expr = parse_expr("lower(name)");
     auto& call = std::get<FunctionCallExpr>(expr->data);
     EXPECT_EQ(call.name, "lower");
+    ASSERT_EQ(call.arguments.size(), 1u);
 
-    auto& arg = std::get<IdentifierExpr>(call.argument->data);
+    auto& arg = std::get<IdentifierExpr>(call.arguments[0]->data);
     EXPECT_EQ(arg.name, "name");
+}
+
+TEST(ParserTest, FunctionCallThreeArgs) {
+    auto expr = parse_expr("replace(s, \" \", \"-\")");
+    auto& call = std::get<FunctionCallExpr>(expr->data);
+    EXPECT_EQ(call.name, "replace");
+    ASSERT_EQ(call.arguments.size(), 3u);
+    EXPECT_EQ(std::get<IdentifierExpr>(call.arguments[0]->data).name, "s");
+    EXPECT_EQ(std::get<StringLiteralExpr>(call.arguments[1]->data).value, " ");
+    EXPECT_EQ(std::get<StringLiteralExpr>(call.arguments[2]->data).value, "-");
+}
+
+TEST(ParserTest, FunctionCallNoArgs) {
+    auto expr = parse_expr("now()");
+    auto& call = std::get<FunctionCallExpr>(expr->data);
+    EXPECT_EQ(call.name, "now");
+    EXPECT_TRUE(call.arguments.empty());
 }
 
 TEST(ParserTest, FunctionCallUpper) {

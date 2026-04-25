@@ -628,15 +628,21 @@ ExprPtr Parser::parse_primary() {
     if (check(TokenType::IDENTIFIER)) {
         Token tok = advance();
 
-        // Check for function call: name(expr)
+        // Check for function call: name(expr) or name(expr, expr, ...)
         if (check(TokenType::LPAREN)) {
             advance();
-            auto arg = parseExpression();
-            expect(TokenType::RPAREN, "expected ')' after function argument");
+            std::vector<ExprPtr> args;
+            if (!check(TokenType::RPAREN)) {
+                args.push_back(parseExpression());
+                while (match(TokenType::COMMA)) {
+                    args.push_back(parseExpression());
+                }
+            }
+            expect(TokenType::RPAREN, "expected ')' after function arguments");
 
             auto expr = std::make_unique<Expr>();
             expr->data = FunctionCallExpr{.name = tok.value,
-                                           .argument = std::move(arg),
+                                           .arguments = std::move(args),
                                            .line = tok.line,
                                            .column = tok.column};
             return expr;

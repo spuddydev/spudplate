@@ -168,7 +168,9 @@ void walk_expr(const Expr& expr, const Scope& scope) {
                 walk_expr(*e.left, scope);
                 walk_expr(*e.right, scope);
             } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
-                walk_expr(*e.argument, scope);
+                for (const auto& arg : e.arguments) {
+                    walk_expr(*arg, scope);
+                }
             }
             // String, Integer, Bool literals have no children.
         },
@@ -322,8 +324,13 @@ ExprPtr clone_expr(const Expr& expr) {
                                             .line = n.line,
                                             .column = n.column});
             } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                std::vector<ExprPtr> cloned_args;
+                cloned_args.reserve(n.arguments.size());
+                for (const auto& a : n.arguments) {
+                    cloned_args.push_back(clone_expr(*a));
+                }
                 return make_expr(FunctionCallExpr{.name = n.name,
-                                                  .argument = clone_expr(*n.argument),
+                                                  .arguments = std::move(cloned_args),
                                                   .line = n.line,
                                                   .column = n.column});
             }
@@ -349,8 +356,13 @@ ExprPtr normalize(const Expr& expr, const TypeMap& tm) {
                                            .line = n.line,
                                            .column = n.column});
             } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                std::vector<ExprPtr> normed_args;
+                normed_args.reserve(n.arguments.size());
+                for (const auto& a : n.arguments) {
+                    normed_args.push_back(normalize(*a, tm));
+                }
                 out = make_expr(FunctionCallExpr{.name = n.name,
-                                                 .argument = normalize(*n.argument, tm),
+                                                 .arguments = std::move(normed_args),
                                                  .line = n.line,
                                                  .column = n.column});
             } else {
@@ -392,7 +404,16 @@ bool exprs_equal(const Expr& a, const Expr& b) {
                 return ax.op == bx.op && exprs_equal(*ax.left, *bx.left) &&
                        exprs_equal(*ax.right, *bx.right);
             } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
-                return ax.name == bx.name && exprs_equal(*ax.argument, *bx.argument);
+                if (ax.name != bx.name ||
+                    ax.arguments.size() != bx.arguments.size()) {
+                    return false;
+                }
+                for (size_t i = 0; i < ax.arguments.size(); ++i) {
+                    if (!exprs_equal(*ax.arguments[i], *bx.arguments[i])) {
+                        return false;
+                    }
+                }
+                return true;
             }
         },
         a.data);

@@ -100,8 +100,20 @@ ExprPtr binop(TokenType op, ExprPtr left, ExprPtr right) {
                            .column = 1});
 }
 ExprPtr fn(const std::string& name, ExprPtr arg) {
+    std::vector<ExprPtr> args;
+    args.push_back(std::move(arg));
     return wrap(FunctionCallExpr{.name = name,
-                                 .argument = std::move(arg),
+                                 .arguments = std::move(args),
+                                 .line = 1,
+                                 .column = 1});
+}
+ExprPtr fn3(const std::string& name, ExprPtr a, ExprPtr b, ExprPtr c) {
+    std::vector<ExprPtr> args;
+    args.push_back(std::move(a));
+    args.push_back(std::move(b));
+    args.push_back(std::move(c));
+    return wrap(FunctionCallExpr{.name = name,
+                                 .arguments = std::move(args),
                                  .line = 1,
                                  .column = 1});
 }
@@ -441,6 +453,61 @@ TEST(EvalExprTest, TrimString) {
     Environment env;
     auto e = fn("trim", str_lit("  x  "));
     EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "x");
+}
+
+TEST(EvalExprTest, ReplaceBasic) {
+    Environment env;
+    auto e = fn3("replace", str_lit("Hello World"), str_lit(" "), str_lit("-"));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "Hello-World");
+}
+
+TEST(EvalExprTest, ReplaceMultipleOccurrences) {
+    Environment env;
+    auto e = fn3("replace", str_lit("a.b.c.d"), str_lit("."), str_lit("/"));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "a/b/c/d");
+}
+
+TEST(EvalExprTest, ReplaceNoMatch) {
+    Environment env;
+    auto e = fn3("replace", str_lit("hello"), str_lit("xyz"), str_lit("Q"));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "hello");
+}
+
+TEST(EvalExprTest, ReplaceMultiCharNeedle) {
+    Environment env;
+    auto e = fn3("replace", str_lit("foobarfoo"), str_lit("foo"), str_lit("X"));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "XbarX");
+}
+
+TEST(EvalExprTest, ReplaceWithEmptyReplacement) {
+    Environment env;
+    auto e = fn3("replace", str_lit("hello world"), str_lit("o"), str_lit(""));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "hell wrld");
+}
+
+TEST(EvalExprTest, ReplaceEmptyNeedleErrors) {
+    Environment env;
+    auto e = fn3("replace", str_lit("x"), str_lit(""), str_lit("y"));
+    EXPECT_THROW(evaluate_expr(*e, env), RuntimeError);
+}
+
+TEST(EvalExprTest, ReplaceWrongArityErrors) {
+    Environment env;
+    auto e = fn("replace", str_lit("hello"));
+    EXPECT_THROW(evaluate_expr(*e, env), RuntimeError);
+}
+
+TEST(EvalExprTest, LowerWrongArityErrors) {
+    Environment env;
+    auto e = fn3("lower", str_lit("a"), str_lit("b"), str_lit("c"));
+    EXPECT_THROW(evaluate_expr(*e, env), RuntimeError);
+}
+
+TEST(EvalExprTest, ReplaceComposesWithLower) {
+    Environment env;
+    env.declare("name", Value{std::string{"Hello World"}});
+    auto e = fn("lower", fn3("replace", ident("name"), str_lit(" "), str_lit("-")));
+    EXPECT_EQ(std::get<std::string>(evaluate_expr(*e, env)), "hello-world");
 }
 
 TEST(EvalExprTest, FunctionTypeMismatchThrows) {

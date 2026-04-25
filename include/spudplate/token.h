@@ -68,6 +68,7 @@ enum class TokenType {
     LBRACE,   ///< `{` — open inline interpolation in path expressions
     RBRACE,   ///< `}` — close inline interpolation in path expressions
     DOT,      ///< `.` — separator in path expressions (e.g. `README.md`)
+    COMMA,    ///< `,` — argument separator in function calls
 
     // Special
     EOF_TOKEN,  ///< End of input
@@ -182,6 +183,8 @@ inline std::string tokenTypeToString(TokenType type) {
             return "RBRACE";
         case TokenType::DOT:
             return "DOT";
+        case TokenType::COMMA:
+            return "COMMA";
         case TokenType::EOF_TOKEN:
             return "EOF_TOKEN";
         case TokenType::ERROR:
