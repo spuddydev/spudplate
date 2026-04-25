@@ -468,6 +468,18 @@ std::string preview_expr(const Expr& expr) {
                 }
                 out += ")";
                 return out;
+            } else if constexpr (std::is_same_v<T, TemplateStringExpr>) {
+                std::string out = "\"";
+                for (const auto& p : e.parts) {
+                    if (std::holds_alternative<std::string>(p)) {
+                        out += std::get<std::string>(p);
+                    } else {
+                        out += "{" +
+                               preview_expr(*std::get<ExprPtr>(p)) + "}";
+                    }
+                }
+                out += "\"";
+                return out;
             }
             return "<unknown>";
         },
