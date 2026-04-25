@@ -14,7 +14,7 @@ Write a `.spud` file in spudlang, install it once, and run it whenever you want 
 2. Install it with `spudplate install my_template.spud`
 3. Run it any time with `spudplate run my_template`
 
-To share a template, export it as a `.spudpack` (a signed zip) and the recipient installs it the same way.
+To share a template, export it as a `.spudpack` (a zip bundle) and the recipient installs it the same way.
 
 ```
 spudplate install my_template.spud
