@@ -11,7 +11,9 @@ namespace spudplate {
  * @brief Command-line entry point factored out of `main` for testability.
  *
  * Recognised invocations:
- *   spudplate run <file.spud>     run a template (exit codes below)
+ *   spudplate run <file.spud>             run a template (exit codes below)
+ *   spudplate run --dry-run <file.spud>   prompt as normal, then print a
+ *                                         tree of would-be writes to stdout
  *
  * Exit codes:
  *   0 — success

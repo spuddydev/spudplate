@@ -112,7 +112,8 @@ TEST(CliTest, SemanticErrorExitsThree) {
 TEST(CliTest, RuntimeErrorExitsFour) {
     TmpDir td;
     auto file = td.path() / "runtime.spud";
-    // `mkdir from` is rejected at runtime as not yet supported.
+    // `mkdir from` looks up `base` in the cwd; with no such directory the
+    // walker raises a runtime error.
     write_file(file, "mkdir foo from base\n");
     Argv args({"spudplate", "run", file.string()});
     std::stringstream out;
@@ -136,6 +137,33 @@ TEST(CliTest, UnknownSubcommandExitsOne) {
 
 TEST(CliTest, NoArgumentsExitsOne) {
     Argv args({"spudplate"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("usage"), std::string::npos);
+}
+
+TEST(CliTest, DryRunPrintsTreeAndDoesNotWrite) {
+    TmpDir td;
+    auto file = td.path() / "ok.spud";
+    write_file(file, "mkdir my_project\nfile my_project/README.md content \"hi\"\n");
+    Argv args({"spudplate", "run", "--dry-run", file.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("Would create:"), std::string::npos);
+    EXPECT_NE(out.str().find("my_project"), std::string::npos);
+    EXPECT_NE(out.str().find("README.md"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "my_project"));
+}
+
+TEST(CliTest, DryRunWithoutFileExitsOne) {
+    Argv args({"spudplate", "run", "--dry-run"});
     std::stringstream out;
     std::stringstream err;
     ScriptedPrompter prompter({});
