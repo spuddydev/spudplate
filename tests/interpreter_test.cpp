@@ -823,7 +823,39 @@ TEST(StdinPrompterTest, PlainStringPromptIsSingleLine) {
         .previous_error = std::nullopt,
     };
     EXPECT_EQ(p.prompt(req), "MyProj");
-    EXPECT_EQ(out.str(), "What is the project name?: > ");
+    EXPECT_EQ(out.str(), "What is the project name?: ");
+}
+
+TEST(StdinPrompterTest, CounterPrefixWhenSet) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Project name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+        .question_index = 1,
+        .question_total = 3,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "(1/3) Project name?: ");
+}
+
+TEST(StdinPrompterTest, CounterSuppressedWhenZero) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str().find("("), std::string::npos);
 }
 
 TEST(StdinPrompterTest, BoolDefaultTrueShowsCapitalY) {
@@ -889,8 +921,7 @@ TEST(StdinPrompterTest, OptionsRenderAsNumberedMenu) {
               "  [1] pdf\n"
               "  [2] html\n"
               "  [3] latex\n"
-              "[default: pdf]\n"
-              "> ");
+              "[default: pdf]: ");
 }
 
 TEST(StdinPrompterTest, BoolInlineHasColon) {
@@ -905,7 +936,7 @@ TEST(StdinPrompterTest, BoolInlineHasColon) {
         .previous_error = std::nullopt,
     };
     p.prompt(req);
-    EXPECT_EQ(out.str(), "Use git? [Y/n]: > ");
+    EXPECT_EQ(out.str(), "Use git? [Y/n]: ");
 }
 
 TEST(StdinPrompterTest, StringWithDefaultIsSingleLine) {
@@ -920,7 +951,7 @@ TEST(StdinPrompterTest, StringWithDefaultIsSingleLine) {
         .previous_error = std::nullopt,
     };
     p.prompt(req);
-    EXPECT_EQ(out.str(), "License? [default: MIT]: > ");
+    EXPECT_EQ(out.str(), "License? [default: MIT]: ");
 }
 
 TEST(StdinPrompterTest, PreviousErrorPrintedAbovePrompt) {

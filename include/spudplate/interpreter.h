@@ -90,6 +90,8 @@ struct PromptRequest {
     std::vector<std::string> options;         ///< Stringified allowed answers; empty means any.
     std::optional<std::string> default_value; ///< Stringified default; empty means required.
     std::optional<std::string> previous_error;///< Set on retry; describes why the prior answer was rejected.
+    int question_index{0};                    ///< 1-based position of this question among presented ones; 0 suppresses the counter.
+    int question_total{0};                    ///< Total static `ask` statements in the program; 0 suppresses the counter.
 };
 
 /**

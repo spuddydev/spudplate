@@ -306,7 +306,8 @@ const char* expected_message(VarType type) {
     return "invalid input";
 }
 
-void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter) {
+void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
+                 int question_index, int question_total) {
     if (!when_passes(stmt.when_clause, env)) {
         return;
     }
@@ -331,6 +332,8 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter) {
                 ? std::optional<std::string>{value_to_string(*default_value)}
                 : std::nullopt,
         .previous_error = std::nullopt,
+        .question_index = question_index,
+        .question_total = question_total,
     };
 
     while (true) {
@@ -453,12 +456,15 @@ class Interpreter {
   public:
     explicit Interpreter(Prompter& prompter) : prompter_(prompter) {}
 
+    void set_ask_total(int total) { ask_total_ = total; }
+
     void execute(const Stmt& stmt) {
         std::visit(
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, AskStmt>) {
-                    execute_ask(s, env_, prompter_);
+                    int index = ask_total_ > 0 ? ++ask_index_ : 0;
+                    execute_ask(s, env_, prompter_, index, ask_total_);
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
@@ -644,9 +650,22 @@ class Interpreter {
     AliasMap alias_map_;
     std::vector<PendingOp> pending_;
     std::unordered_set<std::string> created_during_run_;
+    int ask_total_{0};
+    int ask_index_{0};
 };
 
+int count_ask_statements(const Program& program) {
+    int total = 0;
+    for (const auto& stmt : program.statements) {
+        if (std::holds_alternative<AskStmt>(stmt->data)) {
+            ++total;
+        }
+    }
+    return total;
+}
+
 void run_program(const Program& program, Interpreter& interp) {
+    interp.set_ask_total(count_ask_statements(program));
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
@@ -669,7 +688,7 @@ constexpr const char* kReset = "\x1b[0m";
 constexpr const char* kBold = "\x1b[1m";
 constexpr const char* kDim = "\x1b[2m";
 constexpr const char* kRed = "\x1b[31m";
-constexpr const char* kCyan = "\x1b[36m";
+constexpr const char* kYellow = "\x1b[33m";
 
 std::string wrap(const std::string& s, const char* code, bool on) {
     if (!on) {
@@ -691,25 +710,33 @@ std::string bool_hint(const std::optional<std::string>& default_value) {
 void render_request(std::ostream& out, const PromptRequest& req,
                     bool use_colour) {
     if (req.previous_error.has_value()) {
-        out << wrap("> " + *req.previous_error, kRed, use_colour) << '\n';
+        out << wrap("! " + *req.previous_error, kRed, use_colour) << '\n';
     }
 
     bool has_options = !req.options.empty();
     bool is_bool_inline = req.type == VarType::Bool && !has_options;
+    std::string colon = wrap(":", kYellow, use_colour);
+
+    if (req.question_total > 0 && req.question_index > 0) {
+        std::string counter = "(" + std::to_string(req.question_index) + "/" +
+                              std::to_string(req.question_total) + ") ";
+        out << wrap(counter, kYellow, use_colour);
+    }
 
     out << wrap(req.text, kBold, use_colour);
 
     if (has_options) {
         out << '\n';
         for (std::size_t i = 0; i < req.options.size(); ++i) {
-            out << "  [" << (i + 1) << "] " << req.options[i] << '\n';
+            std::string marker = "[" + std::to_string(i + 1) + "]";
+            out << "  " << wrap(marker, kYellow, use_colour) << ' '
+                << req.options[i] << '\n';
         }
         if (req.default_value.has_value()) {
             out << wrap("[default: " + *req.default_value + "]", kDim,
-                        use_colour)
-                << '\n';
+                        use_colour);
         }
-        out << wrap("> ", kCyan, use_colour) << std::flush;
+        out << colon << ' ' << std::flush;
         return;
     }
 
@@ -720,7 +747,7 @@ void render_request(std::ostream& out, const PromptRequest& req,
             << wrap("[default: " + *req.default_value + "]", kDim, use_colour);
     }
 
-    out << ": " << wrap("> ", kCyan, use_colour) << std::flush;
+    out << colon << ' ' << std::flush;
 }
 
 }  // namespace
