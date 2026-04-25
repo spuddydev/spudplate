@@ -17,11 +17,17 @@ Write a `.spud` file in spudlang, install it once, and run it whenever you want 
 To share a template, export it as a `.spudpack` (a signed zip) and the recipient installs it the same way.
 
 ```
-spudplate install my_template.spud
-spudplate run my_template
+spudplate install my_template.spud      # validate, store under the install root
+spudplate run my_template               # run by installed name
+spudplate run path/to/file.spud         # or run a file directly
+spudplate list                          # list installed templates
+spudplate inspect my_template           # print the source
+spudplate uninstall my_template         # remove
 
 spudplate export my_template -o my_template.spudpack
 ```
+
+The install root is `$SPUDPLATE_HOME` if set, otherwise `$HOME/.spudplate`.
 
 ## Example
 
