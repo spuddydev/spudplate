@@ -75,13 +75,75 @@ void Parser::expect_newline(const std::string& context) {
     expect(TokenType::NEWLINE, "expected newline after " + context);
 }
 
+ExprPtr Parser::make_string_expression(const std::string& raw, int line,
+                                       int column) {
+    if (raw.find('{') == std::string::npos) {
+        auto expr = std::make_unique<Expr>();
+        expr->data = StringLiteralExpr{.value = raw, .line = line, .column = column};
+        return expr;
+    }
+
+    std::vector<std::variant<std::string, ExprPtr>> parts;
+    std::string buf;
+    std::size_t i = 0;
+    while (i < raw.size()) {
+        char c = raw[i];
+        if (c != '{') {
+            buf.push_back(c);
+            ++i;
+            continue;
+        }
+        // Find the matching close, tracking brace depth so `{f({x})}` works.
+        std::size_t scan = i + 1;
+        int depth = 1;
+        while (scan < raw.size() && depth > 0) {
+            if (raw[scan] == '{') {
+                ++depth;
+            } else if (raw[scan] == '}') {
+                --depth;
+                if (depth == 0) {
+                    break;
+                }
+            }
+            ++scan;
+        }
+        if (depth != 0) {
+            throw ParseError("unclosed '{' in string literal", line, column);
+        }
+        std::string inner = raw.substr(i + 1, scan - i - 1);
+        if (inner.empty()) {
+            throw ParseError("empty '{}' in string literal", line, column);
+        }
+        if (!buf.empty()) {
+            parts.emplace_back(std::move(buf));
+            buf.clear();
+        }
+        Lexer sub_lexer(inner);
+        Parser sub_parser(std::move(sub_lexer));
+        ExprPtr inner_expr = sub_parser.parseExpression();
+        if (!sub_parser.check(TokenType::EOF_TOKEN) &&
+            !sub_parser.check(TokenType::NEWLINE)) {
+            throw ParseError(
+                "extra tokens in string interpolation '{" + inner + "}'", line,
+                column);
+        }
+        parts.emplace_back(std::move(inner_expr));
+        i = scan + 1;
+    }
+    if (!buf.empty()) {
+        parts.emplace_back(std::move(buf));
+    }
+
+    auto expr = std::make_unique<Expr>();
+    expr->data = TemplateStringExpr{
+        .parts = std::move(parts), .line = line, .column = column};
+    return expr;
+}
+
 ExprPtr Parser::parse_literal() {
     if (check(TokenType::STRING_LITERAL)) {
         Token tok = advance();
-        auto expr = std::make_unique<Expr>();
-        expr->data =
-            StringLiteralExpr{.value = tok.value, .line = tok.line, .column = tok.column};
-        return expr;
+        return make_string_expression(tok.value, tok.line, tok.column);
     }
     if (check(TokenType::INTEGER_LITERAL)) {
         Token tok = advance();
@@ -654,10 +716,7 @@ ExprPtr Parser::parse_unary() {
 ExprPtr Parser::parse_primary() {
     if (check(TokenType::STRING_LITERAL)) {
         Token tok = advance();
-        auto expr = std::make_unique<Expr>();
-        expr->data =
-            StringLiteralExpr{.value = tok.value, .line = tok.line, .column = tok.column};
-        return expr;
+        return make_string_expression(tok.value, tok.line, tok.column);
     }
 
     if (check(TokenType::INTEGER_LITERAL)) {

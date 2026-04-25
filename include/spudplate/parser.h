@@ -91,6 +91,13 @@ class Parser {
     std::optional<int> parse_mode_clause();
     PathExpr parse_path_expr();
     ExprPtr parse_literal();
+    /**
+     * Build the AST node for a string literal token. If the raw value
+     * contains `{...}` interpolations, returns a `TemplateStringExpr`
+     * with each interpolation sub-parsed as an expression. Otherwise
+     * returns a plain `StringLiteralExpr`.
+     */
+    ExprPtr make_string_expression(const std::string& raw, int line, int column);
     void expect_newline(const std::string& context);
 
     // Expression precedence climbing
