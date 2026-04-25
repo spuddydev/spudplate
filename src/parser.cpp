@@ -283,6 +283,22 @@ StmtPtr Parser::parseLet() {
     return stmt;
 }
 
+StmtPtr Parser::parseAssign() {
+    Token name = expect(TokenType::IDENTIFIER,
+                        "expected variable name at start of assignment");
+    expect(TokenType::ASSIGN,
+           "expected '=' after variable name (use 'let' to declare a new variable)");
+    auto value = parseExpression();
+    expect_newline("assignment");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->data = AssignStmt{.name = name.value,
+                            .value = std::move(value),
+                            .line = name.line,
+                            .column = name.column};
+    return stmt;
+}
+
 StmtPtr Parser::parseMkdir() {
     Token start = expect(TokenType::MKDIR, "expected 'mkdir'");
     PathExpr path = parse_path_expr();
@@ -480,6 +496,9 @@ StmtPtr Parser::parseStatement() {
     }
     if (check(TokenType::RUN)) {
         return parseRun();
+    }
+    if (check(TokenType::IDENTIFIER)) {
+        return parseAssign();
     }
     throw ParseError("unexpected token: " + current_.value, current_.line,
                      current_.column);
