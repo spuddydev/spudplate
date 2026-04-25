@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <ios>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -384,7 +386,7 @@ class Interpreter {
                 } else if constexpr (std::is_same_v<T, MkdirStmt>) {
                     execute_mkdir(s);
                 } else if constexpr (std::is_same_v<T, FileStmt>) {
-                    unsupported("file", s.line, s.column);
+                    execute_file(s);
                 } else if constexpr (std::is_same_v<T, RepeatStmt>) {
                     unsupported("repeat", s.line, s.column);
                 } else if constexpr (std::is_same_v<T, CopyStmt>) {
@@ -447,8 +449,58 @@ class Interpreter {
         created_during_run_.insert(op.path);
     }
 
-    void run_op(const PendingFile& /*op*/) {
-        // PendingFile lands in Part 6.
+    void execute_file(const FileStmt& s) {
+        if (!when_passes(s.when_clause, env_)) {
+            return;
+        }
+        // Reject `from` first so a thrown statement leaves no stale alias.
+        if (std::holds_alternative<FileFromSource>(s.source)) {
+            throw RuntimeError("'file from' not yet supported in this build",
+                               s.line, s.column);
+        }
+        const auto& content_src = std::get<FileContentSource>(s.source);
+        std::string content =
+            value_to_string(evaluate_expr(*content_src.value, env_));
+
+        std::string path_str = evaluate_path(s.path, env_, alias_map_);
+        if (s.alias.has_value()) {
+            alias_map_[*s.alias] = path_str;
+        }
+
+        pending_.push_back(PendingFile{.path = std::move(path_str),
+                                       .content = std::move(content),
+                                       .append = s.append,
+                                       .mode = s.mode,
+                                       .line = s.line,
+                                       .column = s.column});
+    }
+
+    void run_op(const PendingFile& op) {
+        // For non-append, the path may have been written earlier in this run
+        // (a prior `PendingFile` to the same path) — that's an in-run
+        // overwrite, allowed. The pre-existing check only fires for paths
+        // that existed before the run started.
+        check_pre_existing(op.path, op.line, op.column);
+        std::ios::openmode mode = std::ios::out;
+        if (op.append) {
+            mode |= std::ios::app;
+        } else {
+            mode |= std::ios::trunc;
+        }
+        {
+            std::ofstream out(op.path, mode);
+            if (!out) {
+                throw RuntimeError("cannot open '" + op.path + "' for writing",
+                                   op.line, op.column);
+            }
+            out << op.content;
+        }
+        if (op.mode.has_value()) {
+            std::filesystem::permissions(
+                op.path, static_cast<std::filesystem::perms>(*op.mode),
+                std::filesystem::perm_options::replace);
+        }
+        created_during_run_.insert(op.path);
     }
 
     Environment env_;
