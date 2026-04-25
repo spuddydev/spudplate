@@ -73,6 +73,14 @@ class Environment {
      */
     void declare(const std::string& name, Value value);
 
+    /**
+     * @brief Replace the value of an existing binding, innermost first.
+     *
+     * Throws `std::logic_error` if `name` is not visible — the validator
+     * is expected to have rejected such inputs before the interpreter runs.
+     */
+    void assign(const std::string& name, Value value);
+
     /** @brief Find `name` in any frame, innermost first. */
     [[nodiscard]] std::optional<Value> lookup(const std::string& name) const;
 

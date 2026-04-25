@@ -48,6 +48,18 @@ std::optional<Value> Environment::lookup(const std::string& name) const {
     return std::nullopt;
 }
 
+void Environment::assign(const std::string& name, Value value) {
+    for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+        auto found = it->find(name);
+        if (found != it->end()) {
+            found->second = std::move(value);
+            return;
+        }
+    }
+    throw std::logic_error("environment has no binding for '" + name +
+                           "' to assign to");
+}
+
 namespace {
 
 // Deferred-write queue entries. The interpreter never touches the filesystem
@@ -698,6 +710,9 @@ class Interpreter {
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
+                } else if constexpr (std::is_same_v<T, AssignStmt>) {
+                    Value v = evaluate_expr(*s.value, env_);
+                    env_.assign(s.name, std::move(v));
                 } else if constexpr (std::is_same_v<T, MkdirStmt>) {
                     execute_mkdir(s);
                 } else if constexpr (std::is_same_v<T, FileStmt>) {
