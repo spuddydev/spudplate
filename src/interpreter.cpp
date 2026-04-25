@@ -10,12 +10,15 @@
 #include <fstream>
 #include <ios>
 #include <iostream>
+#include <map>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <unistd.h>
 
@@ -572,6 +575,9 @@ class Interpreter {
     }
 
     [[nodiscard]] Environment& env() { return env_; }
+    [[nodiscard]] const std::vector<PendingOp>& pending() const {
+        return pending_;
+    }
 
     void flush() {
         for (const auto& op : pending_) {
@@ -1027,6 +1033,121 @@ Environment run_for_tests(const Program& program, Prompter& prompter) {
     Interpreter interp(prompter);
     run_program(program, interp);
     return std::move(interp.env());
+}
+
+namespace {
+
+// In-memory tree built from the deferred-op queue. `std::map` keeps
+// children sorted alphabetically so the rendered output is stable.
+struct DryRunNode {
+    bool is_dir{true};
+    bool is_append{false};
+    std::map<std::string, DryRunNode> children;
+};
+
+std::vector<std::string> split_path(const std::string& path) {
+    std::vector<std::string> parts;
+    std::string current;
+    for (char c : path) {
+        if (c == '/') {
+            if (!current.empty()) {
+                parts.push_back(std::move(current));
+                current.clear();
+            }
+        } else {
+            current.push_back(c);
+        }
+    }
+    if (!current.empty()) {
+        parts.push_back(std::move(current));
+    }
+    return parts;
+}
+
+// Insert `path` into the tree. `is_dir` and `is_append` apply to the leaf;
+// every intermediate component is implicitly a directory.
+void insert_path(DryRunNode& root, const std::string& path, bool is_dir,
+                 bool is_append) {
+    auto parts = split_path(path);
+    if (parts.empty()) {
+        return;
+    }
+    DryRunNode* cursor = &root;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        const auto& name = parts[i];
+        auto& child = cursor->children[name];
+        if (i + 1 < parts.size()) {
+            child.is_dir = true;
+        } else {
+            // A path that appears first as an intermediate (auto-dir) and
+            // later as an explicit mkdir keeps is_dir=true. A path that
+            // appears as a file overrides any prior is_dir guess.
+            if (!is_dir) {
+                child.is_dir = false;
+                child.is_append = is_append;
+            }
+        }
+        cursor = &child;
+    }
+}
+
+void render_node(std::ostream& out, const DryRunNode& node,
+                 const std::string& prefix) {
+    std::size_t i = 0;
+    const std::size_t n = node.children.size();
+    for (const auto& [name, child] : node.children) {
+        bool last = (i + 1 == n);
+        out << prefix << (last ? "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 "
+                               : "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 ")
+            << name;
+        if (child.is_dir) {
+            out << '/';
+        } else if (child.is_append) {
+            out << " (append)";
+        }
+        out << '\n';
+        std::string next_prefix =
+            prefix + (last ? "    " : "\xe2\x94\x82   ");
+        render_node(out, child, next_prefix);
+        ++i;
+    }
+}
+
+void render_pending(std::ostream& out, const std::vector<PendingOp>& pending) {
+    DryRunNode root;
+    for (const auto& op : pending) {
+        std::visit(
+            [&](const auto& o) {
+                using T = std::decay_t<decltype(o)>;
+                if constexpr (std::is_same_v<T, PendingMkdir>) {
+                    insert_path(root, o.path, /*is_dir=*/true,
+                                /*is_append=*/false);
+                } else if constexpr (std::is_same_v<T, PendingFile>) {
+                    insert_path(root, o.path, /*is_dir=*/false, o.append);
+                }
+                // PendingCheckDir is intentionally skipped — it doesn't
+                // create anything and dry-run can't validate it without
+                // hitting the real filesystem.
+            },
+            op);
+    }
+    out << "Would create:\n";
+    if (root.children.empty()) {
+        out << "  (nothing)\n";
+        return;
+    }
+    render_node(out, root, "");
+}
+
+}  // namespace
+
+void dry_run(const Program& program, Prompter& prompter, std::ostream& out) {
+    Interpreter interp(prompter);
+    interp.set_ask_total(count_ask_statements(program));
+    for (const auto& stmt : program.statements) {
+        interp.execute(*stmt);
+    }
+    render_pending(out, interp.pending());
 }
 
 }  // namespace spudplate

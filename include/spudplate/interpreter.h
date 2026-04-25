@@ -175,6 +175,20 @@ void run(const Program& program, Prompter& prompter);
 Environment run_for_tests(const Program& program, Prompter& prompter);
 
 /**
+ * @brief Run a program without touching the filesystem.
+ *
+ * Walks the program exactly like `run` — same prompts, same expression
+ * evaluation, same alias bindings — but instead of flushing the deferred
+ * write queue prints a `Would create:` tree of every path that would have
+ * been created to `out`. `copy` destination-existence checks are skipped
+ * (they would always fail in dry-run since nothing was written).
+ *
+ * Throws `RuntimeError` on any failure that `run` would also throw before
+ * the flush step.
+ */
+void dry_run(const Program& program, Prompter& prompter, std::ostream& out);
+
+/**
  * @brief Evaluate an expression against an environment.
  *
  * Throws `RuntimeError` on type mismatch, unknown identifier, division by
