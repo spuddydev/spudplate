@@ -1128,8 +1128,37 @@ TEST(ParserTest, RunStringLiteral) {
     auto& cmd = std::get<StringLiteralExpr>(r.command->data);
     EXPECT_EQ(cmd.value, "git init");
     EXPECT_FALSE(r.when_clause.has_value());
+    EXPECT_FALSE(r.cwd.has_value());
     EXPECT_EQ(r.line, 1);
     EXPECT_EQ(r.column, 1);
+}
+
+TEST(ParserTest, RunWithInClause) {
+    auto stmt = parse_run("run \"git init\" in myapp\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    ASSERT_TRUE(r.cwd.has_value());
+    ASSERT_EQ(r.cwd->segments.size(), 1u);
+    EXPECT_EQ(std::get<PathLiteral>(r.cwd->segments[0]).value, "myapp");
+    EXPECT_FALSE(r.when_clause.has_value());
+}
+
+TEST(ParserTest, RunWithInAndWhen) {
+    auto stmt = parse_run("run \"git init\" in myapp when use_git\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    ASSERT_TRUE(r.cwd.has_value());
+    ASSERT_TRUE(r.when_clause.has_value());
+}
+
+TEST(ParserTest, RunInClauseAcceptsInterpolation) {
+    auto stmt = parse_run("run \"git init\" in {dir}\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    ASSERT_TRUE(r.cwd.has_value());
+    ASSERT_EQ(r.cwd->segments.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<PathInterp>(r.cwd->segments[0]));
+}
+
+TEST(ParserTest, RunInWithoutPathIsError) {
+    EXPECT_THROW(parse_run("run \"x\" in\n"), ParseError);
 }
 
 TEST(ParserTest, RunWithWhen) {
