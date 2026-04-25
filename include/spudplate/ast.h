@@ -66,14 +66,14 @@ struct BinaryExpr {
 };
 
 /**
- * @brief A built-in function call expression, e.g. `lower(name)`.
+ * @brief A built-in function call expression, e.g. `lower(name)` or `replace(s, " ", "-")`.
  *
- * All built-in functions take exactly one argument.
- * Supported functions: `lower`, `upper`, `trim`.
+ * Arity is checked at evaluation time per-function. Supported functions:
+ * `lower`, `upper`, `trim` (1 arg), `replace` (3 args).
  */
 struct FunctionCallExpr {
-    std::string name;  ///< Function name.
-    ExprPtr argument;  ///< The single argument expression.
+    std::string name;                  ///< Function name.
+    std::vector<ExprPtr> arguments;    ///< Argument expressions.
     int line;
     int column;
 };
