@@ -16,7 +16,7 @@ namespace spudplate {
 namespace {
 
 void print_usage(std::ostream& err) {
-    err << "usage: spudplate run [--dry-run] <file.spud>\n";
+    err << "usage: spudplate run [--dry-run] [--yes] <file.spud>\n";
 }
 
 void print_error(std::ostream& err, const std::string& file, const char* kind,
@@ -40,10 +40,19 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
 
     bool dry_run_mode = false;
+    bool skip_authorization = false;
     int positional_start = 2;
-    if (argc >= 3 && std::string{argv[2]} == "--dry-run") {
-        dry_run_mode = true;
-        positional_start = 3;
+    while (positional_start < argc) {
+        std::string arg{argv[positional_start]};
+        if (arg == "--dry-run") {
+            dry_run_mode = true;
+            ++positional_start;
+        } else if (arg == "--yes" || arg == "-y") {
+            skip_authorization = true;
+            ++positional_start;
+        } else {
+            break;
+        }
     }
     if (argc - positional_start != 1) {
         print_usage(err);
@@ -83,7 +92,7 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
         if (dry_run_mode) {
             dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8());
         } else {
-            run(program, prompter);
+            run(program, prompter, skip_authorization);
         }
     } catch (const RuntimeError& e) {
         print_error(err, file_path, "runtime error", e.line(), e.column(),
