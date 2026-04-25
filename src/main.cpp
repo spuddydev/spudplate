@@ -1,11 +1,9 @@
 #include <iostream>
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: spudplate <file.spud>" << '\n';
-        return 1;
-    }
+#include "spudplate/cli.h"
+#include "spudplate/interpreter.h"
 
-    std::cout << "spudplate: " << argv[1] << '\n';
-    return 0;
+int main(int argc, char* argv[]) {
+    spudplate::StdinPrompter prompter;
+    return spudplate::cli_main(argc, argv, std::cout, std::cerr, prompter);
 }
