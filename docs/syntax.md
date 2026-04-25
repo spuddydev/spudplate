@@ -26,7 +26,7 @@ Declares a variable `<name>` and asks the user a question at runtime.
 - The `default` accepts any expression — a literal, a previously declared variable, or a computed expression like `lower(trim(project_name))`. The expression is evaluated against the live environment when the user skips the prompt.
 - `options` restricts valid answers to a fixed set, presented as a numbered menu. The user may type either the literal value or its 1-based number.
 - `when <condition>` only asks the question if the condition is true.
-- `ask` is **not allowed inside a `repeat` block**.
+- `ask` is allowed inside `repeat`. Each iteration prompts afresh; the binding lives only for that iteration. Prompts inside `repeat` are indented by 2 spaces per nesting level and are not counted in the `(N/M)` progress indicator (since the iteration count is dynamic). Shadowing rules still apply — an `ask` cannot reuse a name visible from the surrounding scope.
 
 **Types:**
 
@@ -204,7 +204,7 @@ repeat <int_var> as <iter> [when <condition>]
 end
 ```
 
-Repeats the nested block `<int_var>` times. The loop variable `<iter>` holds the current iteration index (0-based). Nested `repeat` blocks and all action statements are allowed; **`ask` is not**.
+Repeats the nested block `<int_var>` times. The loop variable `<iter>` holds the current iteration index (0-based). Nested `repeat` blocks, `ask`, and all action statements are allowed inside the body.
 
 The optional `when` clause skips the entire loop if the condition is false.
 
