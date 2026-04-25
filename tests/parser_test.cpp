@@ -6,6 +6,7 @@
 #include "spudplate/lexer.h"
 
 using spudplate::AskStmt;
+using spudplate::AssignStmt;
 using spudplate::BinaryExpr;
 using spudplate::BoolLiteralExpr;
 using spudplate::ExprPtr;
@@ -236,6 +237,12 @@ static StmtPtr parse_let(const std::string& input) {
     return parser.parseLet();
 }
 
+static StmtPtr parse_assign(const std::string& input) {
+    Lexer lexer(input);
+    Parser parser(std::move(lexer));
+    return parser.parseAssign();
+}
+
 static StmtPtr parse_mkdir(const std::string& input) {
     Lexer lexer(input);
     Parser parser(std::move(lexer));
@@ -464,6 +471,53 @@ TEST(ParserTest, LetMissingAssign) {
 
 TEST(ParserTest, LetMissingName) {
     EXPECT_THROW(parse_let("let = 42\n"), ParseError);
+}
+
+// --- Assignment statement tests ---
+
+TEST(ParserTest, AssignBasic) {
+    auto stmt = parse_assign("count = 1\n");
+    auto& a = std::get<AssignStmt>(stmt->data);
+    EXPECT_EQ(a.name, "count");
+    auto& val = std::get<IntegerLiteralExpr>(a.value->data);
+    EXPECT_EQ(val.value, 1);
+}
+
+TEST(ParserTest, AssignArithmeticUpdate) {
+    auto stmt = parse_assign("n = n + 2\n");
+    auto& a = std::get<AssignStmt>(stmt->data);
+    EXPECT_EQ(a.name, "n");
+    auto& bin = std::get<BinaryExpr>(a.value->data);
+    EXPECT_EQ(bin.op, TokenType::PLUS);
+}
+
+TEST(ParserTest, AssignFunctionCall) {
+    auto stmt = parse_assign("name = lower(name)\n");
+    auto& a = std::get<AssignStmt>(stmt->data);
+    auto& call = std::get<FunctionCallExpr>(a.value->data);
+    EXPECT_EQ(call.name, "lower");
+}
+
+TEST(ParserTest, AssignAtEof) {
+    auto stmt = parse_assign("x = 1");
+    auto& a = std::get<AssignStmt>(stmt->data);
+    EXPECT_EQ(a.name, "x");
+}
+
+TEST(ParserTest, AssignMissingEquals) {
+    EXPECT_THROW(parse_assign("x 1\n"), ParseError);
+}
+
+TEST(ParserTest, AssignMissingValue) {
+    EXPECT_THROW(parse_assign("x =\n"), ParseError);
+}
+
+TEST(ParserTest, AssignDispatchedFromProgram) {
+    auto program = parse_program("let n = 1\nn = n + 1\n");
+    ASSERT_EQ(program.statements.size(), 2u);
+    std::get<LetStmt>(program.statements[0]->data);
+    auto& a = std::get<AssignStmt>(program.statements[1]->data);
+    EXPECT_EQ(a.name, "n");
 }
 
 // --- Mkdir statement tests ---
