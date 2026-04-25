@@ -1227,6 +1227,17 @@ Value evaluate_expr(const Expr& expr, const Environment& env) {
                 return eval_binary(e, env);
             } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
                 return eval_call(e, env);
+            } else if constexpr (std::is_same_v<T, TemplateStringExpr>) {
+                std::string out;
+                for (const auto& p : e.parts) {
+                    if (std::holds_alternative<std::string>(p)) {
+                        out += std::get<std::string>(p);
+                    } else {
+                        out += value_to_string(
+                            evaluate_expr(*std::get<ExprPtr>(p), env));
+                    }
+                }
+                return Value{std::move(out)};
             }
         },
         expr.data);
