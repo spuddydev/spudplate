@@ -24,17 +24,17 @@ Declares a variable `<name>` and asks the user a question at runtime.
 
 - A question is **required** unless it has a `default` value. With a `default`, the user may skip the prompt (empty input) and the default value is used in its place.
 - The `default` accepts any expression — a literal, a previously declared variable, or a computed expression like `lower(trim(project_name))`. The expression is evaluated against the live environment when the user skips the prompt.
-- `options` restricts valid answers to a fixed set, presented as a numbered menu.
+- `options` restricts valid answers to a fixed set, presented as a numbered menu. The user may type either the literal value or its 1-based number.
 - `when <condition>` only asks the question if the condition is true.
 - `ask` is **not allowed inside a `repeat` block**.
 
 **Types:**
 
-| Type     | Description                        |
-|----------|------------------------------------|
-| `string` | Arbitrary text input               |
-| `bool`   | `true` / `false` (yes/no prompt)   |
-| `int`    | Integer input                      |
+| Type     | Description                                              |
+|----------|----------------------------------------------------------|
+| `string` | Arbitrary text input                                     |
+| `bool`   | Accepts `y`, `yes`, `true` and `n`, `no`, `false` (case-insensitive). The hint shows `[Y/n]` for `default true`, `[y/N]` for `default false`, `[y/n]` otherwise |
+| `int`    | Integer input                                            |
 
 **Examples:**
 

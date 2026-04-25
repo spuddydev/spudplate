@@ -39,10 +39,12 @@ using spudplate::Lexer;
 using spudplate::Parser;
 using spudplate::Program;
 using spudplate::Prompter;
+using spudplate::PromptRequest;
 using spudplate::run;
 using spudplate::run_for_tests;
 using spudplate::RuntimeError;
 using spudplate::ScriptedPrompter;
+using spudplate::StdinPrompter;
 using spudplate::StringLiteralExpr;
 using spudplate::TokenType;
 using spudplate::UnaryExpr;
@@ -56,8 +58,7 @@ namespace {
 // statement throws "not yet supported" before the prompter is reached.
 class NullPrompter : public Prompter {
   public:
-    std::string prompt(const std::string& /*message*/,
-                       VarType /*type*/) override {
+    std::string prompt(const PromptRequest& /*req*/) override {
         throw std::logic_error("NullPrompter should not be called");
     }
 };
@@ -734,6 +735,288 @@ TEST(AskTest, BadIntRetries) {
     ScriptedPrompter prompter({"abc", "7"});
     Environment env = run_for_tests(p, prompter);
     EXPECT_EQ(std::get<std::int64_t>(*env.lookup("n")), 7);
+}
+
+TEST(AskTest, BoolAcceptsYesNo) {
+    auto p = parse(R"(ask flag "Enable?" bool
+)");
+    ScriptedPrompter prompter({"yes"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_TRUE(std::get<bool>(*env.lookup("flag")));
+}
+
+TEST(AskTest, BoolAcceptsShortYN) {
+    auto p = parse(R"(ask flag "Enable?" bool
+)");
+    ScriptedPrompter prompter({"n"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_FALSE(std::get<bool>(*env.lookup("flag")));
+}
+
+TEST(AskTest, NumberedOptionIndexResolves) {
+    auto p = parse(R"(ask format "Format?" string options "pdf" "html" "latex"
+)");
+    ScriptedPrompter prompter({"2"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("format")), "html");
+}
+
+TEST(AskTest, NumberedIndexOnIntOptions) {
+    auto p = parse(R"(ask v "PG?" int options 15 16 17
+)");
+    ScriptedPrompter prompter({"3"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("v")), 17);
+}
+
+TEST(AskTest, OutOfRangeIndexFallsThrough) {
+    // "5" is outside the index range so it parses as the int 5, which is not
+    // in the options list — re-prompt rather than crash.
+    auto p = parse(R"(ask v "PG?" int options 15 16 17
+)");
+    ScriptedPrompter prompter({"5", "16"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("v")), 16);
+}
+
+TEST(AskTest, RejectionPropagatesPreviousError) {
+    auto p = parse(R"(ask flag "Enable?" bool
+)");
+    ScriptedPrompter prompter({"maybe", "true"});
+    run_for_tests(p, prompter);
+    ASSERT_TRUE(prompter.last_request().has_value());
+    ASSERT_TRUE(prompter.last_request()->previous_error.has_value());
+    EXPECT_EQ(*prompter.last_request()->previous_error, "expected yes or no");
+}
+
+TEST(AskTest, EmptyOnRequiredQuestionPropagatesError) {
+    auto p = parse(R"(ask name "Name?" string
+)");
+    ScriptedPrompter prompter({"", "x"});
+    run_for_tests(p, prompter);
+    ASSERT_TRUE(prompter.last_request()->previous_error.has_value());
+    EXPECT_EQ(*prompter.last_request()->previous_error,
+              "this question is required");
+}
+
+TEST(AskTest, OffOptionPropagatesError) {
+    auto p = parse(R"(ask format "Format?" string options "pdf" "html"
+)");
+    ScriptedPrompter prompter({"foo", "pdf"});
+    run_for_tests(p, prompter);
+    ASSERT_TRUE(prompter.last_request()->previous_error.has_value());
+    EXPECT_EQ(*prompter.last_request()->previous_error,
+              "not one of the listed options");
+}
+
+// --- StdinPrompter rendering ---
+
+TEST(StdinPrompterTest, PlainStringPromptIsSingleLine) {
+    std::stringstream in("MyProj\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, /*use_colour=*/false);
+    PromptRequest req{
+        .text = "What is the project name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+    };
+    EXPECT_EQ(p.prompt(req), "MyProj");
+    EXPECT_EQ(out.str(), "What is the project name?: ");
+}
+
+TEST(StdinPrompterTest, CounterPrefixWhenSet) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Project name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+        .question_index = 1,
+        .question_total = 3,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "(1/3) Project name?: ");
+}
+
+TEST(StdinPrompterTest, CounterSuppressedWhenZero) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str().find("("), std::string::npos);
+}
+
+TEST(StdinPrompterTest, BoolDefaultTrueShowsCapitalY) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Use git?",
+        .type = VarType::Bool,
+        .options = {},
+        .default_value = "true",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_NE(out.str().find("[Y/n]"), std::string::npos);
+    EXPECT_EQ(out.str().find("[true]"), std::string::npos);
+}
+
+TEST(StdinPrompterTest, BoolDefaultFalseShowsCapitalN) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Use git?",
+        .type = VarType::Bool,
+        .options = {},
+        .default_value = "false",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_NE(out.str().find("[y/N]"), std::string::npos);
+}
+
+TEST(StdinPrompterTest, BoolNoDefaultShowsLowercaseHint) {
+    std::stringstream in("yes\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Use git?",
+        .type = VarType::Bool,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_NE(out.str().find("[y/n]"), std::string::npos);
+}
+
+TEST(StdinPrompterTest, OptionsRenderAsNumberedMenu) {
+    std::stringstream in("1\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Format?",
+        .type = VarType::String,
+        .options = {"pdf", "html", "latex"},
+        .default_value = "pdf",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(),
+              "Format?\n"
+              "  [1] pdf\n"
+              "  [2] html\n"
+              "  [3] latex\n"
+              "[pdf]: ");
+}
+
+TEST(StdinPrompterTest, BoolInlineHasColon) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Use git?",
+        .type = VarType::Bool,
+        .options = {},
+        .default_value = "true",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "Use git? [Y/n]: ");
+}
+
+TEST(StdinPrompterTest, StringWithDefaultIsSingleLine) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "License?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = "MIT",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "License? [MIT]: ");
+}
+
+TEST(StdinPrompterTest, PreviousErrorPrintedAbovePrompt) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Format?",
+        .type = VarType::String,
+        .options = {"pdf"},
+        .default_value = std::nullopt,
+        .previous_error = "not one of the listed options",
+    };
+    p.prompt(req);
+    std::string s = out.str();
+    auto err_pos = s.find("not one of the listed options");
+    auto prompt_pos = s.find("Format?");
+    ASSERT_NE(err_pos, std::string::npos);
+    ASSERT_NE(prompt_pos, std::string::npos);
+    EXPECT_LT(err_pos, prompt_pos);
+}
+
+TEST(StdinPrompterTest, ColourEnabledEmitsAnsiCodes) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, /*use_colour=*/true);
+    PromptRequest req{
+        .text = "Name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_NE(out.str().find("\x1b["), std::string::npos);
+}
+
+TEST(StdinPrompterTest, ColourDisabledEmitsNoAnsi) {
+    std::stringstream in("x\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Name?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = std::nullopt,
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str().find("\x1b["), std::string::npos);
+}
+
+TEST(StdinPrompterTest, DefaultRenderedWithBrackets) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "License?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = "MIT",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_NE(out.str().find("[MIT]"), std::string::npos);
 }
 
 TEST(LetTest, ArithmeticOverPriorAsk) {

@@ -2,6 +2,7 @@
 #define SPUDPLATE_INTERPRETER_H
 
 #include <cstdint>
+#include <iosfwd>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -76,6 +77,24 @@ class Environment {
 };
 
 /**
+ * @brief Structured description of an `ask` prompt for the prompter to render.
+ *
+ * The interpreter populates this struct from an `AskStmt` and the live
+ * environment, then hands it to the prompter. Rendering — colour, layout,
+ * `[Y/n]` hints, numbered option menus, rejection feedback — is the
+ * prompter's responsibility.
+ */
+struct PromptRequest {
+    std::string text;                         ///< The question text from the `.spud` source.
+    VarType type;                             ///< Expected answer type.
+    std::vector<std::string> options;         ///< Stringified allowed answers; empty means any.
+    std::optional<std::string> default_value; ///< Stringified default; empty means required.
+    std::optional<std::string> previous_error;///< Set on retry; describes why the prior answer was rejected.
+    int question_index{0};                    ///< 1-based position of this question among presented ones; 0 suppresses the counter.
+    int question_total{0};                    ///< Total static `ask` statements in the program; 0 suppresses the counter.
+};
+
+/**
  * @brief Abstract source of user input for `ask` statements.
  */
 class Prompter {
@@ -83,21 +102,33 @@ class Prompter {
     virtual ~Prompter() = default;
 
     /**
-     * @brief Display `message` and obtain the user's raw answer string.
+     * @brief Display the prompt described by `req` and return the user's raw answer.
      *
-     * The interpreter parses the returned string into a `Value` according to
-     * the question's `type` and re-prompts on invalid input — implementations
-     * just deliver one raw line per call.
+     * The interpreter parses the returned string, validates it against type
+     * and options, and on rejection calls back with `previous_error` set.
+     * Implementations deliver one raw line per call.
      */
-    virtual std::string prompt(const std::string& message, VarType type) = 0;
+    virtual std::string prompt(const PromptRequest& req) = 0;
 };
 
 /**
- * @brief Production prompter: writes to stdout and reads a line from stdin.
+ * @brief Production prompter: writes to a stream and reads a line from another.
+ *
+ * Defaults to `std::cin` and `std::cout` with auto-detected colour support
+ * (suppressed when `NO_COLOR` is set or stdout is not a tty). The
+ * stream-injecting constructor exists for tests.
  */
 class StdinPrompter : public Prompter {
   public:
-    std::string prompt(const std::string& message, VarType type) override;
+    StdinPrompter();
+    StdinPrompter(std::istream& in, std::ostream& out, bool use_colour);
+
+    std::string prompt(const PromptRequest& req) override;
+
+  private:
+    std::istream& in_;
+    std::ostream& out_;
+    bool use_colour_;
 };
 
 /**
@@ -112,11 +143,17 @@ class ScriptedPrompter : public Prompter {
     explicit ScriptedPrompter(std::vector<std::string> answers)
         : answers_(std::move(answers)) {}
 
-    std::string prompt(const std::string& message, VarType type) override;
+    std::string prompt(const PromptRequest& req) override;
+
+    /** @brief Most recent request seen, for assertions on rendering inputs. */
+    [[nodiscard]] const std::optional<PromptRequest>& last_request() const {
+        return last_;
+    }
 
   private:
     std::vector<std::string> answers_;
     std::size_t index_{0};
+    std::optional<PromptRequest> last_;
 };
 
 /**
