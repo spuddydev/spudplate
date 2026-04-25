@@ -1908,6 +1908,80 @@ TEST(RunTest, SkipAuthorizationBypassesPrompt) {
     EXPECT_FALSE(prompter.last_authorize_summary().has_value());
 }
 
+TEST(RunTest, InClausePinsCwd) {
+    TmpDir td;
+    auto p = parse(R"(mkdir myapp
+run "touch marker" in myapp
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "myapp" / "marker"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "marker"));
+}
+
+TEST(RunTest, InClauseRestoresCwdAfterRun) {
+    TmpDir td;
+    auto saved = std::filesystem::current_path();
+    auto p = parse(R"(mkdir myapp
+run "touch marker" in myapp
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(std::filesystem::current_path(), saved);
+}
+
+TEST(RunTest, InClauseAcceptsAlias) {
+    TmpDir td;
+    auto p = parse(R"(mkdir myapp as proj
+run "touch marker" in proj
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "myapp" / "marker"));
+}
+
+TEST(RunTest, InClauseAcceptsInterpolation) {
+    TmpDir td;
+    auto p = parse(R"(let dir = "myapp"
+mkdir {dir}
+run "touch marker" in {dir}
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "myapp" / "marker"));
+}
+
+TEST(RunTest, InClauseMissingDirIsRuntimeError) {
+    TmpDir td;
+    auto p = parse(R"(run "echo hi" in nope
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+}
+
+TEST(RunTest, InClauseRestoresCwdOnCommandFailure) {
+    TmpDir td;
+    auto saved = std::filesystem::current_path();
+    auto p = parse(R"(mkdir myapp
+run "false" in myapp
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+    EXPECT_EQ(std::filesystem::current_path(), saved);
+}
+
+TEST(RunTest, AuthorizeSummaryIncludesInClause) {
+    TmpDir td;
+    auto p = parse(R"(mkdir myapp
+run "git init" in myapp
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    ASSERT_TRUE(prompter.last_authorize_summary().has_value());
+    EXPECT_NE(prompter.last_authorize_summary()->find("in myapp"),
+              std::string::npos);
+}
+
 TEST(RunTest, DryRunShowsCommandsButDoesNotExecute) {
     TmpDir td;
     auto p = parse(R"(run "touch should_not_exist"
