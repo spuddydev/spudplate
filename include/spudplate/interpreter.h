@@ -22,6 +22,7 @@ namespace spudplate {
  */
 class RuntimeError : public std::runtime_error {
   public:
+    /** @brief Construct an error tagged with the offending source position. */
     RuntimeError(const std::string& message, int line, int column)
         : std::runtime_error(message), line_(line), column_(column) {}
 
@@ -56,9 +57,12 @@ using Value = std::variant<std::string, std::int64_t, bool>;
  */
 class Environment {
   public:
+    /** @brief Start with one program-level frame already on the stack. */
     Environment() { push(); }
 
+    /** @brief Push a fresh frame for a nested scope (e.g. `repeat` body). */
     void push() { frames_.emplace_back(); }
+    /** @brief Pop the innermost frame, discarding any bindings it held. */
     void pop() { frames_.pop_back(); }
 
     /**
@@ -121,7 +125,10 @@ class Prompter {
  */
 class StdinPrompter : public Prompter {
   public:
+    /** @brief Default constructor: read from `std::cin`, write to `std::cout`,
+     *         auto-detect colour support. */
     StdinPrompter();
+    /** @brief Inject custom streams and explicit colour mode (test-only). */
     StdinPrompter(std::istream& in, std::ostream& out, bool use_colour);
 
     std::string prompt(const PromptRequest& req) override;
@@ -141,6 +148,7 @@ class StdinPrompter : public Prompter {
  */
 class ScriptedPrompter : public Prompter {
   public:
+    /** @brief Construct with the canned answers `prompt` will replay in order. */
     explicit ScriptedPrompter(std::vector<std::string> answers)
         : answers_(std::move(answers)) {}
 

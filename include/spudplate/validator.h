@@ -23,6 +23,7 @@ using TypeMap = std::unordered_map<std::string, VarType>;
  */
 class SemanticError : public std::runtime_error {
   public:
+    /** @brief Construct an error tagged with the offending source position. */
     SemanticError(const std::string& message, int line, int column)
         : std::runtime_error(message), line_(line), column_(column) {}
 

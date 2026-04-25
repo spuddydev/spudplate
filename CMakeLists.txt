@@ -35,8 +35,23 @@ gtest_discover_tests(spudplate_tests)
 # Documentation
 find_package(Doxygen OPTIONAL_COMPONENTS dot)
 if(DOXYGEN_FOUND)
+    # doxygen-awesome-css gives the generated HTML a modern look. Fetched
+    # only when docs are about to be built, kept entirely in the build tree.
+    FetchContent_Declare(
+        dox_awesome
+        GIT_REPOSITORY https://github.com/jothepro/doxygen-awesome-css.git
+        GIT_TAG v2.4.2
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_GetProperties(dox_awesome)
+    if(NOT dox_awesome_POPULATED)
+        FetchContent_Populate(dox_awesome)
+    endif()
+
     add_custom_target(docs
-        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Doxyfile
+        COMMAND ${CMAKE_COMMAND} -E env
+            "DOXYGEN_AWESOME_CSS_DIR=${dox_awesome_SOURCE_DIR}"
+            ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Doxyfile
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Generating API documentation with Doxygen"
         VERBATIM
