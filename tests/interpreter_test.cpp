@@ -5,6 +5,7 @@
 #include <climits>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -223,18 +224,6 @@ TEST(InterpreterTest, EmptyProgramRunsCleanly) {
 }
 
 // --- Every statement type throws "not yet supported" ---
-
-TEST(InterpreterTest, FileThrowsNotYetSupported) {
-    auto program = parse(R"(file foo.txt content "hi"
-)");
-    NullPrompter prompter;
-    try {
-        run(program, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("file"), std::string::npos);
-    }
-}
 
 TEST(InterpreterTest, RepeatThrowsNotYetSupported) {
     auto program = parse(R"(repeat n as i
@@ -807,4 +796,152 @@ TEST(EvalPathTest, MixedSegments) {
     segs.push_back(plit("/notes.md"));
     auto pe = path(std::move(segs));
     EXPECT_EQ(evaluate_path(pe, env, aliases), "my-app/week_2/notes.md");
+}
+
+// --- File content + flush (Part 6) ---
+
+namespace {
+
+std::string read_file(const std::filesystem::path& p) {
+    std::ifstream in(p);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+}  // namespace
+
+TEST(FileTest, ContentLiteral) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt content "hello"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "hello");
+}
+
+TEST(FileTest, ContentInterpolatedFromLet) {
+    TmpDir td;
+    auto p = parse(R"(let name = "world"
+file foo.txt content "hello, " + name
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "hello, world");
+}
+
+TEST(FileTest, FileInsideQueuedDirectory) {
+    TmpDir td;
+    auto p = parse(R"(mkdir x
+file x/foo.txt content "hi"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "x" / "foo.txt"), "hi");
+}
+
+TEST(FileTest, AppendAfterContent) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt content "first"
+file foo.txt append content "second"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "firstsecond");
+}
+
+TEST(FileTest, SamePathTwiceWithoutAppendOverwrites) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt content "A"
+file foo.txt content "B"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "B");
+}
+
+TEST(FileTest, EmptyContent) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt content ""
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "foo.txt"));
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "");
+}
+
+TEST(FileTest, IntContentCoercedToString) {
+    TmpDir td;
+    auto p = parse(R"(let n = 42
+file count.txt content n
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "count.txt"), "42");
+}
+
+TEST(FileTest, BoolContentCoercedToString) {
+    TmpDir td;
+    auto p = parse(R"(file flag.txt content true
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "flag.txt"), "true");
+}
+
+TEST(FileTest, AppendViaAlias) {
+    TmpDir td;
+    auto p = parse(R"(file foo content "A" as f
+file f append content "B"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo"), "AB");
+}
+
+TEST(FileTest, ModeApplied) {
+    TmpDir td;
+    auto p = parse(R"(file run.sh content "echo hi" mode 0755
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    auto perms = std::filesystem::status(td.path() / "run.sh").permissions();
+    EXPECT_EQ(perms, static_cast<std::filesystem::perms>(0755));
+}
+
+TEST(FileTest, RejectsPreExistingFile) {
+    TmpDir td;
+    {
+        std::ofstream out(td.path() / "exists.txt");
+        out << "old";
+    }
+    auto p = parse(R"(file exists.txt content "new"
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+}
+
+TEST(FileTest, FromIsNotYetSupported) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt from src
+)");
+    ScriptedPrompter prompter({});
+    try {
+        run(p, prompter);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& e) {
+        EXPECT_NE(std::string(e.what()).find("not yet supported"),
+                  std::string::npos);
+    }
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo.txt"));
+}
+
+TEST(FileTest, WhenFalseSkips) {
+    TmpDir td;
+    auto p = parse(R"(ask use_f "Use file?" bool
+file foo.txt content "hi" when use_f
+)");
+    ScriptedPrompter prompter({"false"});
+    run(p, prompter);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo.txt"));
 }
