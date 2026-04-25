@@ -1151,6 +1151,88 @@ let slug = lower(trim(project_name))
     EXPECT_EQ(std::get<std::string>(*env.lookup("slug")), "my project");
 }
 
+// --- Universal string-literal interpolation ---
+
+TEST(TemplateStringTest, InterpolatesIdentifierInLet) {
+    auto p = parse(R"(let name = "world"
+let greet = "hello {name}!"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("greet")), "hello world!");
+}
+
+TEST(TemplateStringTest, StringifiesIntInInterpolation) {
+    auto p = parse(R"(let n = 42
+let s = "n={n}"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("s")), "n=42");
+}
+
+TEST(TemplateStringTest, StringifiesBoolInInterpolation) {
+    auto p = parse(R"(let b = true
+let s = "b={b}"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("s")), "b=true");
+}
+
+TEST(TemplateStringTest, ArithmeticInInterpolation) {
+    auto p = parse(R"(let n = 5
+let s = "next={n + 1}"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("s")), "next=6");
+}
+
+TEST(TemplateStringTest, FunctionCallInInterpolation) {
+    auto p = parse(R"(let raw = "  Hi  "
+let s = "[{trim(raw)}]"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("s")), "[Hi]");
+}
+
+TEST(TemplateStringTest, MultipleInterpolations) {
+    auto p = parse(R"(let a = "x"
+let b = 2
+let s = "{a} times {b}"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("s")), "x times 2");
+}
+
+TEST(TemplateStringTest, StringifyOnly) {
+    // `"{n}"` is a single-part template that stringifies n as the entire result.
+    auto p = parse(R"(let n = 7
+let s = "{n}"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("s")), "7");
+}
+
+TEST(TemplateStringTest, RunCommandPreviewKeepsBraceForm) {
+    // The trust prompt shows the literal source — interpolations stay
+    // visible as `{...}` so the user sees what flows into the command.
+    TmpDir td;
+    auto p = parse(R"(let label = "ok"
+run "echo hi {label}"
+)");
+    ScriptedPrompter prompter({});
+    prompter.set_authorize_response(false);
+    run(p, prompter);
+    ASSERT_TRUE(prompter.last_authorize_summary().has_value());
+    EXPECT_NE(prompter.last_authorize_summary()->find("{label}"),
+              std::string::npos);
+}
+
 TEST(ScriptedPrompterTest, ExhaustionThrowsLogicError) {
     auto p = parse(R"(ask name "Name?" string
 )");
@@ -1475,12 +1557,10 @@ TEST(FileTest, ContentBraceMissingVarErrors) {
     EXPECT_THROW(run(p, prompter), spudplate::RuntimeError);
 }
 
-TEST(FileTest, ContentBraceUnclosedErrors) {
-    TmpDir td;
-    auto p = parse(R"(file foo.txt content "{name"
-)");
-    ScriptedPrompter prompter({});
-    EXPECT_THROW(run(p, prompter), spudplate::RuntimeError);
+TEST(FileTest, ContentBraceUnclosedErrorsAtParse) {
+    EXPECT_THROW(parse(R"(file foo.txt content "{name"
+)"),
+                 spudplate::ParseError);
 }
 
 TEST(FileTest, FileInsideQueuedDirectory) {
