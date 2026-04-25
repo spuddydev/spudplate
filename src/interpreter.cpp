@@ -388,7 +388,7 @@ class Interpreter {
                 } else if constexpr (std::is_same_v<T, FileStmt>) {
                     execute_file(s);
                 } else if constexpr (std::is_same_v<T, RepeatStmt>) {
-                    unsupported("repeat", s.line, s.column);
+                    execute_repeat(s);
                 } else if constexpr (std::is_same_v<T, CopyStmt>) {
                     unsupported("copy", s.line, s.column);
                 } else if constexpr (std::is_same_v<T, IncludeStmt>) {
@@ -407,6 +407,63 @@ class Interpreter {
     }
 
   private:
+    void execute_repeat(const RepeatStmt& s) {
+        if (!when_passes(s.when_clause, env_)) {
+            return;
+        }
+        auto count_v = env_.lookup(s.collection_var);
+        if (!count_v.has_value()) {
+            throw RuntimeError("undefined variable '" + s.collection_var + "'",
+                               s.line, s.column);
+        }
+        if (!std::holds_alternative<std::int64_t>(*count_v)) {
+            throw RuntimeError("'repeat' count must be int", s.line, s.column);
+        }
+        std::int64_t count = std::get<std::int64_t>(*count_v);
+        if (count < 0) {
+            return;  // matches n == 0 — empty loop, no throw
+        }
+
+        for (std::int64_t i = 0; i < count; ++i) {
+            // Snapshot which alias names existed before the iteration so we
+            // can drop anything the body adds. Aliases declared in the body
+            // do not leak across iterations or out of the loop.
+            std::unordered_set<std::string> outer_aliases;
+            outer_aliases.reserve(alias_map_.size());
+            for (const auto& kv : alias_map_) {
+                outer_aliases.insert(kv.first);
+            }
+
+            env_.push();
+            env_.declare(s.iterator_var, Value{i});
+            try {
+                for (const auto& stmt : s.body) {
+                    execute(*stmt);
+                }
+            } catch (...) {
+                // Restore scope before propagating; aliases stay restored too.
+                for (auto it = alias_map_.begin(); it != alias_map_.end();) {
+                    if (outer_aliases.find(it->first) == outer_aliases.end()) {
+                        it = alias_map_.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                env_.pop();
+                throw;
+            }
+
+            for (auto it = alias_map_.begin(); it != alias_map_.end();) {
+                if (outer_aliases.find(it->first) == outer_aliases.end()) {
+                    it = alias_map_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            env_.pop();
+        }
+    }
+
     void execute_mkdir(const MkdirStmt& s) {
         if (!when_passes(s.when_clause, env_)) {
             return;
