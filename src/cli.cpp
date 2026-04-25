@@ -78,6 +78,100 @@ std::filesystem::path resolve_template_arg(const std::string& arg,
     return dir / arg / "template.spud";
 }
 
+// Parse and validate `source` so install rejects broken templates before
+// they are copied. Returns true on success; on failure writes a `<file>:`
+// diagnostic to `err` and sets `exit_code` to the appropriate error.
+bool validate_template_source(const std::string& source,
+                              const std::string& file_label,
+                              std::ostream& err, int& exit_code) {
+    try {
+        Lexer lexer(source);
+        Parser parser(std::move(lexer));
+        Program program = parser.parse();
+        validate(program);
+    } catch (const ParseError& e) {
+        print_error(err, file_label, "parse error", e.line(), e.column(),
+                    e.what());
+        exit_code = 2;
+        return false;
+    } catch (const SemanticError& e) {
+        print_error(err, file_label, "semantic error", e.line(), e.column(),
+                    e.what());
+        exit_code = 3;
+        return false;
+    }
+    return true;
+}
+
+int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc - 2 != 1) {
+        print_usage(err);
+        return 1;
+    }
+
+    std::filesystem::path source_path{argv[2]};
+    std::ifstream in(source_path);
+    if (!in) {
+        err << source_path.string() << ": cannot open: " << std::strerror(errno)
+            << "\n";
+        return 5;
+    }
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    std::string source = buffer.str();
+
+    int exit_code = 0;
+    if (!validate_template_source(source, source_path.string(), err,
+                                  exit_code)) {
+        return exit_code;
+    }
+
+    std::filesystem::path home = install_dir();
+    if (home.empty()) {
+        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        return 1;
+    }
+
+    std::string name = source_path.stem().string();
+    if (name.empty()) {
+        err << source_path.string() << ": cannot derive template name\n";
+        return 1;
+    }
+
+    std::filesystem::path target_dir = home / name;
+    if (std::filesystem::exists(target_dir)) {
+        err << name
+            << ": already installed (use 'spudplate uninstall " << name
+            << "' first)\n";
+        return 1;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(target_dir, ec);
+    if (ec) {
+        err << target_dir.string()
+            << ": cannot create install directory: " << ec.message() << "\n";
+        return 1;
+    }
+    std::filesystem::path target_file = target_dir / "template.spud";
+    std::ofstream sink(target_file, std::ios::binary);
+    if (!sink) {
+        err << target_file.string()
+            << ": cannot write: " << std::strerror(errno) << "\n";
+        std::filesystem::remove_all(target_dir, ec);
+        return 1;
+    }
+    sink << source;
+    if (!sink.good()) {
+        err << target_file.string() << ": write failed\n";
+        std::filesystem::remove_all(target_dir, ec);
+        return 1;
+    }
+
+    out << "installed " << name << " to " << target_dir.string() << "\n";
+    return 0;
+}
+
 int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             Prompter& prompter) {
     bool dry_run_mode = false;
@@ -160,6 +254,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     std::string subcommand{argv[1]};
     if (subcommand == "run") {
         return cmd_run(argc, argv, out, err, prompter);
+    }
+    if (subcommand == "install") {
+        return cmd_install(argc, argv, out, err);
     }
     print_usage(err);
     return 1;
