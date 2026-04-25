@@ -76,16 +76,17 @@ let total_days = num_weeks * 7
 
 ### Path expressions
 
-Paths in `mkdir`, `file`, and `copy` are written as **path expressions** — an unquoted sequence of identifiers, slashes, dots, and `{expr}` interpolations.
+Paths in `mkdir`, `file`, and `copy` are written as **path expressions** — an unquoted sequence of identifiers, slashes, dots, hyphens, and `{expr}` interpolations.
 
 ```
 mkdir static/notes
 file static/notes/README.md content ""
 mkdir week_{n}
+mkdir my-project/pre-commit-hooks
 file src/main.cpp from base/main.cpp
 ```
 
-Paths containing spaces must be quoted: `mkdir "my notes"`.
+Hyphens are allowed inside a path but cannot start one — `mkdir -foo` would be ambiguous with the subtraction operator and is rejected. Paths containing spaces must be quoted: `mkdir "my notes"`.
 
 `{expr}` interpolation works directly in unquoted paths: `mkdir week_{n}`, `file {prefix}/README.md`.
 
