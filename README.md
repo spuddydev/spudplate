@@ -33,12 +33,12 @@ ask license "License?" string default "MIT"
 let slug = lower(trim(project_name))
 
 mkdir {slug} as project
-mkdir {project}/src
-mkdir {project}/tests when use_tests
+mkdir project/src
+mkdir project/tests when use_tests
 
-file {project}/README.md content "# " + project_name
-file {project}/src/main.cpp from templates/main.cpp
-file {project}/tests/test_main.cpp from templates/test_main.cpp when use_tests
+file project/README.md content "# " + project_name
+file project/src/main.cpp from templates/main.cpp
+file project/tests/test_main.cpp from templates/test_main.cpp when use_tests
 ```
 
 Spudlang supports questions with defaults and option lists, derived variables, conditional actions, path aliases, loops, and including other installed templates. See [docs/syntax.md](docs/syntax.md) for the full language reference.

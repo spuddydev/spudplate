@@ -345,13 +345,13 @@ let slug = lower(trim(project_name))
 let dir = slug + "-project"
 
 mkdir {dir} as project
-mkdir {project}/src
-mkdir {project}/tests when use_tests
+mkdir project/src
+mkdir project/tests when use_tests
 
-file {project}/README.md content "# " + project_name as readme
+file project/README.md content "# " + project_name as readme
 file {readme} append content "\nLicensed under " + license + "\n"
-file {project}/src/main.cpp from templates/main.cpp
-file {project}/tests/test_main.cpp from templates/test_main.cpp when use_tests
+file project/src/main.cpp from templates/main.cpp
+file project/tests/test_main.cpp from templates/test_main.cpp when use_tests
 
 include claude_setup when use_claude
 ```
