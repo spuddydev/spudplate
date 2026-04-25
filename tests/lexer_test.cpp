@@ -103,6 +103,7 @@ TEST(LexerTest, AllKeywords) {
         {"end", TokenType::END},
         {"verbatim", TokenType::VERBATIM},
         {"run", TokenType::RUN},
+        {"in", TokenType::IN},
         {"mode", TokenType::MODE},
         {"as", TokenType::AS},
         {"and", TokenType::AND},
