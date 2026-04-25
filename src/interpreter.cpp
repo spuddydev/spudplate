@@ -1333,9 +1333,28 @@ void render_pending(std::ostream& out, const std::vector<PendingOp>& pending,
     out << "Would create:\n";
     if (root.children.empty()) {
         out << "  (nothing)\n";
+    } else {
+        render_node(out, root, "", glyphs);
+    }
+
+    bool has_run = false;
+    for (const auto& op : pending) {
+        if (std::holds_alternative<PendingRun>(op)) {
+            has_run = true;
+            break;
+        }
+    }
+    if (!has_run) {
         return;
     }
-    render_node(out, root, "", glyphs);
+    out << "\nWould execute:\n";
+    std::size_t i = 0;
+    for (const auto& op : pending) {
+        if (const auto* r = std::get_if<PendingRun>(&op)) {
+            ++i;
+            out << "  " << i << ". " << r->command << '\n';
+        }
+    }
 }
 
 }  // namespace
