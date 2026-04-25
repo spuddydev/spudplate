@@ -197,7 +197,7 @@ Creates a file at `<path>`, either from a source file (`from`) or from an inline
 
 - `append` — appends to the file instead of overwriting. Without `append`, the file is created fresh (or overwritten if previously created in the same run).
 - `from <source>` — embeds the contents of `<source>` at compile time. `{var}` interpolation is applied at runtime unless `verbatim` is specified.
-- `content <expression>` — inline content. The resulting string is interpolated: any `{var}` occurrence in the value is replaced with the bound variable's value (`content "n={n}"` writes `n=1` when `n` is `1`). String concatenation also works (`content "n=" + name`). An unclosed `{` or an unknown variable name is a runtime error.
+- `content <expression>` — inline content. String literals interpolate `{expr}` like everywhere else (`content "n={n}"` writes `n=1` when `n` is `1`). String concatenation also works (`content "n=" + name`). See **Variable Interpolation** below for the full rules.
 - `mode <octal>` — sets file permissions (e.g., `mode 0644`, `mode 0755`).
 - `when <condition>` — only creates the file if the condition is true.
 - `as <name>` — binds the file path; useful for conditional appends.
@@ -372,10 +372,13 @@ use_tests
 
 ## Variable Interpolation
 
-Interpolation appears in two places with slightly different grammars:
+Spudlang interpolates `{expr}` in three places:
 
-- **Path expressions** support full `{expr}` interpolation (`mkdir week_{n}`, `mkdir {prefix}/notes`).
-- **`content` values**, **`from` source files**, and files copied by `copy` support only bare `{ident}` substitution — no function calls, no arithmetic, no string concatenation inside the braces. For richer values in a `content` expression, use string concatenation (`content "v" + version`). Use `verbatim` (on `from` and `copy`) to copy file contents byte-for-byte without any substitution. A literal `{` or `}` in a non-verbatim source is a runtime error; switch the statement to `verbatim` if you need literal braces.
+- **String literals** in any expression — `let s = "hello {name}"`, `run "echo {label}"`, `ask q "{prompt_for}?" string`. The full expression grammar applies inside the braces (identifiers, arithmetic, function calls, string concatenation). Each interpolation result is stringified and concatenated with the surrounding literal text. Brace pairs are balanced, so `{f({x})}` parses as a single interpolation. A `"` inside an interpolation closes the surrounding string literal — keep the inner expression to identifiers and operations on them, or bind a value with `let` first.
+- **Path expressions** in `mkdir`, `file`, `copy` — `mkdir week_{n}`, `mkdir {prefix}/notes`. Same expression grammar, with no surrounding quotes.
+- **`from` source files** and files copied by `copy` — only bare `{ident}` substitution is applied to file contents read from disk; no function calls or arithmetic inside the braces. Use `verbatim` to copy file contents byte-for-byte without any substitution. A literal `{` or `}` in a non-verbatim source is a runtime error; switch the statement to `verbatim` if you need literal braces.
+
+Errors are surfaced at parse time where possible: an unclosed `{`, an empty `{}`, or an interpolation whose contents don't parse as an expression all stop the build before the run begins. An interpolation that references an undeclared name surfaces in the validator the same as any other expression.
 
 ---
 
