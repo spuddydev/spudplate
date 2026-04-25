@@ -8,6 +8,22 @@
 
 Write a `.spud` file in spudlang, install it once, and run it whenever you want to scaffold a new project. The interpreter prompts the user and creates files and directories based on their answers.
 
+> **Pre-1.0.** spudplate works end to end but breaking changes are expected before `v1.0`. Pin to a specific release if you need stability.
+
+## Install
+
+One-liner (Linux x86_64, macOS arm64):
+
+```
+curl -fsSL https://raw.githubusercontent.com/spuddydev/spudplate/main/install.sh | sh
+```
+
+Drops the binary in `~/.local/bin`. Set `PREFIX=/usr/local` (and run with `sudo`) to install system-wide, or `VERSION=v0.1.0` to pin to a tag.
+
+Alternatives:
+- Download a binary from the [releases page](https://github.com/spuddydev/spudplate/releases) and put it on your `PATH`. `SHA256SUMS` is published alongside.
+- Build from source — see [Build](#build) below, then `sudo cmake --install build`.
+
 ## How it works
 
 1. Write a `.spud` file describing your template
