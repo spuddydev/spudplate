@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # required to create and upload to a GitHub Release
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            asset_name: spudplate-linux-x86_64
+          - os: macos-14
+            asset_name: spudplate-darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Strip
+        run: strip build/spudplate
+
+      - name: Stage binary
+        run: cp build/spudplate ${{ matrix.asset_name }}
+
+      - name: Checksum
+        run: shasum -a 256 ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage release assets
+        run: |
+          set -eu
+          mkdir -p release
+          find artifacts -type f -name 'spudplate-*' ! -name '*.sha256' -exec cp {} release/ \;
+          (cd release && find ../artifacts -name '*.sha256' -exec cat {} \;) > release/SHA256SUMS
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            **Pre-1.0 release.** The CLI surface is reasonably stable but breaking changes are expected before `v1.0`.
+
+            Install with:
+            ```
+            curl -fsSL https://raw.githubusercontent.com/spuddydev/spudplate/main/install.sh | sh
+            ```
+
+            Or download a binary directly from the assets below and put it on your `PATH`. Verify with `shasum -a 256 -c SHA256SUMS`.
