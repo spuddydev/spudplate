@@ -1,5 +1,6 @@
 #include "spudplate/cli.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "spudplate/interpreter.h"
 #include "spudplate/lexer.h"
@@ -172,6 +174,81 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     return 0;
 }
 
+int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc != 2) {
+        print_usage(err);
+        return 1;
+    }
+    std::filesystem::path home = install_dir();
+    if (home.empty()) {
+        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        return 1;
+    }
+    if (!std::filesystem::is_directory(home)) {
+        return 0;  // No installs yet — empty output, success.
+    }
+    std::vector<std::string> names;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
+        if (entry.is_directory() &&
+            std::filesystem::is_regular_file(entry.path() / "template.spud")) {
+            names.push_back(entry.path().filename().string());
+        }
+    }
+    std::sort(names.begin(), names.end());
+    for (const auto& n : names) {
+        out << n << "\n";
+    }
+    return 0;
+}
+
+int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc - 2 != 1) {
+        print_usage(err);
+        return 1;
+    }
+    std::string name{argv[2]};
+    std::filesystem::path home = install_dir();
+    if (home.empty()) {
+        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        return 1;
+    }
+    std::filesystem::path file_path = home / name / "template.spud";
+    std::ifstream in(file_path);
+    if (!in) {
+        err << name << ": not installed\n";
+        return 5;
+    }
+    out << in.rdbuf();
+    return 0;
+}
+
+int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc - 2 != 1) {
+        print_usage(err);
+        return 1;
+    }
+    std::string name{argv[2]};
+    std::filesystem::path home = install_dir();
+    if (home.empty()) {
+        err << "cannot determine install directory: set SPUDPLATE_HOME or HOME\n";
+        return 1;
+    }
+    std::filesystem::path target = home / name;
+    if (!std::filesystem::is_directory(target)) {
+        err << name << ": not installed\n";
+        return 5;
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(target, ec);
+    if (ec) {
+        err << name << ": cannot remove: " << ec.message() << "\n";
+        return 1;
+    }
+    out << "uninstalled " << name << "\n";
+    return 0;
+}
+
 int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             Prompter& prompter) {
     bool dry_run_mode = false;
@@ -257,6 +334,15 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
     if (subcommand == "install") {
         return cmd_install(argc, argv, out, err);
+    }
+    if (subcommand == "list") {
+        return cmd_list(argc, argv, out, err);
+    }
+    if (subcommand == "inspect") {
+        return cmd_inspect(argc, argv, out, err);
+    }
+    if (subcommand == "uninstall") {
+        return cmd_uninstall(argc, argv, out, err);
     }
     print_usage(err);
     return 1;
