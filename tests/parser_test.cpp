@@ -31,6 +31,7 @@ using spudplate::Program;
 using spudplate::RepeatStmt;
 using spudplate::StmtPtr;
 using spudplate::StringLiteralExpr;
+using spudplate::TemplateStringExpr;
 using spudplate::TokenType;
 using spudplate::UnaryExpr;
 using spudplate::VarType;
@@ -518,6 +519,90 @@ TEST(ParserTest, AssignDispatchedFromProgram) {
     std::get<LetStmt>(program.statements[0]->data);
     auto& a = std::get<AssignStmt>(program.statements[1]->data);
     EXPECT_EQ(a.name, "n");
+}
+
+// --- String-literal template parsing ---
+
+TEST(ParserTest, PlainStringStaysLiteral) {
+    auto e = parse_expr(R"("hello")");
+    auto& lit = std::get<StringLiteralExpr>(e->data);
+    EXPECT_EQ(lit.value, "hello");
+}
+
+TEST(ParserTest, EmptyStringStaysLiteral) {
+    auto e = parse_expr(R"("")");
+    auto& lit = std::get<StringLiteralExpr>(e->data);
+    EXPECT_EQ(lit.value, "");
+}
+
+TEST(ParserTest, SingleInterpolationProducesTemplate) {
+    auto e = parse_expr(R"("hello {name}")");
+    auto& tpl = std::get<TemplateStringExpr>(e->data);
+    ASSERT_EQ(tpl.parts.size(), 2u);
+    EXPECT_EQ(std::get<std::string>(tpl.parts[0]), "hello ");
+    auto& id = std::get<IdentifierExpr>(
+        std::get<ExprPtr>(tpl.parts[1])->data);
+    EXPECT_EQ(id.name, "name");
+}
+
+TEST(ParserTest, SoleInterpolationHasOnlyExprPart) {
+    auto e = parse_expr(R"("{n}")");
+    auto& tpl = std::get<TemplateStringExpr>(e->data);
+    ASSERT_EQ(tpl.parts.size(), 1u);
+    auto& id = std::get<IdentifierExpr>(
+        std::get<ExprPtr>(tpl.parts[0])->data);
+    EXPECT_EQ(id.name, "n");
+}
+
+TEST(ParserTest, MultipleInterpolations) {
+    auto e = parse_expr(R"("{a} and {b}!")");
+    auto& tpl = std::get<TemplateStringExpr>(e->data);
+    ASSERT_EQ(tpl.parts.size(), 4u);
+    auto& a = std::get<IdentifierExpr>(
+        std::get<ExprPtr>(tpl.parts[0])->data);
+    EXPECT_EQ(a.name, "a");
+    EXPECT_EQ(std::get<std::string>(tpl.parts[1]), " and ");
+    auto& b = std::get<IdentifierExpr>(
+        std::get<ExprPtr>(tpl.parts[2])->data);
+    EXPECT_EQ(b.name, "b");
+    EXPECT_EQ(std::get<std::string>(tpl.parts[3]), "!");
+}
+
+TEST(ParserTest, InterpolationWithArithmetic) {
+    auto e = parse_expr(R"("week {n + 1}")");
+    auto& tpl = std::get<TemplateStringExpr>(e->data);
+    ASSERT_EQ(tpl.parts.size(), 2u);
+    auto& bin = std::get<BinaryExpr>(
+        std::get<ExprPtr>(tpl.parts[1])->data);
+    EXPECT_EQ(bin.op, TokenType::PLUS);
+}
+
+TEST(ParserTest, InterpolationWithFunctionCall) {
+    auto e = parse_expr(R"("slug={lower(name)}")");
+    auto& tpl = std::get<TemplateStringExpr>(e->data);
+    ASSERT_EQ(tpl.parts.size(), 2u);
+    auto& call = std::get<FunctionCallExpr>(
+        std::get<ExprPtr>(tpl.parts[1])->data);
+    EXPECT_EQ(call.name, "lower");
+}
+
+TEST(ParserTest, NestedBracesInInterpolation) {
+    // Brace-balanced scanning so the inner `{ }` doesn't close the outer.
+    auto e = parse_expr(R"("{a + b}")");
+    auto& tpl = std::get<TemplateStringExpr>(e->data);
+    EXPECT_EQ(tpl.parts.size(), 1u);
+}
+
+TEST(ParserTest, UnclosedBraceErrors) {
+    EXPECT_THROW(parse_expr(R"("hello {name")"), ParseError);
+}
+
+TEST(ParserTest, EmptyBraceErrors) {
+    EXPECT_THROW(parse_expr(R"("hello {}")"), ParseError);
+}
+
+TEST(ParserTest, GarbageInterpolationErrors) {
+    EXPECT_THROW(parse_expr(R"("hello {1 +}")"), ParseError);
 }
 
 // --- Mkdir statement tests ---

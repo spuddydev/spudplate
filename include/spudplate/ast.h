@@ -78,9 +78,26 @@ struct FunctionCallExpr {
     int column;  ///< 1-based source column where this node begins.
 };
 
+/**
+ * @brief A string literal containing one or more `{expr}` interpolations.
+ *
+ * Produced by the parser when a `"..."` string literal contains any
+ * `{...}` segment. Each `parts` entry is either a literal string fragment
+ * (the text between braces) or an expression to evaluate and stringify.
+ * Evaluation concatenates the stringified parts in order. A plain string
+ * literal (no `{...}`) parses as a `StringLiteralExpr`; this type is used
+ * only when at least one interpolation is present.
+ */
+struct TemplateStringExpr {
+    std::vector<std::variant<std::string, ExprPtr>> parts;  ///< Ordered literal/expression segments.
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
+};
+
 /** @brief Discriminated union of all expression node types. */
 using ExprData = std::variant<StringLiteralExpr, IntegerLiteralExpr, BoolLiteralExpr,
-                              IdentifierExpr, UnaryExpr, BinaryExpr, FunctionCallExpr>;
+                              IdentifierExpr, UnaryExpr, BinaryExpr, FunctionCallExpr,
+                              TemplateStringExpr>;
 
 /** @brief An expression node wrapping an ExprData variant. */
 struct Expr {

@@ -613,6 +613,34 @@ TEST(ValidatorTest, ReassignOutOfScopeLetIsError) {
     EXPECT_THROW(validate(program), spudplate::SemanticError);
 }
 
+// --- String-literal template scoping ---
+
+TEST(ValidatorTest, TemplateInLetReferencesDeclaredVar) {
+    auto program = parse(
+        "let n = 1\n"
+        "let m = \"value={n}\"\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, TemplateReferencingUndeclaredOutOfScopeIsError) {
+    auto program = parse(
+        "let n = 3\n"
+        "repeat n as i\n"
+        "  let local = 0\n"
+        "end\n"
+        "let s = \"value={local}\"\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
+TEST(ValidatorTest, TemplateInWhenInRunIsWalked) {
+    auto program = parse(
+        "let n = 1\n"
+        "repeat n as i\n"
+        "end\n"
+        "run \"echo {i}\"\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
 TEST(ValidatorTest, ComposedRulesEndToEnd) {
     // Exercises Part A (repeat when), Part B (no ask-in-repeat — valid case),
     // Part C (nested let scoping), and Part E (bool-equivalent alias when).
