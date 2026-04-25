@@ -333,14 +333,29 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter) {
 }
 
 Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
-    Value arg = evaluate_expr(*fc.argument, env);
-    if (!std::holds_alternative<std::string>(arg)) {
-        type_error(std::string{"function '"} + fc.name +
-                       "' requires string argument, got " + type_name(arg),
-                   fc.line, fc.column);
-    }
-    const std::string& s = std::get<std::string>(arg);
+    auto require_arity = [&](size_t expected) {
+        if (fc.arguments.size() != expected) {
+            type_error("function '" + fc.name + "' takes " +
+                           std::to_string(expected) + " argument(s), got " +
+                           std::to_string(fc.arguments.size()),
+                       fc.line, fc.column);
+        }
+    };
+
+    auto eval_string_arg = [&](const Expr& e, size_t idx) -> std::string {
+        Value v = evaluate_expr(e, env);
+        if (!std::holds_alternative<std::string>(v)) {
+            type_error("function '" + fc.name + "' argument " +
+                           std::to_string(idx + 1) +
+                           " must be string, got " + type_name(v),
+                       fc.line, fc.column);
+        }
+        return std::get<std::string>(std::move(v));
+    };
+
     if (fc.name == "lower") {
+        require_arity(1);
+        std::string s = eval_string_arg(*fc.arguments[0], 0);
         std::string out;
         out.reserve(s.size());
         for (char c : s) {
@@ -350,6 +365,8 @@ Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
         return Value{out};
     }
     if (fc.name == "upper") {
+        require_arity(1);
+        std::string s = eval_string_arg(*fc.arguments[0], 0);
         std::string out;
         out.reserve(s.size());
         for (char c : s) {
@@ -359,6 +376,8 @@ Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
         return Value{out};
     }
     if (fc.name == "trim") {
+        require_arity(1);
+        std::string s = eval_string_arg(*fc.arguments[0], 0);
         auto start = std::find_if_not(s.begin(), s.end(), [](unsigned char c) {
             return std::isspace(c) != 0;
         });
@@ -366,6 +385,30 @@ Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
                        return std::isspace(c) != 0;
                    }).base();
         return Value{(start < end) ? std::string{start, end} : std::string{}};
+    }
+    if (fc.name == "replace") {
+        require_arity(3);
+        std::string s = eval_string_arg(*fc.arguments[0], 0);
+        std::string from = eval_string_arg(*fc.arguments[1], 1);
+        std::string to = eval_string_arg(*fc.arguments[2], 2);
+        if (from.empty()) {
+            type_error("function 'replace' search string must be non-empty",
+                       fc.line, fc.column);
+        }
+        std::string out;
+        out.reserve(s.size());
+        size_t pos = 0;
+        while (pos < s.size()) {
+            size_t found = s.find(from, pos);
+            if (found == std::string::npos) {
+                out.append(s, pos, std::string::npos);
+                break;
+            }
+            out.append(s, pos, found - pos);
+            out.append(to);
+            pos = found + from.size();
+        }
+        return Value{std::move(out)};
     }
     type_error("unknown function '" + fc.name + "'", fc.line, fc.column);
 }
