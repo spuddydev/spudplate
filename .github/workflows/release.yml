@@ -64,7 +64,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
-          prerelease: true
           generate_release_notes: true
           body: |
             **Pre-1.0 release.** The CLI surface is reasonably stable but breaking changes are expected before `v1.0`.
