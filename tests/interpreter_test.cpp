@@ -871,7 +871,7 @@ TEST(StdinPrompterTest, BoolDefaultTrueShowsCapitalY) {
     };
     p.prompt(req);
     EXPECT_NE(out.str().find("[Y/n]"), std::string::npos);
-    EXPECT_EQ(out.str().find("[default:"), std::string::npos);
+    EXPECT_EQ(out.str().find("[true]"), std::string::npos);
 }
 
 TEST(StdinPrompterTest, BoolDefaultFalseShowsCapitalN) {
@@ -921,7 +921,7 @@ TEST(StdinPrompterTest, OptionsRenderAsNumberedMenu) {
               "  [1] pdf\n"
               "  [2] html\n"
               "  [3] latex\n"
-              "[default: pdf]: ");
+              "[pdf]: ");
 }
 
 TEST(StdinPrompterTest, BoolInlineHasColon) {
@@ -951,7 +951,7 @@ TEST(StdinPrompterTest, StringWithDefaultIsSingleLine) {
         .previous_error = std::nullopt,
     };
     p.prompt(req);
-    EXPECT_EQ(out.str(), "License? [default: MIT]: ");
+    EXPECT_EQ(out.str(), "License? [MIT]: ");
 }
 
 TEST(StdinPrompterTest, PreviousErrorPrintedAbovePrompt) {
@@ -1016,7 +1016,7 @@ TEST(StdinPrompterTest, DefaultRenderedWithBrackets) {
         .previous_error = std::nullopt,
     };
     p.prompt(req);
-    EXPECT_NE(out.str().find("[default: MIT]"), std::string::npos);
+    EXPECT_NE(out.str().find("[MIT]"), std::string::npos);
 }
 
 TEST(LetTest, ArithmeticOverPriorAsk) {

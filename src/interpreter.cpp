@@ -686,9 +686,11 @@ bool detect_colour_support() {
 
 constexpr const char* kReset = "\x1b[0m";
 constexpr const char* kBold = "\x1b[1m";
-constexpr const char* kDim = "\x1b[2m";
+constexpr const char* kDim = "\x1b[38;5;250m";  // light grey
 constexpr const char* kRed = "\x1b[31m";
-constexpr const char* kYellow = "\x1b[33m";
+// Single source of truth for the accent colour used on counter, option
+// numbers, and the input colon. Swap this one constant to retheme.
+constexpr const char* kAccent = "\x1b[38;5;226m";  // pure bright yellow
 
 std::string wrap(const std::string& s, const char* code, bool on) {
     if (!on) {
@@ -715,12 +717,12 @@ void render_request(std::ostream& out, const PromptRequest& req,
 
     bool has_options = !req.options.empty();
     bool is_bool_inline = req.type == VarType::Bool && !has_options;
-    std::string colon = wrap(":", kYellow, use_colour);
+    std::string colon = wrap(":", kAccent, use_colour);
 
     if (req.question_total > 0 && req.question_index > 0) {
         std::string counter = "(" + std::to_string(req.question_index) + "/" +
                               std::to_string(req.question_total) + ") ";
-        out << wrap(counter, kYellow, use_colour);
+        out << wrap(counter, kAccent, use_colour);
     }
 
     out << wrap(req.text, kBold, use_colour);
@@ -729,11 +731,11 @@ void render_request(std::ostream& out, const PromptRequest& req,
         out << '\n';
         for (std::size_t i = 0; i < req.options.size(); ++i) {
             std::string marker = "[" + std::to_string(i + 1) + "]";
-            out << "  " << wrap(marker, kYellow, use_colour) << ' '
+            out << "  " << wrap(marker, kAccent, use_colour) << ' '
                 << req.options[i] << '\n';
         }
         if (req.default_value.has_value()) {
-            out << wrap("[default: " + *req.default_value + "]", kDim,
+            out << wrap("[" + *req.default_value + "]", kDim,
                         use_colour);
         }
         out << colon << ' ' << std::flush;
@@ -741,10 +743,11 @@ void render_request(std::ostream& out, const PromptRequest& req,
     }
 
     if (is_bool_inline) {
-        out << ' ' << bool_hint(req.default_value);
+        out << ' '
+            << wrap(bool_hint(req.default_value), kDim, use_colour);
     } else if (req.default_value.has_value()) {
         out << ' '
-            << wrap("[default: " + *req.default_value + "]", kDim, use_colour);
+            << wrap("[" + *req.default_value + "]", kDim, use_colour);
     }
 
     out << colon << ' ' << std::flush;
