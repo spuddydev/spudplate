@@ -705,6 +705,18 @@ TEST(MkdirTest, CreatesDirectory) {
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "my_project"));
 }
 
+TEST(MkdirTest, HyphenatedDirectoryName) {
+    TmpDir td;
+    auto p = parse(R"(mkdir my-project
+mkdir my-project/pre-commit-hooks
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "my-project"));
+    EXPECT_TRUE(std::filesystem::is_directory(
+        td.path() / "my-project" / "pre-commit-hooks"));
+}
+
 TEST(MkdirTest, MkdirP) {
     TmpDir td;
     auto p = parse(R"(mkdir a/b/c
