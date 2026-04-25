@@ -36,6 +36,27 @@ std::optional<Value> Environment::lookup(const std::string& name) const {
 
 namespace {
 
+// Deferred-write queue entries. The interpreter never touches the filesystem
+// during statement execution; mkdir and file statements push one of these and
+// the flush step at the end of a run executes them in order.
+struct PendingMkdir {
+    std::string path;
+    std::optional<int> mode;
+    int line;
+    int column;
+};
+
+struct PendingFile {
+    std::string path;
+    std::string content;
+    bool append;
+    std::optional<int> mode;
+    int line;
+    int column;
+};
+
+using PendingOp = std::variant<PendingMkdir, PendingFile>;
+
 // Until Part 4 lands, the Prompter forward-declared in the header has no
 // concrete implementation. The skeleton interpreter never reaches a code
 // path that calls it (every statement throws "not yet supported" first).
@@ -248,6 +269,7 @@ class Interpreter {
 
   private:
     Environment env_;
+    std::vector<PendingOp> pending_;
 };
 
 void run_program(const Program& program, Prompter& /*prompter*/,
@@ -285,6 +307,32 @@ Value evaluate_expr(const Expr& expr, const Environment& env) {
             }
         },
         expr.data);
+}
+
+std::string evaluate_path(const PathExpr& path, const Environment& env,
+                          const AliasMap& aliases) {
+    std::string out;
+    for (const auto& seg : path.segments) {
+        std::visit(
+            [&](const auto& s) {
+                using T = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<T, PathLiteral>) {
+                    out += s.value;
+                } else if constexpr (std::is_same_v<T, PathVar>) {
+                    auto it = aliases.find(s.name);
+                    if (it == aliases.end()) {
+                        throw RuntimeError(
+                            "internal error: unbound path alias '" + s.name + "'",
+                            s.line, s.column);
+                    }
+                    out += it->second;
+                } else if constexpr (std::is_same_v<T, PathInterp>) {
+                    out += value_to_string(evaluate_expr(*s.expression, env));
+                }
+            },
+            seg);
+    }
+    return out;
 }
 
 std::string value_to_string(const Value& value) {

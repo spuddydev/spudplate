@@ -133,6 +133,28 @@ Value evaluate_expr(const Expr& expr, const Environment& env);
  */
 std::string value_to_string(const Value& value);
 
+/**
+ * @brief Resolved bindings for path aliases declared by `as` clauses.
+ *
+ * Maps the alias name to the already-resolved destination path string. The
+ * parser guarantees that `PathVar` segments only ever name a registered alias,
+ * so the evaluator never falls back to an environment lookup for them.
+ */
+using AliasMap = std::unordered_map<std::string, std::string>;
+
+/**
+ * @brief Evaluate a path expression to a flat string.
+ *
+ * Concatenates segment outputs verbatim (the parser already embeds `/` and
+ * `.` inside `PathLiteral.value`, so no separator insertion is needed).
+ * `PathInterp` segments evaluate their inner expression and stringify the
+ * result via `value_to_string`. `PathVar` segments look up the alias name in
+ * `aliases`; an unbound alias is a defensive runtime error since the
+ * validator already guarantees presence in well-formed programs.
+ */
+std::string evaluate_path(const PathExpr& path, const Environment& env,
+                          const AliasMap& aliases);
+
 }  // namespace spudplate
 
 #endif  // SPUDPLATE_INTERPRETER_H
