@@ -22,7 +22,8 @@ ask <name> "<prompt>" <type> [options <v1> <v2> ...] [default <value>] [when <co
 
 Declares a variable `<name>` and asks the user a question at runtime.
 
-- A question is **required** unless it has a `default` value. With a `default`, the user may skip the prompt (empty input) and the default literal is used in its place.
+- A question is **required** unless it has a `default` value. With a `default`, the user may skip the prompt (empty input) and the default value is used in its place.
+- The `default` accepts any expression — a literal, a previously declared variable, or a computed expression like `lower(trim(project_name))`. The expression is evaluated against the live environment when the user skips the prompt.
 - `options` restricts valid answers to a fixed set, presented as a numbered menu.
 - `when <condition>` only asks the question if the condition is true.
 - `ask` is **not allowed inside a `repeat` block**.
@@ -44,6 +45,9 @@ ask license "License?" string default "MIT"
 ask num_weeks "How many weeks?" int when use_tests
 ask format "Output format?" string options "pdf" "html" "latex" default "pdf"
 ask postgres_version "Postgres version?" int options 15 16 17
+
+ask project_name "Project name?" string
+ask slug "Slug?" string default lower(trim(project_name))
 ```
 
 ---
