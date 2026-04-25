@@ -18,6 +18,7 @@ namespace spudplate {
  */
 class ParseError : public std::runtime_error {
   public:
+    /** @brief Construct an error tagged with the offending source position. */
     ParseError(const std::string& message, int line, int column)
         : std::runtime_error(message), line_(line), column_(column) {}
 

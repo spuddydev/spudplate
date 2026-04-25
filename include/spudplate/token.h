@@ -82,8 +82,10 @@ struct Token {
     int line;           ///< 1-based source line number.
     int column;         ///< 1-based source column number.
 
+    /** @brief Default-construct an EOF token at position 0:0. */
     Token() : type(TokenType::EOF_TOKEN), line(0), column(0) {}
 
+    /** @brief Construct a token with explicit type, lexeme, and source position. */
     Token(TokenType type, std::string value, int line, int column)
         : type(type), value(std::move(value)), line(line), column(column) {}
 };
