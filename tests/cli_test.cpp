@@ -305,3 +305,40 @@ TEST(CliTest, InstallMissingFileExitsFive) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 5);
 }
+
+// --- run by installed name ---
+
+TEST(CliTest, RunByNameLooksUpInstalledTemplate) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "ask name \"Project name?\" string\nmkdir {name}\n");
+    {
+        Argv install_args({"spudplate", "install", src.string()});
+        std::stringstream o;
+        std::stringstream e;
+        ScriptedPrompter p({});
+        ASSERT_EQ(cli_main(install_args.argc(), install_args.argv(), o, e, p), 0)
+            << e.str();
+    }
+    Argv run_args({"spudplate", "run", "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({"my_project"});
+    int code = cli_main(run_args.argc(), run_args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "my_project"));
+}
+
+TEST(CliTest, RunByUnknownNameExitsFive) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "run", "ghost"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+}
