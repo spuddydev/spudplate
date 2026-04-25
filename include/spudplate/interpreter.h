@@ -77,10 +77,6 @@ class Environment {
 
 /**
  * @brief Abstract source of user input for `ask` statements.
- *
- * Concrete subclasses (`StdinPrompter` for production, `ScriptedPrompter` for
- * tests) are added when `ask` execution lands. The base interface is exposed
- * now so callers can pass any subclass to `run`.
  */
 class Prompter {
   public:
@@ -90,11 +86,37 @@ class Prompter {
      * @brief Display `message` and obtain the user's raw answer string.
      *
      * The interpreter parses the returned string into a `Value` according to
-     * the question's `type`. Implementations may re-prompt internally if the
-     * caller signals invalid input by ignoring the return value, but normally
-     * the loop lives in the interpreter, not here.
+     * the question's `type` and re-prompts on invalid input — implementations
+     * just deliver one raw line per call.
      */
     virtual std::string prompt(const std::string& message, VarType type) = 0;
+};
+
+/**
+ * @brief Production prompter: writes to stdout and reads a line from stdin.
+ */
+class StdinPrompter : public Prompter {
+  public:
+    std::string prompt(const std::string& message, VarType type) override;
+};
+
+/**
+ * @brief Test prompter: replays a fixed sequence of canned answers.
+ *
+ * Constructed with a vector of strings; each call to `prompt` consumes the
+ * next answer. Calling `prompt` after the queue is exhausted throws
+ * `std::logic_error`, so test retry-loop bugs cannot hang.
+ */
+class ScriptedPrompter : public Prompter {
+  public:
+    explicit ScriptedPrompter(std::vector<std::string> answers)
+        : answers_(std::move(answers)) {}
+
+    std::string prompt(const std::string& message, VarType type) override;
+
+  private:
+    std::vector<std::string> answers_;
+    std::size_t index_{0};
 };
 
 /**

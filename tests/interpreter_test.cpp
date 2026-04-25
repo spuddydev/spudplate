@@ -38,6 +38,7 @@ using spudplate::Prompter;
 using spudplate::run;
 using spudplate::run_for_tests;
 using spudplate::RuntimeError;
+using spudplate::ScriptedPrompter;
 using spudplate::StringLiteralExpr;
 using spudplate::TokenType;
 using spudplate::UnaryExpr;
@@ -189,30 +190,6 @@ TEST(InterpreterTest, EmptyProgramRunsCleanly) {
 }
 
 // --- Every statement type throws "not yet supported" ---
-
-TEST(InterpreterTest, AskThrowsNotYetSupported) {
-    auto program = parse(R"(ask name "Project name?" string
-)");
-    NullPrompter prompter;
-    try {
-        run(program, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("ask"), std::string::npos);
-    }
-}
-
-TEST(InterpreterTest, LetThrowsNotYetSupported) {
-    auto program = parse(R"(let x = 1
-)");
-    NullPrompter prompter;
-    try {
-        run(program, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("let"), std::string::npos);
-    }
-}
 
 TEST(InterpreterTest, MkdirThrowsNotYetSupported) {
     auto program = parse(R"(mkdir foo
@@ -571,6 +548,117 @@ TEST(EvalPathTest, UnboundAliasThrows) {
         EXPECT_EQ(ex.line(), 5);
         EXPECT_EQ(ex.column(), 9);
     }
+}
+
+// --- Ask + Let execution (Part 4) ---
+
+TEST(AskTest, StringAnswerIsBound) {
+    auto p = parse(R"(ask name "Project name?" string
+)");
+    ScriptedPrompter prompter({"my-project"});
+    Environment env = run_for_tests(p, prompter);
+    auto v = env.lookup("name");
+    ASSERT_TRUE(v.has_value());
+    EXPECT_EQ(std::get<std::string>(*v), "my-project");
+}
+
+TEST(AskTest, BoolAnswerCaseInsensitive) {
+    auto p = parse(R"(ask flag "Enable?" bool
+)");
+    ScriptedPrompter t({"true"});
+    EXPECT_TRUE(std::get<bool>(*run_for_tests(p, t).lookup("flag")));
+    ScriptedPrompter f({"FALSE"});
+    EXPECT_FALSE(std::get<bool>(*run_for_tests(p, f).lookup("flag")));
+}
+
+TEST(AskTest, IntAnswer) {
+    auto p = parse(R"(ask n "How many?" int
+)");
+    ScriptedPrompter prompter({"42"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("n")), 42);
+}
+
+TEST(AskTest, EmptyInputUsesDefault) {
+    auto p = parse(R"(ask license "License?" string default "MIT"
+)");
+    ScriptedPrompter prompter({""});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("license")), "MIT");
+}
+
+TEST(AskTest, EmptyInputWithoutDefaultRePrompts) {
+    auto p = parse(R"(ask name "Name?" string
+)");
+    ScriptedPrompter prompter({"", "MyProj"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("name")), "MyProj");
+}
+
+TEST(AskTest, StringOptionsRetryUntilValid) {
+    auto p = parse(R"(ask format "Format?" string options "pdf" "html"
+)");
+    ScriptedPrompter prompter({"foo", "pdf"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("format")), "pdf");
+}
+
+TEST(AskTest, IntOptionsAcceptNumericMatch) {
+    auto p = parse(R"(ask v "Version?" int options 15 16 17
+)");
+    ScriptedPrompter prompter({"15"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("v")), 15);
+}
+
+TEST(AskTest, WhenSkipsAsk) {
+    auto p = parse(R"(ask use_x "Use X?" bool
+ask name "Name?" string when use_x
+)");
+    ScriptedPrompter prompter({"false"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_FALSE(env.lookup("name").has_value());
+}
+
+TEST(AskTest, BadBoolRetries) {
+    auto p = parse(R"(ask flag "Enable?" bool
+)");
+    ScriptedPrompter prompter({"maybe", "true"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_TRUE(std::get<bool>(*env.lookup("flag")));
+}
+
+TEST(AskTest, BadIntRetries) {
+    auto p = parse(R"(ask n "How many?" int
+)");
+    ScriptedPrompter prompter({"abc", "7"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("n")), 7);
+}
+
+TEST(LetTest, ArithmeticOverPriorAsk) {
+    auto p = parse(R"(ask n "n?" int
+let m = n + 1
+)");
+    ScriptedPrompter prompter({"10"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("m")), 11);
+}
+
+TEST(LetTest, StringFunctionsCompose) {
+    auto p = parse(R"(ask project_name "Name?" string
+let slug = lower(trim(project_name))
+)");
+    ScriptedPrompter prompter({"  My Project  "});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("slug")), "my project");
+}
+
+TEST(ScriptedPrompterTest, ExhaustionThrowsLogicError) {
+    auto p = parse(R"(ask name "Name?" string
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run_for_tests(p, prompter), std::logic_error);
 }
 
 TEST(EvalPathTest, MixedSegments) {
