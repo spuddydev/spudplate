@@ -389,11 +389,16 @@ StmtPtr Parser::parseCopy() {
 StmtPtr Parser::parseRun() {
     Token start = expect(TokenType::RUN, "expected 'run'");
     auto command = parseExpression();
+    std::optional<PathExpr> cwd;
+    if (match(TokenType::IN)) {
+        cwd = parse_path_expr();
+    }
     auto when_clause = parse_when_clause();
     expect_newline("run statement");
 
     auto stmt = std::make_unique<Stmt>();
     stmt->data = RunStmt{.command = std::move(command),
+                         .cwd = std::move(cwd),
                          .when_clause = std::move(when_clause),
                          .line = start.line,
                          .column = start.column};
