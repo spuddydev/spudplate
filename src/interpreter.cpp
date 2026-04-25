@@ -80,12 +80,14 @@ struct PendingCheckDir {
 
 // A `run` statement queued for flush-time execution. The command stored
 // here is the *evaluated* expression result — what /bin/sh -c will run.
-// The user authorised the literal source at the start of the run, before
-// any expression evaluated. Source-vs-resolved drift (the shell-injection
-// surface for `run "git clone " + url` patterns) is documented as a known
-// caveat rather than mitigated at this layer.
+// `cwd` is the optional resolved working directory from the `in <path>`
+// clause. The user authorised the literal source at the start of the run,
+// before any expression evaluated. Source-vs-resolved drift (the shell-
+// injection surface for `run "git clone " + url` patterns) is documented
+// as a known caveat rather than mitigated at this layer.
 struct PendingRun {
     std::string command;
+    std::optional<std::string> cwd;
     int line;
     int column;
 };
@@ -464,6 +466,27 @@ std::string preview_expr(const Expr& expr) {
 // and append a one-line preview of each command's source-form expression
 // to `out`. Repeat-internal commands are tagged so the user knows they
 // may run multiple times — or not at all.
+// Render a path expression as a readable approximation of its source. Used
+// by the trust prompt to surface the `in <path>` clause on `run` statements.
+std::string preview_path(const PathExpr& path) {
+    std::string out;
+    for (const auto& seg : path.segments) {
+        std::visit(
+            [&](const auto& s) {
+                using T = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<T, PathLiteral>) {
+                    out += s.value;
+                } else if constexpr (std::is_same_v<T, PathVar>) {
+                    out += s.name;
+                } else if constexpr (std::is_same_v<T, PathInterp>) {
+                    out += "{" + preview_expr(*s.expression) + "}";
+                }
+            },
+            seg);
+    }
+    return out;
+}
+
 void collect_run_previews(const std::vector<StmtPtr>& body,
                           std::vector<std::string>& out, bool inside_repeat) {
     for (const auto& stmt : body) {
@@ -472,6 +495,9 @@ void collect_run_previews(const std::vector<StmtPtr>& body,
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, RunStmt>) {
                     std::string line = preview_expr(*s.command);
+                    if (s.cwd.has_value()) {
+                        line += " in " + preview_path(*s.cwd);
+                    }
                     if (inside_repeat) {
                         line += "  (inside repeat — may run 0 or many times)";
                     }
@@ -790,7 +816,12 @@ class Interpreter {
             throw RuntimeError("'run' command must evaluate to a string",
                                s.line, s.column);
         }
+        std::optional<std::string> cwd;
+        if (s.cwd.has_value()) {
+            cwd = evaluate_path(*s.cwd, env_, alias_map_);
+        }
         pending_.push_back(PendingRun{.command = std::get<std::string>(v),
+                                      .cwd = std::move(cwd),
                                       .line = s.line,
                                       .column = s.column});
     }
@@ -914,7 +945,35 @@ class Interpreter {
     void run_op(const PendingRun& op) const {
         // /bin/sh -c is what std::system invokes on POSIX. Output streams
         // through to stdout/stderr inherited from the parent. A non-zero
-        // exit aborts the rest of the flush.
+        // exit aborts the rest of the flush. If `op.cwd` is set, the chdir
+        // is restored on every exit path via the destructor.
+        struct ChdirScope {
+            std::filesystem::path saved;
+            bool active{false};
+            ~ChdirScope() {
+                if (active) {
+                    std::error_code ec;
+                    std::filesystem::current_path(saved, ec);
+                }
+            }
+        };
+        ChdirScope scope;
+        if (op.cwd.has_value()) {
+            std::error_code ec;
+            scope.saved = std::filesystem::current_path(ec);
+            if (ec) {
+                throw RuntimeError(
+                    "cannot read current directory: " + ec.message(), op.line,
+                    op.column);
+            }
+            std::filesystem::current_path(*op.cwd, ec);
+            if (ec) {
+                throw RuntimeError("cannot chdir to '" + *op.cwd + "' for run: " +
+                                       ec.message(),
+                                   op.line, op.column);
+            }
+            scope.active = true;
+        }
         int rc = std::system(op.command.c_str());
         if (rc == -1) {
             throw RuntimeError("failed to invoke shell for command '" +
@@ -1352,7 +1411,11 @@ void render_pending(std::ostream& out, const std::vector<PendingOp>& pending,
     for (const auto& op : pending) {
         if (const auto* r = std::get_if<PendingRun>(&op)) {
             ++i;
-            out << "  " << i << ". " << r->command << '\n';
+            out << "  " << i << ". " << r->command;
+            if (r->cwd.has_value()) {
+                out << " (in " << *r->cwd << ")";
+            }
+            out << '\n';
         }
     }
 }
