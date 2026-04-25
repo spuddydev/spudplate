@@ -530,6 +530,23 @@ TEST(ValidatorTest, RunReferencesIteratorOutsideRepeatIsError) {
     EXPECT_THROW(validate(program), spudplate::SemanticError);
 }
 
+TEST(ValidatorTest, RunInClauseReferencesAlias) {
+    auto program = parse(
+        "mkdir myapp as proj\n"
+        "run \"git init\" in proj\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, RunInClauseReferencesPoppedAliasIsError) {
+    auto program = parse(
+        "let n = 1\n"
+        "repeat n as i\n"
+        "  mkdir foo as bar\n"
+        "end\n"
+        "run \"echo hi\" in bar\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
 TEST(ValidatorTest, RunWhenReferencesIteratorOutsideRepeatIsError) {
     auto program = parse(
         "let n = 1\n"
