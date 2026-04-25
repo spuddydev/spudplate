@@ -27,7 +27,7 @@ spudplate uninstall my_template         # remove
 spudplate export my_template -o my_template.spudpack
 ```
 
-The install root is `$SPUDPLATE_HOME` if set, otherwise `$HOME/.spudplate`.
+The install root is `$SPUDPLATE_HOME` if set, otherwise `$XDG_DATA_HOME/spudplate` (default `~/.local/share/spudplate` on most systems).
 
 ## Example
 
