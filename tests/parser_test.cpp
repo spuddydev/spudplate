@@ -346,6 +346,29 @@ TEST(ParserTest, AskDefaultWrongTypeLiteral) {
                  ParseError);
 }
 
+TEST(ParserTest, AskDefaultComputedExpression) {
+    auto stmt = parse_ask(
+        "ask slug \"Slug?\" string default lower(trim(project_name))\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_TRUE(ask.default_value.has_value());
+    EXPECT_TRUE(std::holds_alternative<FunctionCallExpr>((*ask.default_value)->data));
+}
+
+TEST(ParserTest, AskDefaultVariableReference) {
+    auto stmt = parse_ask("ask alt \"Alt?\" string default project_name\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_TRUE(ask.default_value.has_value());
+    auto& var = std::get<IdentifierExpr>((*ask.default_value)->data);
+    EXPECT_EQ(var.name, "project_name");
+}
+
+TEST(ParserTest, AskDefaultConcatenation) {
+    auto stmt = parse_ask("ask dir \"Dir?\" string default slug + \"-app\"\n");
+    auto& ask = std::get<AskStmt>(stmt->data);
+    ASSERT_TRUE(ask.default_value.has_value());
+    EXPECT_TRUE(std::holds_alternative<BinaryExpr>((*ask.default_value)->data));
+}
+
 TEST(ParserTest, AskOptionsWrongTypeLiteral) {
     EXPECT_THROW(parse_ask("ask version \"Version?\" int options 1 \"two\"\n"),
                  ParseError);

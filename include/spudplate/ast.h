@@ -161,7 +161,7 @@ struct AskStmt {
     std::string name;                         ///< Variable name to bind the answer to.
     std::string prompt;                       ///< The prompt string shown to the user.
     VarType var_type;                         ///< Expected type of the answer.
-    std::optional<ExprPtr> default_value;     ///< Literal used when the user skips the prompt.
+    std::optional<ExprPtr> default_value;     ///< Expression evaluated when the user skips the prompt.
     std::vector<ExprPtr> options;             ///< Allowed literal values; empty means any.
     std::optional<ExprPtr> when_clause;       ///< Optional condition guarding the prompt.
     int line;

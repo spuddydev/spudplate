@@ -584,6 +584,42 @@ TEST(AskTest, EmptyInputUsesDefault) {
     EXPECT_EQ(std::get<std::string>(*env.lookup("license")), "MIT");
 }
 
+TEST(AskTest, ComputedDefaultUsesPriorAnswer) {
+    auto p = parse(R"(ask project_name "Project?" string
+ask slug "Slug?" string default lower(trim(project_name))
+)");
+    ScriptedPrompter prompter({"  Hello World  ", ""});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("slug")), "hello world");
+}
+
+TEST(AskTest, ComputedDefaultStillOverridable) {
+    auto p = parse(R"(ask project_name "Project?" string
+ask slug "Slug?" string default lower(project_name)
+)");
+    ScriptedPrompter prompter({"MyProj", "custom"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("slug")), "custom");
+}
+
+TEST(AskTest, ComputedDefaultStringConcat) {
+    auto p = parse(R"(ask base "Base?" string
+ask dir "Dir?" string default base + "-app"
+)");
+    ScriptedPrompter prompter({"foo", ""});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("dir")), "foo-app");
+}
+
+TEST(AskTest, ComputedDefaultIntArithmetic) {
+    auto p = parse(R"(ask weeks "Weeks?" int
+ask days "Days?" int default weeks * 7
+)");
+    ScriptedPrompter prompter({"3", ""});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("days")), 21);
+}
+
 TEST(AskTest, EmptyInputWithoutDefaultRePrompts) {
     auto p = parse(R"(ask name "Name?" string
 )");
