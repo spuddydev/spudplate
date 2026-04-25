@@ -16,7 +16,7 @@ namespace spudplate {
 namespace {
 
 void print_usage(std::ostream& err) {
-    err << "usage: spudplate run <file.spud>\n";
+    err << "usage: spudplate run [--dry-run] <file.spud>\n";
 }
 
 void print_error(std::ostream& err, const std::string& file, const char* kind,
@@ -27,19 +27,30 @@ void print_error(std::ostream& err, const std::string& file, const char* kind,
 
 }  // namespace
 
-int cli_main(int argc, char* argv[], std::ostream& /*out*/, std::ostream& err,
+int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
              Prompter& prompter) {
     if (argc < 2) {
         print_usage(err);
         return 1;
     }
     std::string subcommand{argv[1]};
-    if (subcommand != "run" || argc != 3) {
+    if (subcommand != "run") {
         print_usage(err);
         return 1;
     }
 
-    std::string file_path{argv[2]};
+    bool dry_run_mode = false;
+    int positional_start = 2;
+    if (argc >= 3 && std::string{argv[2]} == "--dry-run") {
+        dry_run_mode = true;
+        positional_start = 3;
+    }
+    if (argc - positional_start != 1) {
+        print_usage(err);
+        return 1;
+    }
+
+    std::string file_path{argv[positional_start]};
     std::ifstream in(file_path);
     if (!in) {
         err << file_path << ": cannot open: " << std::strerror(errno) << "\n";
@@ -69,7 +80,11 @@ int cli_main(int argc, char* argv[], std::ostream& /*out*/, std::ostream& err,
     }
 
     try {
-        run(program, prompter);
+        if (dry_run_mode) {
+            dry_run(program, prompter, out);
+        } else {
+            run(program, prompter);
+        }
     } catch (const RuntimeError& e) {
         print_error(err, file_path, "runtime error", e.line(), e.column(),
                     e.what());
