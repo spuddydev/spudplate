@@ -163,6 +163,13 @@ class TmpDir {
     std::filesystem::path prev_;
 };
 
+std::string read_file(const std::filesystem::path& p) {
+    std::ifstream in(p);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
 }  // namespace
 
 // --- RuntimeError shape ---
@@ -236,19 +243,7 @@ TEST(InterpreterTest, EmptyProgramRunsCleanly) {
     EXPECT_NO_THROW(run(empty, prompter));
 }
 
-// --- Every statement type throws "not yet supported" ---
-
-TEST(InterpreterTest, CopyThrowsNotYetSupported) {
-    auto program = parse(R"(copy src into dst
-)");
-    NullPrompter prompter;
-    try {
-        run(program, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("copy"), std::string::npos);
-    }
-}
+// --- Statement types still pending an implementation ---
 
 TEST(InterpreterTest, IncludeThrowsNotYetSupported) {
     auto program = parse(R"(include claude_setup
@@ -1239,26 +1234,83 @@ TEST(MkdirTest, RejectsPreExistingPath) {
     EXPECT_THROW(run(p, prompter), RuntimeError);
 }
 
-TEST(MkdirTest, FromIsNotYetSupported) {
+TEST(MkdirTest, FromMissingSourceThrows) {
     TmpDir td;
     auto p = parse(R"(mkdir foo from base
 )");
     ScriptedPrompter prompter({});
-    try {
-        run(p, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("not yet supported"),
-                  std::string::npos);
-    }
+    EXPECT_THROW(run(p, prompter), RuntimeError);
     // The `from` rejection happens during execution, before flush — nothing
     // was written.
     EXPECT_FALSE(std::filesystem::exists(td.path() / "foo"));
 }
 
+TEST(MkdirTest, FromCopiesSourceTree) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src" / "sub");
+    {
+        std::ofstream(td.path() / "src" / "top.txt") << "top";
+    }
+    {
+        std::ofstream(td.path() / "src" / "sub" / "nested.txt") << "nested";
+    }
+    auto p = parse(R"(mkdir dst from src
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "dst"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "dst" / "sub"));
+    EXPECT_EQ(read_file(td.path() / "dst" / "top.txt"), "top");
+    EXPECT_EQ(read_file(td.path() / "dst" / "sub" / "nested.txt"), "nested");
+}
+
+TEST(MkdirTest, FromInterpolatesFileContents) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "readme.md") << "# {name}";
+    }
+    auto p = parse(R"(let name = "spudplate"
+mkdir dst from src
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "dst" / "readme.md"), "# spudplate");
+}
+
+TEST(MkdirTest, FromVerbatimSuppressesInterpolation) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "raw.txt") << "{name} stays";
+    }
+    auto p = parse(R"(let name = "ignored"
+mkdir dst from src verbatim
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "dst" / "raw.txt"), "{name} stays");
+}
+
+TEST(MkdirTest, FromBindsAlias) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "a.txt") << "x";
+    }
+    auto p = parse(R"(mkdir dst from src as out
+file out/extra.txt content "extra"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "dst" / "a.txt"), "x");
+    EXPECT_EQ(read_file(td.path() / "dst" / "extra.txt"), "extra");
+}
+
 TEST(MkdirTest, DeferredWriteAtomicityOnPreFlushFailure) {
     TmpDir td;
-    // First mkdir queues; second throws on `from` before any flush runs.
+    // First mkdir queues; second's `from` walk throws on missing source
+    // before any flush runs, so neither directory ends up on disk.
     auto p = parse(R"(mkdir a
 mkdir b from base
 )");
@@ -1298,17 +1350,6 @@ TEST(EvalPathTest, MixedSegments) {
 }
 
 // --- File content + flush (Part 6) ---
-
-namespace {
-
-std::string read_file(const std::filesystem::path& p) {
-    std::ifstream in(p);
-    std::stringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
-}
-
-}  // namespace
 
 TEST(FileTest, ContentLiteral) {
     TmpDir td;
@@ -1420,19 +1461,92 @@ TEST(FileTest, RejectsPreExistingFile) {
     EXPECT_THROW(run(p, prompter), RuntimeError);
 }
 
-TEST(FileTest, FromIsNotYetSupported) {
+TEST(FileTest, FromCopiesSourceContents) {
     TmpDir td;
-    auto p = parse(R"(file foo.txt from src
+    {
+        std::ofstream out(td.path() / "src.txt");
+        out << "from-source content";
+    }
+    auto p = parse(R"(file foo.txt from src.txt
 )");
     ScriptedPrompter prompter({});
-    try {
-        run(p, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("not yet supported"),
-                  std::string::npos);
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "from-source content");
+}
+
+TEST(FileTest, FromInterpolatesIdentifiers) {
+    TmpDir td;
+    {
+        std::ofstream out(td.path() / "src.txt");
+        out << "hello, {who}!";
     }
+    auto p = parse(R"(let who = "world"
+file foo.txt from src.txt
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "hello, world!");
+}
+
+TEST(FileTest, FromVerbatimSkipsInterpolation) {
+    TmpDir td;
+    {
+        std::ofstream out(td.path() / "src.txt");
+        out << "literal {braces}";
+    }
+    auto p = parse(R"(file foo.txt from src.txt verbatim
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "literal {braces}");
+}
+
+TEST(FileTest, FromUnknownIdentInterpolationThrows) {
+    TmpDir td;
+    {
+        std::ofstream out(td.path() / "src.txt");
+        out << "{missing}";
+    }
+    auto p = parse(R"(file foo.txt from src.txt
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
     EXPECT_FALSE(std::filesystem::exists(td.path() / "foo.txt"));
+}
+
+TEST(FileTest, FromMissingSourceThrows) {
+    TmpDir td;
+    auto p = parse(R"(file foo.txt from nope.txt
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo.txt"));
+}
+
+TEST(FileTest, FromAppendsToFile) {
+    TmpDir td;
+    {
+        std::ofstream out(td.path() / "src.txt");
+        out << "B";
+    }
+    auto p = parse(R"(file foo.txt content "A"
+file foo.txt append from src.txt
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "foo.txt"), "AB");
+}
+
+TEST(FileTest, FromUnclosedBraceThrows) {
+    TmpDir td;
+    {
+        std::ofstream out(td.path() / "src.txt");
+        out << "oops {name";
+    }
+    auto p = parse(R"(file foo.txt from src.txt
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
 }
 
 TEST(FileTest, WhenFalseSkips) {
@@ -1443,6 +1557,126 @@ file foo.txt content "hi" when use_f
     ScriptedPrompter prompter({"false"});
     run(p, prompter);
     EXPECT_FALSE(std::filesystem::exists(td.path() / "foo.txt"));
+}
+
+// --- Copy ---
+
+TEST(CopyTest, MergesIntoExistingDir) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "a.txt") << "a";
+    }
+    auto p = parse(R"(mkdir dst
+copy src into dst
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "dst" / "a.txt"), "a");
+}
+
+TEST(CopyTest, MissingDestinationFailsAtFlush) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "a.txt") << "a";
+    }
+    auto p = parse(R"(copy src into dst
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "dst"));
+}
+
+TEST(CopyTest, MissingSourceThrows) {
+    TmpDir td;
+    auto p = parse(R"(mkdir dst
+copy nope into dst
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "dst"));
+}
+
+TEST(CopyTest, MergesMultipleSources) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src1");
+    std::filesystem::create_directories(td.path() / "src2");
+    {
+        std::ofstream(td.path() / "src1" / "a.txt") << "a";
+    }
+    {
+        std::ofstream(td.path() / "src2" / "b.txt") << "b";
+    }
+    auto p = parse(R"(mkdir dst
+copy src1 into dst
+copy src2 into dst
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "dst" / "a.txt"), "a");
+    EXPECT_EQ(read_file(td.path() / "dst" / "b.txt"), "b");
+}
+
+TEST(CopyTest, RecursesIntoSubdirectories) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src" / "deep");
+    {
+        std::ofstream(td.path() / "src" / "deep" / "x.txt") << "x";
+    }
+    auto p = parse(R"(mkdir dst
+copy src into dst
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "dst" / "deep"));
+    EXPECT_EQ(read_file(td.path() / "dst" / "deep" / "x.txt"), "x");
+}
+
+TEST(CopyTest, InterpolatesByDefault) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "f.txt") << "hello {who}";
+    }
+    auto p = parse(R"(let who = "you"
+mkdir dst
+copy src into dst
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "dst" / "f.txt"), "hello you");
+}
+
+TEST(CopyTest, VerbatimSuppressesInterpolation) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "f.txt") << "{who}";
+    }
+    auto p = parse(R"(let who = "ignored"
+mkdir dst
+copy src into dst verbatim
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "dst" / "f.txt"), "{who}");
+}
+
+TEST(CopyTest, WhenFalseSkips) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "src");
+    {
+        std::ofstream(td.path() / "src" / "f.txt") << "x";
+    }
+    auto p = parse(R"(ask flag "Copy?" bool
+mkdir dst
+copy src into dst when flag
+)");
+    ScriptedPrompter prompter({"false"});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "dst"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "dst" / "f.txt"));
 }
 
 // --- Repeat (Part 7) ---
