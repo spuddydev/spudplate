@@ -185,6 +185,12 @@ void walk_expr(const Expr& expr, const Scope& scope) {
                 for (const auto& arg : e.arguments) {
                     walk_expr(*arg, scope);
                 }
+            } else if constexpr (std::is_same_v<T, TemplateStringExpr>) {
+                for (const auto& p : e.parts) {
+                    if (std::holds_alternative<ExprPtr>(p)) {
+                        walk_expr(*std::get<ExprPtr>(p), scope);
+                    }
+                }
             }
             // String, Integer, Bool literals have no children.
         },
@@ -365,6 +371,20 @@ ExprPtr clone_expr(const Expr& expr) {
                                                   .arguments = std::move(cloned_args),
                                                   .line = n.line,
                                                   .column = n.column});
+            } else if constexpr (std::is_same_v<T, TemplateStringExpr>) {
+                std::vector<std::variant<std::string, ExprPtr>> cloned_parts;
+                cloned_parts.reserve(n.parts.size());
+                for (const auto& p : n.parts) {
+                    if (std::holds_alternative<std::string>(p)) {
+                        cloned_parts.emplace_back(std::get<std::string>(p));
+                    } else {
+                        cloned_parts.emplace_back(
+                            clone_expr(*std::get<ExprPtr>(p)));
+                    }
+                }
+                return make_expr(TemplateStringExpr{.parts = std::move(cloned_parts),
+                                                    .line = n.line,
+                                                    .column = n.column});
             }
         },
         expr.data);
@@ -442,6 +462,25 @@ bool exprs_equal(const Expr& a, const Expr& b) {
                 }
                 for (size_t i = 0; i < ax.arguments.size(); ++i) {
                     if (!exprs_equal(*ax.arguments[i], *bx.arguments[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            } else if constexpr (std::is_same_v<T, TemplateStringExpr>) {
+                if (ax.parts.size() != bx.parts.size()) {
+                    return false;
+                }
+                for (size_t i = 0; i < ax.parts.size(); ++i) {
+                    if (ax.parts[i].index() != bx.parts[i].index()) {
+                        return false;
+                    }
+                    if (std::holds_alternative<std::string>(ax.parts[i])) {
+                        if (std::get<std::string>(ax.parts[i]) !=
+                            std::get<std::string>(bx.parts[i])) {
+                            return false;
+                        }
+                    } else if (!exprs_equal(*std::get<ExprPtr>(ax.parts[i]),
+                                            *std::get<ExprPtr>(bx.parts[i]))) {
                         return false;
                     }
                 }
