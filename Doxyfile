@@ -17,6 +17,15 @@ EXTRACT_STATIC         = YES
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 
+# doxygen-awesome-css theme. CMake injects DOXYGEN_AWESOME_CSS_DIR via the
+# `docs` target so the path resolves to the FetchContent-populated source
+# directory. HTML_COLORSTYLE must be LIGHT for the theme to apply.
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_COLORSTYLE        = LIGHT
+HTML_EXTRA_STYLESHEET  = $(DOXYGEN_AWESOME_CSS_DIR)/doxygen-awesome.css
+
 GENERATE_LATEX         = NO
 
 QUIET                  = YES
