@@ -1091,29 +1091,48 @@ void insert_path(DryRunNode& root, const std::string& path, bool is_dir,
     }
 }
 
+struct TreeGlyphs {
+    const char* tee;       // child with siblings below
+    const char* corner;    // last child
+    const char* vertical;  // continuation through ancestor with siblings below
+    const char* gap;       // continuation through ancestor that was last
+};
+
+constexpr TreeGlyphs kUtf8Glyphs{
+    .tee = "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 ",   // ├──
+    .corner = "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 ",  // └──
+    .vertical = "\xe2\x94\x82   ",                       // │
+    .gap = "    ",
+};
+
+constexpr TreeGlyphs kAsciiGlyphs{
+    .tee = "|-- ",
+    .corner = "\\-- ",
+    .vertical = "|   ",
+    .gap = "    ",
+};
+
 void render_node(std::ostream& out, const DryRunNode& node,
-                 const std::string& prefix) {
+                 const std::string& prefix, const TreeGlyphs& glyphs) {
     std::size_t i = 0;
     const std::size_t n = node.children.size();
     for (const auto& [name, child] : node.children) {
         bool last = (i + 1 == n);
-        out << prefix << (last ? "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80 "
-                               : "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 ")
-            << name;
+        out << prefix << (last ? glyphs.corner : glyphs.tee) << name;
         if (child.is_dir) {
             out << '/';
         } else if (child.is_append) {
             out << " (append)";
         }
         out << '\n';
-        std::string next_prefix =
-            prefix + (last ? "    " : "\xe2\x94\x82   ");
-        render_node(out, child, next_prefix);
+        std::string next_prefix = prefix + (last ? glyphs.gap : glyphs.vertical);
+        render_node(out, child, next_prefix, glyphs);
         ++i;
     }
 }
 
-void render_pending(std::ostream& out, const std::vector<PendingOp>& pending) {
+void render_pending(std::ostream& out, const std::vector<PendingOp>& pending,
+                    const TreeGlyphs& glyphs) {
     DryRunNode root;
     for (const auto& op : pending) {
         std::visit(
@@ -1136,18 +1155,41 @@ void render_pending(std::ostream& out, const std::vector<PendingOp>& pending) {
         out << "  (nothing)\n";
         return;
     }
-    render_node(out, root, "");
+    render_node(out, root, "", glyphs);
 }
 
 }  // namespace
 
-void dry_run(const Program& program, Prompter& prompter, std::ostream& out) {
+bool locale_is_utf8() {
+    for (const char* var : {"LC_ALL", "LC_CTYPE", "LANG"}) {
+        const char* value = std::getenv(var);
+        if (value == nullptr || value[0] == '\0') {
+            continue;
+        }
+        std::string s(value);
+        for (auto& c : s) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (s.find("utf-8") != std::string::npos ||
+            s.find("utf8") != std::string::npos) {
+            return true;
+        }
+        // The first set variable wins; an explicitly non-UTF-8 locale should
+        // not be overridden by a later UTF-8 fallback.
+        return false;
+    }
+    return false;
+}
+
+void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
+             bool ascii_only) {
     Interpreter interp(prompter);
     interp.set_ask_total(count_ask_statements(program));
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
-    render_pending(out, interp.pending());
+    render_pending(out, interp.pending(),
+                   ascii_only ? kAsciiGlyphs : kUtf8Glyphs);
 }
 
 }  // namespace spudplate

@@ -183,10 +183,25 @@ Environment run_for_tests(const Program& program, Prompter& prompter);
  * been created to `out`. `copy` destination-existence checks are skipped
  * (they would always fail in dry-run since nothing was written).
  *
+ * Tree glyphs default to UTF-8 box drawing (`├──`/`└──`/`│  `). Pass
+ * `ascii_only = true` to fall back to plain ASCII (`|--`/`\\--`/`|  `) for
+ * terminals that don't render the box-drawing characters cleanly.
+ *
  * Throws `RuntimeError` on any failure that `run` would also throw before
  * the flush step.
  */
-void dry_run(const Program& program, Prompter& prompter, std::ostream& out);
+void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
+             bool ascii_only = false);
+
+/**
+ * @brief Heuristic check: does the current environment look UTF-8 capable?
+ *
+ * Looks at `LC_ALL`, `LC_CTYPE`, `LANG` (in that order) and returns true if
+ * any contains "UTF-8" or "utf8" (case-insensitive). Used by the CLI to
+ * decide whether to render the dry-run tree with UTF-8 box-drawing glyphs
+ * or fall back to ASCII.
+ */
+bool locale_is_utf8();
 
 /**
  * @brief Evaluate an expression against an environment.

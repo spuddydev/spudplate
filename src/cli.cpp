@@ -81,7 +81,7 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
 
     try {
         if (dry_run_mode) {
-            dry_run(program, prompter, out);
+            dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8());
         } else {
             run(program, prompter);
         }
