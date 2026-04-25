@@ -17,6 +17,8 @@
 #include <utility>
 #include <variant>
 
+#include <unistd.h>
+
 #include "spudplate/ast.h"
 #include "spudplate/token.h"
 
@@ -246,10 +248,10 @@ std::optional<Value> parse_answer(const std::string& raw, VarType type) {
     }
     if (type == VarType::Bool) {
         std::string lc = ascii_lower(raw);
-        if (lc == "true") {
+        if (lc == "true" || lc == "yes" || lc == "y") {
             return Value{true};
         }
-        if (lc == "false") {
+        if (lc == "false" || lc == "no" || lc == "n") {
             return Value{false};
         }
         return std::nullopt;
@@ -270,6 +272,40 @@ std::optional<Value> parse_answer(const std::string& raw, VarType type) {
     }
 }
 
+// If raw parses as a 1-based index into options, return the corresponding
+// option string. Otherwise return raw unchanged.
+std::string apply_option_index(const std::string& raw,
+                               const std::vector<std::string>& options) {
+    if (options.empty() || raw.empty()) {
+        return raw;
+    }
+    for (char c : raw) {
+        if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
+            return raw;
+        }
+    }
+    try {
+        std::size_t idx = std::stoul(raw);
+        if (idx >= 1 && idx <= options.size()) {
+            return options[idx - 1];
+        }
+    } catch (...) {
+    }
+    return raw;
+}
+
+const char* expected_message(VarType type) {
+    switch (type) {
+        case VarType::Bool:
+            return "expected yes or no";
+        case VarType::Int:
+            return "expected an integer";
+        case VarType::String:
+            return "invalid input";
+    }
+    return "invalid input";
+}
+
 void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter) {
     if (!when_passes(stmt.when_clause, env)) {
         return;
@@ -286,32 +322,31 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter) {
         option_strings.push_back(value_to_string(evaluate_expr(*opt, env)));
     }
 
-    std::string message = stmt.prompt;
-    if (!option_strings.empty()) {
-        message += " [";
-        for (std::size_t i = 0; i < option_strings.size(); ++i) {
-            if (i != 0) {
-                message += ", ";
-            }
-            message += option_strings[i];
-        }
-        message += "]";
-    }
-    if (default_value.has_value()) {
-        message += " (default: " + value_to_string(*default_value) + ")";
-    }
+    PromptRequest req{
+        .text = stmt.prompt,
+        .type = stmt.var_type,
+        .options = option_strings,
+        .default_value =
+            default_value.has_value()
+                ? std::optional<std::string>{value_to_string(*default_value)}
+                : std::nullopt,
+        .previous_error = std::nullopt,
+    };
 
     while (true) {
-        std::string raw = prompter.prompt(message, stmt.var_type);
+        std::string raw = prompter.prompt(req);
         if (raw.empty()) {
             if (default_value.has_value()) {
                 env.declare(stmt.name, *default_value);
                 return;
             }
-            continue;  // required question, re-prompt
+            req.previous_error = "this question is required";
+            continue;
         }
-        auto parsed = parse_answer(raw, stmt.var_type);
+        std::string mapped = apply_option_index(raw, option_strings);
+        auto parsed = parse_answer(mapped, stmt.var_type);
         if (!parsed.has_value()) {
+            req.previous_error = expected_message(stmt.var_type);
             continue;
         }
         if (!option_strings.empty()) {
@@ -324,6 +359,7 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter) {
                 }
             }
             if (!match) {
+                req.previous_error = "not one of the listed options";
                 continue;
             }
         }
@@ -619,16 +655,90 @@ void run_program(const Program& program, Interpreter& interp) {
 
 }  // namespace
 
-std::string StdinPrompter::prompt(const std::string& message,
-                                  VarType /*type*/) {
-    std::cout << message << ": " << std::flush;
+namespace {
+
+bool detect_colour_support() {
+    const char* nc = std::getenv("NO_COLOR");
+    if (nc != nullptr && nc[0] != '\0') {
+        return false;
+    }
+    return ::isatty(::fileno(stdout)) != 0;
+}
+
+constexpr const char* kReset = "\x1b[0m";
+constexpr const char* kBold = "\x1b[1m";
+constexpr const char* kDim = "\x1b[2m";
+constexpr const char* kRed = "\x1b[31m";
+constexpr const char* kCyan = "\x1b[36m";
+
+std::string wrap(const std::string& s, const char* code, bool on) {
+    if (!on) {
+        return s;
+    }
+    return std::string{code} + s + kReset;
+}
+
+std::string bool_hint(const std::optional<std::string>& default_value) {
+    if (!default_value.has_value()) {
+        return "[y/n]";
+    }
+    if (*default_value == "true") {
+        return "[Y/n]";
+    }
+    return "[y/N]";
+}
+
+void render_request(std::ostream& out, const PromptRequest& req,
+                    bool use_colour) {
+    if (req.previous_error.has_value()) {
+        out << wrap("> " + *req.previous_error, kRed, use_colour) << '\n';
+    }
+
+    out << wrap(req.text, kBold, use_colour);
+
+    if (req.type == VarType::Bool && req.options.empty()) {
+        out << ' ' << wrap(bool_hint(req.default_value), kDim, use_colour);
+    }
+
+    if (!req.options.empty()) {
+        out << '\n';
+        for (std::size_t i = 0; i < req.options.size(); ++i) {
+            std::string entry =
+                "  [" + std::to_string(i + 1) + "] " + req.options[i];
+            out << wrap(entry, kDim, use_colour) << '\n';
+        }
+    }
+
+    if (req.default_value.has_value()) {
+        std::string hint;
+        if (req.type == VarType::Bool && req.options.empty()) {
+            // [Y/n] already encodes the default — skip the explicit hint.
+        } else {
+            hint = " [default: " + *req.default_value + "]";
+            out << wrap(hint, kDim, use_colour);
+        }
+    }
+
+    out << '\n' << wrap("> ", kCyan, use_colour) << std::flush;
+}
+
+}  // namespace
+
+StdinPrompter::StdinPrompter()
+    : in_(std::cin), out_(std::cout), use_colour_(detect_colour_support()) {}
+
+StdinPrompter::StdinPrompter(std::istream& in, std::ostream& out, bool use_colour)
+    : in_(in), out_(out), use_colour_(use_colour) {}
+
+std::string StdinPrompter::prompt(const PromptRequest& req) {
+    render_request(out_, req, use_colour_);
     std::string line;
-    std::getline(std::cin, line);
+    std::getline(in_, line);
     return line;
 }
 
-std::string ScriptedPrompter::prompt(const std::string& /*message*/,
-                                     VarType /*type*/) {
+std::string ScriptedPrompter::prompt(const PromptRequest& req) {
+    last_ = req;
     if (index_ >= answers_.size()) {
         throw std::logic_error("ScriptedPrompter exhausted");
     }
