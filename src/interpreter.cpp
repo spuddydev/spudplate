@@ -694,32 +694,33 @@ void render_request(std::ostream& out, const PromptRequest& req,
         out << wrap("> " + *req.previous_error, kRed, use_colour) << '\n';
     }
 
+    bool has_options = !req.options.empty();
+    bool is_bool_inline = req.type == VarType::Bool && !has_options;
+
     out << wrap(req.text, kBold, use_colour);
 
-    if (req.type == VarType::Bool && req.options.empty()) {
-        out << ' ' << wrap(bool_hint(req.default_value), kDim, use_colour);
-    }
-
-    if (!req.options.empty()) {
+    if (has_options) {
         out << '\n';
         for (std::size_t i = 0; i < req.options.size(); ++i) {
-            std::string entry =
-                "  [" + std::to_string(i + 1) + "] " + req.options[i];
-            out << wrap(entry, kDim, use_colour) << '\n';
+            out << "  [" << (i + 1) << "] " << req.options[i] << '\n';
         }
+        if (req.default_value.has_value()) {
+            out << wrap("[default: " + *req.default_value + "]", kDim,
+                        use_colour)
+                << '\n';
+        }
+        out << wrap("> ", kCyan, use_colour) << std::flush;
+        return;
     }
 
-    if (req.default_value.has_value()) {
-        std::string hint;
-        if (req.type == VarType::Bool && req.options.empty()) {
-            // [Y/n] already encodes the default — skip the explicit hint.
-        } else {
-            hint = " [default: " + *req.default_value + "]";
-            out << wrap(hint, kDim, use_colour);
-        }
+    if (is_bool_inline) {
+        out << ' ' << bool_hint(req.default_value);
+    } else if (req.default_value.has_value()) {
+        out << ' '
+            << wrap("[default: " + *req.default_value + "]", kDim, use_colour);
     }
 
-    out << '\n' << wrap("> ", kCyan, use_colour) << std::flush;
+    out << ": " << wrap("> ", kCyan, use_colour) << std::flush;
 }
 
 }  // namespace

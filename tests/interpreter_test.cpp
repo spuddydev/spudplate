@@ -811,7 +811,7 @@ TEST(AskTest, OffOptionPropagatesError) {
 
 // --- StdinPrompter rendering ---
 
-TEST(StdinPrompterTest, PlainStringPromptHasMarker) {
+TEST(StdinPrompterTest, PlainStringPromptIsSingleLine) {
     std::stringstream in("MyProj\n");
     std::stringstream out;
     StdinPrompter p(in, out, /*use_colour=*/false);
@@ -823,9 +823,7 @@ TEST(StdinPrompterTest, PlainStringPromptHasMarker) {
         .previous_error = std::nullopt,
     };
     EXPECT_EQ(p.prompt(req), "MyProj");
-    std::string s = out.str();
-    EXPECT_NE(s.find("What is the project name?"), std::string::npos);
-    EXPECT_NE(s.find("> "), std::string::npos);
+    EXPECT_EQ(out.str(), "What is the project name?: > ");
 }
 
 TEST(StdinPrompterTest, BoolDefaultTrueShowsCapitalY) {
@@ -886,11 +884,43 @@ TEST(StdinPrompterTest, OptionsRenderAsNumberedMenu) {
         .previous_error = std::nullopt,
     };
     p.prompt(req);
-    std::string s = out.str();
-    EXPECT_NE(s.find("[1] pdf"), std::string::npos);
-    EXPECT_NE(s.find("[2] html"), std::string::npos);
-    EXPECT_NE(s.find("[3] latex"), std::string::npos);
-    EXPECT_NE(s.find("[default: pdf]"), std::string::npos);
+    EXPECT_EQ(out.str(),
+              "Format?\n"
+              "  [1] pdf\n"
+              "  [2] html\n"
+              "  [3] latex\n"
+              "[default: pdf]\n"
+              "> ");
+}
+
+TEST(StdinPrompterTest, BoolInlineHasColon) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "Use git?",
+        .type = VarType::Bool,
+        .options = {},
+        .default_value = "true",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "Use git? [Y/n]: > ");
+}
+
+TEST(StdinPrompterTest, StringWithDefaultIsSingleLine) {
+    std::stringstream in("\n");
+    std::stringstream out;
+    StdinPrompter p(in, out, false);
+    PromptRequest req{
+        .text = "License?",
+        .type = VarType::String,
+        .options = {},
+        .default_value = "MIT",
+        .previous_error = std::nullopt,
+    };
+    p.prompt(req);
+    EXPECT_EQ(out.str(), "License? [default: MIT]: > ");
 }
 
 TEST(StdinPrompterTest, PreviousErrorPrintedAbovePrompt) {
