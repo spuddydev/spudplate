@@ -50,31 +50,49 @@ void write_file(const std::filesystem::path& p, const std::string& content) {
     out << content;
 }
 
-// Scoped override of `SPUDPLATE_HOME`. Tests use this to point the CLI at
-// a temporary install root so they don't touch the user's real
-// `~/.spudplate` directory. Restores the previous value on destruction.
-class ScopedHome {
+// Save and restore an environment variable around a test. Set the value
+// with `set()` or remove it with `unset()`; the original is reinstated on
+// destruction so other tests in the suite are unaffected.
+class ScopedEnv {
   public:
-    explicit ScopedHome(const std::filesystem::path& dir) {
-        if (const char* prev = std::getenv("SPUDPLATE_HOME"); prev != nullptr) {
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* prev = std::getenv(name_.c_str()); prev != nullptr) {
             had_prev_ = true;
             prev_ = prev;
         }
-        ::setenv("SPUDPLATE_HOME", dir.c_str(), /*overwrite=*/1);
     }
-    ScopedHome(const ScopedHome&) = delete;
-    ScopedHome& operator=(const ScopedHome&) = delete;
-    ~ScopedHome() {
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+    ~ScopedEnv() {
         if (had_prev_) {
-            ::setenv("SPUDPLATE_HOME", prev_.c_str(), /*overwrite=*/1);
+            ::setenv(name_.c_str(), prev_.c_str(), /*overwrite=*/1);
         } else {
-            ::unsetenv("SPUDPLATE_HOME");
+            ::unsetenv(name_.c_str());
         }
     }
 
+    void set(const std::string& value) {
+        ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
+    }
+    void unset() {
+        ::unsetenv(name_.c_str());
+    }
+
   private:
+    std::string name_;
     bool had_prev_{false};
     std::string prev_;
+};
+
+// Convenience: scope `SPUDPLATE_HOME` to a temp install root.
+class ScopedHome {
+  public:
+    explicit ScopedHome(const std::filesystem::path& dir) : env_("SPUDPLATE_HOME") {
+        env_.set(dir.string());
+    }
+
+  private:
+    ScopedEnv env_;
 };
 
 // Build an argv array suitable for cli_main from a vector of arguments.
@@ -291,6 +309,25 @@ TEST(CliTest, InstallRejectsBrokenTemplateAndLeavesNoTrace) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 2);
     EXPECT_FALSE(std::filesystem::exists(home / "broken"));
+}
+
+TEST(CliTest, InstallUsesXdgDataHomeWhenNoSpudplateHome) {
+    TmpDir td;
+    ScopedEnv spud_home("SPUDPLATE_HOME");
+    ScopedEnv xdg("XDG_DATA_HOME");
+    spud_home.unset();
+    auto xdg_root = td.path() / "xdg";
+    xdg.set(xdg_root.string());
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir foo\n");
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::is_regular_file(
+        xdg_root / "spudplate" / "demo" / "template.spud"));
 }
 
 TEST(CliTest, InstallMissingFileExitsFive) {
