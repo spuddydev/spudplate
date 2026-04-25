@@ -14,6 +14,7 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"mode", TokenType::MODE},         {"as", TokenType::AS},
     {"default", TokenType::DEFAULT},   {"options", TokenType::OPTIONS},
     {"copy", TokenType::COPY},         {"into", TokenType::INTO},
+    {"include", TokenType::INCLUDE},
     {"and", TokenType::AND},           {"or", TokenType::OR},
     {"not", TokenType::NOT},           {"string", TokenType::STRING_TYPE},
     {"bool", TokenType::BOOL_TYPE},    {"int", TokenType::INT_TYPE},

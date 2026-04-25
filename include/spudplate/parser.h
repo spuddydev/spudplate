@@ -63,6 +63,8 @@ class Parser {
     StmtPtr parseRepeat();
     /** @brief Parses a `copy` statement. */
     StmtPtr parseCopy();
+    /** @brief Parses an `include` statement. */
+    StmtPtr parseInclude();
     /** @brief Dispatches to the appropriate statement parser based on the current token.
      */
     StmtPtr parseStatement();
