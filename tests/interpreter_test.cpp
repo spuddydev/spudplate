@@ -4,7 +4,10 @@
 
 #include <climits>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -116,6 +119,36 @@ PathExpr path(std::vector<PathSegment> segs) {
     return PathExpr{.segments = std::move(segs), .line = 1, .column = 1};
 }
 
+// Per-test scratch directory. Created on construction with a randomised name
+// under the system temp dir; the previous working directory is restored and
+// the directory is wiped on destruction. Tests that touch the filesystem
+// `chdir` into one of these so `mkdir foo` etc. resolve under it.
+class TmpDir {
+  public:
+    TmpDir() {
+        prev_ = std::filesystem::current_path();
+        std::random_device rd;
+        std::stringstream ss;
+        ss << "spudplate-test-" << std::hex << rd() << rd();
+        path_ = std::filesystem::temp_directory_path() / ss.str();
+        std::filesystem::create_directories(path_);
+        std::filesystem::current_path(path_);
+    }
+    TmpDir(const TmpDir&) = delete;
+    TmpDir& operator=(const TmpDir&) = delete;
+    ~TmpDir() {
+        std::error_code ec;
+        std::filesystem::current_path(prev_, ec);
+        std::filesystem::remove_all(path_, ec);
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
+
+  private:
+    std::filesystem::path path_;
+    std::filesystem::path prev_;
+};
+
 }  // namespace
 
 // --- RuntimeError shape ---
@@ -190,18 +223,6 @@ TEST(InterpreterTest, EmptyProgramRunsCleanly) {
 }
 
 // --- Every statement type throws "not yet supported" ---
-
-TEST(InterpreterTest, MkdirThrowsNotYetSupported) {
-    auto program = parse(R"(mkdir foo
-)");
-    NullPrompter prompter;
-    try {
-        run(program, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("mkdir"), std::string::npos);
-    }
-}
 
 TEST(InterpreterTest, FileThrowsNotYetSupported) {
     auto program = parse(R"(file foo.txt content "hi"
@@ -659,6 +680,120 @@ TEST(ScriptedPrompterTest, ExhaustionThrowsLogicError) {
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run_for_tests(p, prompter), std::logic_error);
+}
+
+// --- Mkdir + flush + safety (Part 5) ---
+
+TEST(MkdirTest, CreatesDirectory) {
+    TmpDir td;
+    auto p = parse(R"(mkdir my_project
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "my_project"));
+}
+
+TEST(MkdirTest, MkdirP) {
+    TmpDir td;
+    auto p = parse(R"(mkdir a/b/c
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "a" / "b" / "c"));
+}
+
+TEST(MkdirTest, WhenFalseSkips) {
+    TmpDir td;
+    auto p = parse(R"(ask use_foo "Use foo?" bool
+mkdir foo when use_foo
+)");
+    ScriptedPrompter prompter({"false"});
+    run(p, prompter);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo"));
+}
+
+TEST(MkdirTest, WhenTrueCreates) {
+    TmpDir td;
+    auto p = parse(R"(ask use_foo "Use foo?" bool
+mkdir foo when use_foo
+)");
+    ScriptedPrompter prompter({"true"});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "foo"));
+}
+
+TEST(MkdirTest, ModeApplied) {
+    TmpDir td;
+    auto p = parse(R"(mkdir bar mode 0700
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    auto perms = std::filesystem::status(td.path() / "bar").permissions();
+    EXPECT_EQ(perms, static_cast<std::filesystem::perms>(0700));
+}
+
+TEST(MkdirTest, AliasResolvesInLaterPath) {
+    TmpDir td;
+    auto p = parse(R"(mkdir foo as project
+mkdir project/sub
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "foo" / "sub"));
+}
+
+TEST(MkdirTest, RejectsPreExistingPath) {
+    TmpDir td;
+    std::filesystem::create_directory(td.path() / "exists");
+    auto p = parse(R"(mkdir exists
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+}
+
+TEST(MkdirTest, FromIsNotYetSupported) {
+    TmpDir td;
+    auto p = parse(R"(mkdir foo from base
+)");
+    ScriptedPrompter prompter({});
+    try {
+        run(p, prompter);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& e) {
+        EXPECT_NE(std::string(e.what()).find("not yet supported"),
+                  std::string::npos);
+    }
+    // The `from` rejection happens during execution, before flush — nothing
+    // was written.
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo"));
+}
+
+TEST(MkdirTest, DeferredWriteAtomicityOnPreFlushFailure) {
+    TmpDir td;
+    // First mkdir queues; second throws on `from` before any flush runs.
+    auto p = parse(R"(mkdir a
+mkdir b from base
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(run(p, prompter), RuntimeError);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "a"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "b"));
+}
+
+TEST(MkdirTest, SkippedConditionalAliasNotBound) {
+    TmpDir td;
+    // Producer is skipped (`use_x=false`); consumer guarded by the same when
+    // is also skipped — neither directory is created and the alias is never
+    // looked up. This proves the runtime does not bind aliases on skipped
+    // statements.
+    auto p = parse(R"(ask use_x "Use x?" bool
+mkdir foo when use_x as project
+mkdir project/sub when use_x
+)");
+    ScriptedPrompter prompter({"false"});
+    run(p, prompter);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "foo"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "project"));
 }
 
 TEST(EvalPathTest, MixedSegments) {

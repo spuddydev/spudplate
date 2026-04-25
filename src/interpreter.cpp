@@ -6,10 +6,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -380,7 +382,7 @@ class Interpreter {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
                 } else if constexpr (std::is_same_v<T, MkdirStmt>) {
-                    unsupported("mkdir", s.line, s.column);
+                    execute_mkdir(s);
                 } else if constexpr (std::is_same_v<T, FileStmt>) {
                     unsupported("file", s.line, s.column);
                 } else if constexpr (std::is_same_v<T, RepeatStmt>) {
@@ -396,16 +398,71 @@ class Interpreter {
 
     [[nodiscard]] Environment& env() { return env_; }
 
+    void flush() {
+        for (const auto& op : pending_) {
+            std::visit([&](const auto& o) { run_op(o); }, op);
+        }
+    }
+
   private:
+    void execute_mkdir(const MkdirStmt& s) {
+        if (!when_passes(s.when_clause, env_)) {
+            return;
+        }
+        if (s.from_source.has_value() || s.verbatim) {
+            throw RuntimeError(
+                "'mkdir from' / 'verbatim' not yet supported in this build",
+                s.line, s.column);
+        }
+        std::string path_str = evaluate_path(s.path, env_, alias_map_);
+        if (s.alias.has_value()) {
+            alias_map_[*s.alias] = path_str;
+        }
+        pending_.push_back(PendingMkdir{.path = std::move(path_str),
+                                        .mode = s.mode,
+                                        .line = s.line,
+                                        .column = s.column});
+    }
+
+    void check_pre_existing(const std::string& path, int line, int col) {
+        // Snapshot is taken at flush time, not run start; valid only because
+        // v1 does not write before flush. If a side-effecting statement is
+        // added before flush (e.g. `run`), revisit.
+        if (created_during_run_.find(path) == created_during_run_.end() &&
+            std::filesystem::exists(path)) {
+            throw RuntimeError("refusing to write to pre-existing path '" + path +
+                                   "'",
+                               line, col);
+        }
+    }
+
+    void run_op(const PendingMkdir& op) {
+        check_pre_existing(op.path, op.line, op.column);
+        std::filesystem::create_directories(op.path);
+        if (op.mode.has_value()) {
+            std::filesystem::permissions(
+                op.path, static_cast<std::filesystem::perms>(*op.mode),
+                std::filesystem::perm_options::replace);
+        }
+        created_during_run_.insert(op.path);
+    }
+
+    void run_op(const PendingFile& /*op*/) {
+        // PendingFile lands in Part 6.
+    }
+
     Environment env_;
     Prompter& prompter_;
+    AliasMap alias_map_;
     std::vector<PendingOp> pending_;
+    std::unordered_set<std::string> created_during_run_;
 };
 
 void run_program(const Program& program, Interpreter& interp) {
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
+    interp.flush();
 }
 
 }  // namespace
