@@ -258,9 +258,24 @@ struct CopyStmt {
     int column;
 };
 
+/**
+ * @brief An `include` statement — runs another installed template as a subprocess.
+ *
+ * Example: `include claude_setup when use_claude`
+ *
+ * The named template is referenced by its installed name and runs in its own
+ * scope at runtime. The optional `when` clause skips the include if false.
+ */
+struct IncludeStmt {
+    std::string name;                    ///< Name of the installed template to run.
+    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the include.
+    int line;
+    int column;
+};
+
 /** @brief Discriminated union of all statement node types. */
-using StmtData =
-    std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt, CopyStmt>;
+using StmtData = std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt,
+                              CopyStmt, IncludeStmt>;
 
 /** @brief A statement node wrapping a StmtData variant. */
 struct Stmt {

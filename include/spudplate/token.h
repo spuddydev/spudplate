@@ -25,6 +25,7 @@ enum class TokenType {
     OPTIONS,   ///< `options` — restrict an ask to a bounded list of literals
     COPY,      ///< `copy` — copy a source directory into an existing destination
     INTO,      ///< `into` — destination marker used by `copy`
+    INCLUDE,   ///< `include` — run another installed template as a subprocess
 
     // Logical operators (keywords)
     AND,  ///< `and` — logical AND
@@ -123,6 +124,8 @@ inline std::string tokenTypeToString(TokenType type) {
             return "COPY";
         case TokenType::INTO:
             return "INTO";
+        case TokenType::INCLUDE:
+            return "INCLUDE";
         case TokenType::AND:
             return "AND";
         case TokenType::OR:

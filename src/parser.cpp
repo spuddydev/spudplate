@@ -375,6 +375,23 @@ StmtPtr Parser::parseCopy() {
     return stmt;
 }
 
+// Include statement parser
+
+StmtPtr Parser::parseInclude() {
+    Token start = expect(TokenType::INCLUDE, "expected 'include'");
+    Token name =
+        expect(TokenType::IDENTIFIER, "expected template name after 'include'");
+    auto when_clause = parse_when_clause();
+    expect_newline("include statement");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->data = IncludeStmt{.name = name.value,
+                             .when_clause = std::move(when_clause),
+                             .line = start.line,
+                             .column = start.column};
+    return stmt;
+}
+
 // Repeat block parser
 
 StmtPtr Parser::parseRepeat() {
@@ -427,6 +444,9 @@ StmtPtr Parser::parseStatement() {
     }
     if (check(TokenType::COPY)) {
         return parseCopy();
+    }
+    if (check(TokenType::INCLUDE)) {
+        return parseInclude();
     }
     throw ParseError("unexpected token: " + current_.value, current_.line,
                      current_.column);
