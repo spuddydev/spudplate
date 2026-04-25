@@ -556,6 +556,63 @@ TEST(ValidatorTest, RunWhenReferencesIteratorOutsideRepeatIsError) {
     EXPECT_THROW(validate(program), spudplate::SemanticError);
 }
 
+// --- Reassignment tests ---
+
+TEST(ValidatorTest, ReassignLetBindingValidates) {
+    auto program = parse(
+        "let n = 1\n"
+        "n = n + 1\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, ReassignUndeclaredIsError) {
+    auto program = parse("n = 1\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
+TEST(ValidatorTest, ReassignAskAnswerIsError) {
+    auto program = parse(
+        "ask name \"name?\" string\n"
+        "name = \"other\"\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
+TEST(ValidatorTest, ReassignPathAliasIsError) {
+    auto program = parse(
+        "mkdir foo as bar\n"
+        "bar = \"baz\"\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
+TEST(ValidatorTest, ReassignRepeatIteratorIsError) {
+    auto program = parse(
+        "let n = 3\n"
+        "repeat n as i\n"
+        "  i = 0\n"
+        "end\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
+TEST(ValidatorTest, ReassignOuterLetFromRepeatValidates) {
+    auto program = parse(
+        "let total = 0\n"
+        "let n = 3\n"
+        "repeat n as i\n"
+        "  total = total + i\n"
+        "end\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, ReassignOutOfScopeLetIsError) {
+    auto program = parse(
+        "let n = 3\n"
+        "repeat n as i\n"
+        "  let local = 0\n"
+        "end\n"
+        "local = 1\n");
+    EXPECT_THROW(validate(program), spudplate::SemanticError);
+}
+
 TEST(ValidatorTest, ComposedRulesEndToEnd) {
     // Exercises Part A (repeat when), Part B (no ask-in-repeat — valid case),
     // Part C (nested let scoping), and Part E (bool-equivalent alias when).
