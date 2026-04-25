@@ -248,18 +248,20 @@ There is no source-level inlining; all template reuse goes through `include` and
 ### `run` — Execute a shell command
 
 ```
-run <expression> [when <condition>]
+run <expression> [in <path>] [when <condition>]
 ```
 
 Runs a shell command via `/bin/sh -c`. The expression evaluates to a string at runtime — supporting concatenation with `ask`/`let` values — and the resulting command is queued for execution at flush time, in source order alongside the file operations. Output streams live to the parent process's stdout/stderr.
 
+- `in <path>` — pin the command's working directory to `<path>`. Without it, the command inherits the cwd of the `spudplate` process, which is rarely what you want once the template has created a project subdirectory. The path is a regular path expression — alias references and `{expr}` interpolation work, and the directory must exist by the time the command runs (errors otherwise). The cwd is restored after the command, even on failure.
 - `when <condition>` — only run the command if the condition is true.
 
 ```
-ask use_git "Initialise a git repo?" bool default true
-run "git init" when use_git
+ask project "Project name?" string
+mkdir {project} as proj
+run "git init" in proj
 ask repo_url "Origin URL?" string default ""
-run "git remote add origin " + repo_url when repo_url != ""
+run "git remote add origin " + repo_url in proj when repo_url != ""
 ```
 
 #### Trust prompt
@@ -284,7 +286,7 @@ A non-zero exit, a signal-killed process, or a failure to invoke the shell raise
 #### Security caveats
 
 - **Shell injection via interpolation.** Commands are dispatched through `/bin/sh -c`. The trust prompt shows the literal source expression; the *evaluated* string is what executes. A command like `run "git clone " + url` looks safe in the prompt, but a malicious `url` answer (`; rm -rf $HOME`) would still be passed through. Treat any `ask`/`let` value flowing into a `run` command as untrusted and quote it appropriately in the command string, or restrict input via `options`.
-- **Working directory.** Commands run in whatever directory `spudplate run` was invoked from, *not* a per-template sandbox. Use `cd` inside the command if you need a different cwd.
+- **Working directory.** Without `in <path>`, commands run in whatever directory `spudplate run` was invoked from — *not* a per-template sandbox. Templates that create a project subdirectory should pin every following command to it via `in <path>`.
 - **No timeout.** A long-running command blocks the flush indefinitely. Templates running interactive commands (e.g. `vim`) will hand the terminal over.
 - **No allowlist.** Any command is permitted once authorised. Privilege escalation (e.g. `sudo`) prompts for the user's password — that natural friction is the safety net for anything destructive.
 
