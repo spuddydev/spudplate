@@ -45,8 +45,6 @@ Spudlang supports questions with defaults and option lists, derived variables, c
 
 ## Build
 
-> **Note:** spudplate is currently in active development. The lexer, parser, and semantic validator are complete, but the interpreter and CLI are not yet functional, so installed templates cannot be run end-to-end.
-
 Requires CMake and a C++20 compiler.
 
 ```bash
