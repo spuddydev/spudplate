@@ -338,6 +338,24 @@ Combined with deferred file operations, this means a run either fully succeeds o
 
 ---
 
+## Dry-run preview
+
+`spudplate run --dry-run <file.spud>` runs every prompt and queues every action exactly like a real run, but instead of writing to disk it prints a tree of every path that would have been created:
+
+```
+Would create:
+└── cool-thing/
+    ├── README.md
+    ├── src/
+    │   └── main.cpp
+    └── tests/
+        └── test_main.cpp
+```
+
+Append-mode files appear once with a trailing `(append)` annotation. `mkdir from` and `copy` expand into the individual files they would create. `copy` destination-existence checks are skipped — dry-run cannot validate them without touching the filesystem. Conditional statements whose `when` clause evaluated to false are pruned from the queue, so the tree only shows what would actually happen.
+
+---
+
 ## Full Example
 
 ```
