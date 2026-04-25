@@ -50,6 +50,51 @@ void write_file(const std::filesystem::path& p, const std::string& content) {
     out << content;
 }
 
+// Save and restore an environment variable around a test. Set the value
+// with `set()` or remove it with `unset()`; the original is reinstated on
+// destruction so other tests in the suite are unaffected.
+class ScopedEnv {
+  public:
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* prev = std::getenv(name_.c_str()); prev != nullptr) {
+            had_prev_ = true;
+            prev_ = prev;
+        }
+    }
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+    ~ScopedEnv() {
+        if (had_prev_) {
+            ::setenv(name_.c_str(), prev_.c_str(), /*overwrite=*/1);
+        } else {
+            ::unsetenv(name_.c_str());
+        }
+    }
+
+    void set(const std::string& value) {
+        ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
+    }
+    void unset() {
+        ::unsetenv(name_.c_str());
+    }
+
+  private:
+    std::string name_;
+    bool had_prev_{false};
+    std::string prev_;
+};
+
+// Convenience: scope `SPUDPLATE_HOME` to a temp install root.
+class ScopedHome {
+  public:
+    explicit ScopedHome(const std::filesystem::path& dir) : env_("SPUDPLATE_HOME") {
+        env_.set(dir.string());
+    }
+
+  private:
+    ScopedEnv env_;
+};
+
 // Build an argv array suitable for cli_main from a vector of arguments.
 class Argv {
   public:
@@ -212,4 +257,220 @@ TEST(CliTest, MissingFileExitsFive) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 5);
     EXPECT_NE(err.str().find("cannot open"), std::string::npos);
+}
+
+// --- install ---
+
+TEST(CliTest, InstallSuccessStoresTemplate) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "ask name \"Project name?\" string\nmkdir {name}\n");
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::is_regular_file(home / "demo" / "template.spud"));
+    EXPECT_NE(out.str().find("installed demo"), std::string::npos);
+}
+
+TEST(CliTest, InstallRejectsDuplicate) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir foo\n");
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out1;
+    std::stringstream err1;
+    ScriptedPrompter prompter({});
+    ASSERT_EQ(cli_main(args.argc(), args.argv(), out1, err1, prompter), 0)
+        << err1.str();
+    std::stringstream out2;
+    std::stringstream err2;
+    int code = cli_main(args.argc(), args.argv(), out2, err2, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err2.str().find("already installed"), std::string::npos);
+}
+
+TEST(CliTest, InstallRejectsBrokenTemplateAndLeavesNoTrace) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "broken.spud";
+    write_file(src, "ask\n");  // parse error: missing args
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 2);
+    EXPECT_FALSE(std::filesystem::exists(home / "broken"));
+}
+
+TEST(CliTest, InstallUsesXdgDataHomeWhenNoSpudplateHome) {
+    TmpDir td;
+    ScopedEnv spud_home("SPUDPLATE_HOME");
+    ScopedEnv xdg("XDG_DATA_HOME");
+    spud_home.unset();
+    auto xdg_root = td.path() / "xdg";
+    xdg.set(xdg_root.string());
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir foo\n");
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::is_regular_file(
+        xdg_root / "spudplate" / "demo" / "template.spud"));
+}
+
+TEST(CliTest, InstallMissingFileExitsFive) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "absent.spud";
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+}
+
+// --- run by installed name ---
+
+TEST(CliTest, RunByNameLooksUpInstalledTemplate) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "ask name \"Project name?\" string\nmkdir {name}\n");
+    {
+        Argv install_args({"spudplate", "install", src.string()});
+        std::stringstream o;
+        std::stringstream e;
+        ScriptedPrompter p({});
+        ASSERT_EQ(cli_main(install_args.argc(), install_args.argv(), o, e, p), 0)
+            << e.str();
+    }
+    Argv run_args({"spudplate", "run", "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({"my_project"});
+    int code = cli_main(run_args.argc(), run_args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "my_project"));
+}
+
+TEST(CliTest, RunByUnknownNameExitsFive) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "run", "ghost"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+}
+
+// --- list / inspect / uninstall ---
+
+namespace {
+void install_template(const std::filesystem::path& src, const std::string& body) {
+    write_file(src, body);
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream o;
+    std::stringstream e;
+    ScriptedPrompter p({});
+    ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+}
+}  // namespace
+
+TEST(CliTest, ListEmptyProducesNoOutput) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "list"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(out.str(), "");
+}
+
+TEST(CliTest, ListShowsInstalledNamesSorted) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "zebra.spud", "mkdir z\n");
+    install_template(td.path() / "alpha.spud", "mkdir a\n");
+    Argv args({"spudplate", "list"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(out.str(), "alpha\nzebra\n");
+}
+
+TEST(CliTest, InspectPrintsSource) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    const std::string body = "mkdir hello\n";
+    install_template(td.path() / "demo.spud", body);
+    Argv args({"spudplate", "inspect", "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(out.str(), body);
+}
+
+TEST(CliTest, InspectUnknownExitsFive) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "inspect", "ghost"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+}
+
+TEST(CliTest, UninstallRemovesTemplate) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud", "mkdir x\n");
+    ASSERT_TRUE(std::filesystem::is_directory(home / "demo"));
+    Argv args({"spudplate", "uninstall", "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_FALSE(std::filesystem::exists(home / "demo"));
+}
+
+TEST(CliTest, UninstallUnknownExitsFive) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "uninstall", "ghost"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
 }
