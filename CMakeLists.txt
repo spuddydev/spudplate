@@ -14,8 +14,18 @@ target_include_directories(spudplate_lib PUBLIC include)
 add_executable(spudplate src/main.cpp)
 target_link_libraries(spudplate PRIVATE spudplate_lib)
 
+# Install rule — `cmake --install build` drops the binary at the configured
+# prefix (default `/usr/local`). `GNUInstallDirs` resolves
+# `CMAKE_INSTALL_BINDIR` so distro packagers and the release workflow get the
+# expected layout.
+include(GNUInstallDirs)
+install(TARGETS spudplate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 # Testing
 include(FetchContent)
+# `INSTALL_GTEST OFF` keeps googletest's headers and static libraries out
+# of `cmake --install`, so the install only contains the spudplate binary.
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
