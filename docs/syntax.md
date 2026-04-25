@@ -197,7 +197,7 @@ Creates a file at `<path>`, either from a source file (`from`) or from an inline
 
 - `append` — appends to the file instead of overwriting. Without `append`, the file is created fresh (or overwritten if previously created in the same run).
 - `from <source>` — embeds the contents of `<source>` at compile time. `{var}` interpolation is applied at runtime unless `verbatim` is specified.
-- `content <expression>` — inline content; supports `{var}` interpolation via string concatenation.
+- `content <expression>` — inline content. The resulting string is interpolated: any `{var}` occurrence in the value is replaced with the bound variable's value (`content "n={n}"` writes `n=1` when `n` is `1`). String concatenation also works (`content "n=" + name`). An unclosed `{` or an unknown variable name is a runtime error.
 - `mode <octal>` — sets file permissions (e.g., `mode 0644`, `mode 0755`).
 - `when <condition>` — only creates the file if the condition is true.
 - `as <name>` — binds the file path; useful for conditional appends.
@@ -374,8 +374,8 @@ use_tests
 
 Interpolation appears in two places with slightly different grammars:
 
-- **Path expressions** and `content` values support full `{expr}` interpolation (`mkdir week_{n}`, `content "v" + version`).
-- **`from` source files** and files copied by `copy` support only bare `{ident}` substitution — no function calls, no arithmetic, no string concatenation. Use `verbatim` to copy file contents byte-for-byte without any substitution. A literal `{` or `}` in a non-verbatim source is a runtime error; switch the statement to `verbatim` if you need literal braces.
+- **Path expressions** support full `{expr}` interpolation (`mkdir week_{n}`, `mkdir {prefix}/notes`).
+- **`content` values**, **`from` source files**, and files copied by `copy` support only bare `{ident}` substitution — no function calls, no arithmetic, no string concatenation inside the braces. For richer values in a `content` expression, use string concatenation (`content "v" + version`). Use `verbatim` (on `from` and `copy`) to copy file contents byte-for-byte without any substitution. A literal `{` or `}` in a non-verbatim source is a runtime error; switch the statement to `verbatim` if you need literal braces.
 
 ---
 
