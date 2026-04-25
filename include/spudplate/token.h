@@ -26,6 +26,7 @@ enum class TokenType {
     COPY,      ///< `copy` — copy a source directory into an existing destination
     INTO,      ///< `into` — destination marker used by `copy`
     INCLUDE,   ///< `include` — run another installed template as a subprocess
+    RUN,       ///< `run` — execute a shell command (gated by trust prompt)
 
     // Logical operators (keywords)
     AND,  ///< `and` — logical AND
@@ -129,6 +130,8 @@ inline std::string tokenTypeToString(TokenType type) {
             return "INTO";
         case TokenType::INCLUDE:
             return "INCLUDE";
+        case TokenType::RUN:
+            return "RUN";
         case TokenType::AND:
             return "AND";
         case TokenType::OR:
