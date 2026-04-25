@@ -114,6 +114,25 @@ void run(const Program& program, Prompter& prompter);
  */
 Environment run_for_tests(const Program& program, Prompter& prompter);
 
+/**
+ * @brief Evaluate an expression against an environment.
+ *
+ * Throws `RuntimeError` on type mismatch, unknown identifier, division by
+ * zero, integer overflow on division, or unknown function name. Arithmetic
+ * `+`, `-`, `*` use signed two's-complement wrap-around. Logical `and`/`or`
+ * short-circuit. Equality `==`/`!=` returns `false`/`true` for operands of
+ * differing variant alternatives.
+ */
+Value evaluate_expr(const Expr& expr, const Environment& env);
+
+/**
+ * @brief Render a `Value` for use in path interpolation or file content.
+ *
+ * Strings pass through; ints become decimal with no padding; bools become
+ * `"true"` or `"false"`.
+ */
+std::string value_to_string(const Value& value);
+
 }  // namespace spudplate
 
 #endif  // SPUDPLATE_INTERPRETER_H
