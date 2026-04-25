@@ -181,6 +181,23 @@ struct LetStmt {
 };
 
 /**
+ * @brief A bare assignment statement — rebinds an existing variable.
+ *
+ * Example: `count = count + 1`
+ *
+ * Unlike `let`, the name must already be declared in an enclosing scope and
+ * the new value must match the original type. Path aliases bound by `as`,
+ * repeat iterators, and `ask`-bound names are read-only and may not be
+ * reassigned.
+ */
+struct AssignStmt {
+    std::string name;  ///< Variable name to rebind.
+    ExprPtr value;     ///< Expression whose value replaces the current binding.
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
+};
+
+/**
  * @brief A `mkdir` statement — creates a directory.
  *
  * Example: `mkdir src/modules mode 0755`
@@ -295,8 +312,8 @@ struct IncludeStmt {
 };
 
 /** @brief Discriminated union of all statement node types. */
-using StmtData = std::variant<AskStmt, LetStmt, MkdirStmt, FileStmt, RepeatStmt,
-                              CopyStmt, IncludeStmt, RunStmt>;
+using StmtData = std::variant<AskStmt, LetStmt, AssignStmt, MkdirStmt, FileStmt,
+                              RepeatStmt, CopyStmt, IncludeStmt, RunStmt>;
 
 /** @brief A statement node wrapping a StmtData variant. */
 struct Stmt {

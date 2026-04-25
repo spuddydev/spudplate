@@ -83,12 +83,17 @@ ExprPtr apply_rule_once(const Expr& expr, const TypeMap& tm, bool& fired) {
 struct Scope {
     std::vector<std::unordered_set<std::string>> frames;
     std::unordered_set<std::string> popped;
+    // Subset of currently-visible names that may be reassigned (only `let`
+    // bindings). `ask` answers, path aliases, and repeat iterators are
+    // declared but not added here, so assignment to them is rejected.
+    std::unordered_set<std::string> mutables;
 
     void push() { frames.emplace_back(); }
 
     void pop() {
         for (const auto& n : frames.back()) {
             popped.insert(n);
+            mutables.erase(n);
         }
         frames.pop_back();
     }
@@ -107,6 +112,15 @@ struct Scope {
     }
 
     void declare(const std::string& name) { frames.back().insert(name); }
+
+    void declare_mutable(const std::string& name) {
+        declare(name);
+        mutables.insert(name);
+    }
+
+    [[nodiscard]] bool is_mutable(const std::string& name) const {
+        return mutables.count(name) != 0U;
+    }
 
     [[nodiscard]] bool inside_repeat() const { return frames.size() > 1; }
 };
@@ -241,7 +255,21 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
             } else if constexpr (std::is_same_v<T, LetStmt>) {
                 walk_expr(*s.value, scope);
                 check_shadowing(s.name, s.line, s.column, scope);
-                scope.declare(s.name);
+                scope.declare_mutable(s.name);
+            } else if constexpr (std::is_same_v<T, AssignStmt>) {
+                walk_expr(*s.value, scope);
+                if (!scope.visible(s.name)) {
+                    throw SemanticError(
+                        "assignment to undeclared name '" + s.name +
+                            "' (use 'let' to declare a new variable)",
+                        s.line, s.column);
+                }
+                if (!scope.is_mutable(s.name)) {
+                    throw SemanticError(
+                        "cannot reassign read-only name '" + s.name +
+                            "' (only 'let' bindings are mutable)",
+                        s.line, s.column);
+                }
             } else if constexpr (std::is_same_v<T, MkdirStmt>) {
                 walk_path(s.path, scope, ctx, s.when_clause);
                 if (s.from_source.has_value()) {

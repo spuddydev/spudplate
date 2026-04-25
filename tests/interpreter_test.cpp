@@ -1158,6 +1158,67 @@ TEST(ScriptedPrompterTest, ExhaustionThrowsLogicError) {
     EXPECT_THROW(run_for_tests(p, prompter), std::logic_error);
 }
 
+// --- Reassignment ---
+
+TEST(AssignTest, ReassignsLetBinding) {
+    auto p = parse(R"(let n = 1
+n = n + 2
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("n")), 3);
+}
+
+TEST(AssignTest, StringReassignment) {
+    auto p = parse(R"(let s = "hi"
+s = s + "!"
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("s")), "hi!");
+}
+
+TEST(AssignTest, RepeatAccumulator) {
+    // Sum 0+1+2 over three iterations.
+    auto p = parse(R"(let total = 0
+let n = 3
+repeat n as i
+  total = total + i
+end
+)");
+    ScriptedPrompter prompter({});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::int64_t>(*env.lookup("total")), 3);
+}
+
+TEST(AssignTest, MkdirCapturesValueAtStatementTime) {
+    // Each mkdir resolves its path at statement time, so reassigning n
+    // between two mkdirs creates two distinct directories.
+    TmpDir td;
+    auto p = parse(R"(let n = 1
+mkdir dir_{n}
+n = n + 1
+mkdir dir_{n}
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "dir_1"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "dir_2"));
+}
+
+TEST(AssignTest, FileContentCapturesValueAtStatementTime) {
+    TmpDir td;
+    auto p = parse(R"(let label = "first"
+file a.txt content "label=" + label
+label = "second"
+file b.txt content "label=" + label
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_EQ(read_file(td.path() / "a.txt"), "label=first");
+    EXPECT_EQ(read_file(td.path() / "b.txt"), "label=second");
+}
+
 // --- Mkdir + flush + safety (Part 5) ---
 
 TEST(MkdirTest, CreatesDirectory) {

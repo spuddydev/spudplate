@@ -56,6 +56,8 @@ class Parser {
     StmtPtr parseAsk();
     /** @brief Parses a `let` statement. */
     StmtPtr parseLet();
+    /** @brief Parses a bare assignment statement (`name = expr`). */
+    StmtPtr parseAssign();
     /** @brief Parses a `mkdir` statement. */
     StmtPtr parseMkdir();
     /** @brief Parses a `file` statement. */

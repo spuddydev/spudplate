@@ -75,6 +75,32 @@ let total_days = num_weeks * 7
 
 ---
 
+### Reassignment — Update an existing variable
+
+```
+<name> = <expression>
+```
+
+A bare `name = expr` line replaces the value of an existing `let` binding. Use this for incremental updates or loop accumulators:
+
+```
+let total = 0
+let n = 3
+repeat n as i
+  total = total + i
+end
+```
+
+**Rules:**
+
+- The name must already be declared by `let` and visible in the current scope. Use `let` for the first binding; reassignment is rejected for undeclared names.
+- Only `let` bindings are mutable. `ask` answers, path aliases (`as <name>` on `mkdir` or `file`), and repeat iterators are read-only — assigning to them is a validation error.
+- The runtime captures values at statement time. After `let n = 1`, `mkdir dir_{n}`, `n = n + 1`, `mkdir dir_{n}` you get two directories `dir_1` and `dir_2` — each `mkdir` resolves its path before the next statement runs, so reassignment between them is safe.
+
+Reassignment to an outer-scope `let` from inside a `repeat` body mutates the outer binding (used for accumulators). Bindings local to a `repeat` body cannot be reassigned from outside it once the loop ends — they are out of scope.
+
+---
+
 ### Path expressions
 
 Paths in `mkdir`, `file`, and `copy` are written as **path expressions** — an unquoted sequence of identifiers, slashes, dots, hyphens, and `{expr}` interpolations.
