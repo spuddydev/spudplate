@@ -6,41 +6,46 @@
 
 **Templating made for spuds!**
 
-Write a `.spud` file in spudlang, compile it into a standalone binary that asks the user questions and creates files and directories based on their answers.
+Write a `.spud` file in spudlang, install it once, and run it whenever you want to scaffold a new project. The interpreter prompts the user and creates files and directories based on their answers.
 
 ## How it works
 
 1. Write a `.spud` file describing your template
-2. Compile it with `spudplate` into a standalone binary
-3. Distribute or run the binary, it prompts the user and scaffolds the project!
+2. Install it with `spudplate install my_template.spud`
+3. Run it any time with `spudplate run my_template`
+
+To share a template, export it as a `.spudpack` (a signed zip) and the recipient installs it the same way.
 
 ```
-spudplate my_template.spud -o my_template
-./my_template
+spudplate install my_template.spud
+spudplate run my_template
+
+spudplate export my_template -o my_template.spudpack
 ```
 
 ## Example
 
 ```
-ask project_name "Project name?" string required
-ask use_tests "Include a test suite?" bool
+ask project_name "Project name?" string
+ask use_tests "Include a test suite?" bool default false
+ask license "License?" string default "MIT"
 
 let slug = lower(trim(project_name))
 
-mkdir "{slug}"
-mkdir "{slug}/src"
-mkdir "{slug}/tests" when use_tests
+mkdir {slug} as project
+mkdir {project}/src
+mkdir {project}/tests when use_tests
 
-file "{slug}/README.md" content "# " + project_name
-file "{slug}/src/main.cpp" from "templates/main.cpp"
-file "{slug}/tests/test_main.cpp" from "templates/test_main.cpp" when use_tests
+file {project}/README.md content "# " + project_name
+file {project}/src/main.cpp from templates/main.cpp
+file {project}/tests/test_main.cpp from templates/test_main.cpp when use_tests
 ```
 
-Spudlang supports variables, string/int expressions, conditionals (`when`), and `repeat` loops. See [docs/syntax.md](docs/syntax.md) for the full language reference.
+Spudlang supports questions with defaults and option lists, derived variables, conditional actions, path aliases, loops, and including other installed templates. See [docs/syntax.md](docs/syntax.md) for the full language reference.
 
 ## Build
 
-> **Note:** spudplate is currently in active development. The lexer and parser are complete, but the compiler is not yet functional. Compiled binaries cannot be produced yet.
+> **Note:** spudplate is currently in active development. The lexer, parser, and semantic validator are complete, but the interpreter and CLI are not yet functional, so installed templates cannot be run end-to-end.
 
 Requires CMake and a C++20 compiler.
 
