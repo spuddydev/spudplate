@@ -4,6 +4,8 @@
 #include <string>
 #include <utility>
 
+#include "spudplate/validator.h"
+
 namespace spudplate {
 
 namespace {
@@ -809,8 +811,232 @@ Program program_from_json(const nlohmann::json& root) {
     }
 }
 
-bool programs_equal(const Program& /*a*/, const Program& /*b*/) {
-    throw std::logic_error("programs_equal: not implemented yet");
+namespace {
+
+// `exprs_equal` (validator.h) compares semantics but ignores line/column —
+// good for the validator's normalised-when-clause check, wrong for a
+// serialiser round-trip test. These helpers wrap it and also walk the
+// position fields, so a successful `program_to_json` -> `program_from_json`
+// round trip can assert exact equality (including positions).
+
+bool positions_equal(int la, int ca, int lb, int cb) {
+    return la == lb && ca == cb;
+}
+
+bool optional_expr_equal(const std::optional<ExprPtr>& a,
+                         const std::optional<ExprPtr>& b);
+bool path_segments_equal(const PathSegment& a, const PathSegment& b);
+bool paths_equal(const PathExpr& a, const PathExpr& b);
+bool stmts_equal(const Stmt& a, const Stmt& b);
+
+bool exprs_equal_with_positions(const Expr& a, const Expr& b) {
+    if (a.data.index() != b.data.index()) {
+        return false;
+    }
+    if (!exprs_equal(a, b)) {
+        return false;
+    }
+    return std::visit(
+        [&](const auto& ax) -> bool {
+            using T = std::decay_t<decltype(ax)>;
+            const auto& bx = std::get<T>(b.data);
+            if (!positions_equal(ax.line, ax.column, bx.line, bx.column)) {
+                return false;
+            }
+            if constexpr (std::is_same_v<T, UnaryExpr>) {
+                return exprs_equal_with_positions(*ax.operand, *bx.operand);
+            } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+                return exprs_equal_with_positions(*ax.left, *bx.left) &&
+                       exprs_equal_with_positions(*ax.right, *bx.right);
+            } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                for (size_t i = 0; i < ax.arguments.size(); ++i) {
+                    if (!exprs_equal_with_positions(*ax.arguments[i],
+                                                    *bx.arguments[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            } else if constexpr (std::is_same_v<T, TemplateStringExpr>) {
+                for (size_t i = 0; i < ax.parts.size(); ++i) {
+                    if (std::holds_alternative<ExprPtr>(ax.parts[i]) &&
+                        !exprs_equal_with_positions(
+                            *std::get<ExprPtr>(ax.parts[i]),
+                            *std::get<ExprPtr>(bx.parts[i]))) {
+                        return false;
+                    }
+                }
+                return true;
+            } else {
+                return true;
+            }
+        },
+        a.data);
+}
+
+bool optional_expr_equal(const std::optional<ExprPtr>& a,
+                         const std::optional<ExprPtr>& b) {
+    if (a.has_value() != b.has_value()) {
+        return false;
+    }
+    if (!a.has_value()) {
+        return true;
+    }
+    return exprs_equal_with_positions(**a, **b);
+}
+
+bool path_segments_equal(const PathSegment& a, const PathSegment& b) {
+    if (a.index() != b.index()) {
+        return false;
+    }
+    return std::visit(
+        [&](const auto& ax) -> bool {
+            using T = std::decay_t<decltype(ax)>;
+            const auto& bx = std::get<T>(b);
+            if (!positions_equal(ax.line, ax.column, bx.line, bx.column)) {
+                return false;
+            }
+            if constexpr (std::is_same_v<T, PathLiteral>) {
+                return ax.value == bx.value;
+            } else if constexpr (std::is_same_v<T, PathVar>) {
+                return ax.name == bx.name;
+            } else if constexpr (std::is_same_v<T, PathInterp>) {
+                return exprs_equal_with_positions(*ax.expression, *bx.expression);
+            }
+        },
+        a);
+}
+
+bool paths_equal(const PathExpr& a, const PathExpr& b) {
+    if (!positions_equal(a.line, a.column, b.line, b.column)) {
+        return false;
+    }
+    if (a.segments.size() != b.segments.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.segments.size(); ++i) {
+        if (!path_segments_equal(a.segments[i], b.segments[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool optional_path_equal(const std::optional<PathExpr>& a,
+                         const std::optional<PathExpr>& b) {
+    if (a.has_value() != b.has_value()) {
+        return false;
+    }
+    if (!a.has_value()) {
+        return true;
+    }
+    return paths_equal(*a, *b);
+}
+
+bool file_sources_equal(const FileSource& a, const FileSource& b) {
+    if (a.index() != b.index()) {
+        return false;
+    }
+    return std::visit(
+        [&](const auto& ax) -> bool {
+            using T = std::decay_t<decltype(ax)>;
+            const auto& bx = std::get<T>(b);
+            if constexpr (std::is_same_v<T, FileFromSource>) {
+                return paths_equal(ax.path, bx.path) &&
+                       ax.verbatim == bx.verbatim;
+            } else if constexpr (std::is_same_v<T, FileContentSource>) {
+                return exprs_equal_with_positions(*ax.value, *bx.value);
+            }
+        },
+        a);
+}
+
+bool stmts_equal(const Stmt& a, const Stmt& b) {
+    if (a.data.index() != b.data.index()) {
+        return false;
+    }
+    return std::visit(
+        [&](const auto& ax) -> bool {
+            using T = std::decay_t<decltype(ax)>;
+            const auto& bx = std::get<T>(b.data);
+            if (!positions_equal(ax.line, ax.column, bx.line, bx.column)) {
+                return false;
+            }
+            if constexpr (std::is_same_v<T, AskStmt>) {
+                if (ax.name != bx.name || ax.prompt != bx.prompt ||
+                    ax.var_type != bx.var_type ||
+                    ax.options.size() != bx.options.size()) {
+                    return false;
+                }
+                if (!optional_expr_equal(ax.default_value, bx.default_value) ||
+                    !optional_expr_equal(ax.when_clause, bx.when_clause)) {
+                    return false;
+                }
+                for (size_t i = 0; i < ax.options.size(); ++i) {
+                    if (!exprs_equal_with_positions(*ax.options[i],
+                                                    *bx.options[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            } else if constexpr (std::is_same_v<T, LetStmt>) {
+                return ax.name == bx.name &&
+                       exprs_equal_with_positions(*ax.value, *bx.value);
+            } else if constexpr (std::is_same_v<T, AssignStmt>) {
+                return ax.name == bx.name &&
+                       exprs_equal_with_positions(*ax.value, *bx.value);
+            } else if constexpr (std::is_same_v<T, MkdirStmt>) {
+                return paths_equal(ax.path, bx.path) && ax.alias == bx.alias &&
+                       ax.mkdir_p == bx.mkdir_p &&
+                       optional_path_equal(ax.from_source, bx.from_source) &&
+                       ax.verbatim == bx.verbatim && ax.mode == bx.mode &&
+                       optional_expr_equal(ax.when_clause, bx.when_clause);
+            } else if constexpr (std::is_same_v<T, FileStmt>) {
+                return paths_equal(ax.path, bx.path) && ax.alias == bx.alias &&
+                       file_sources_equal(ax.source, bx.source) &&
+                       ax.append == bx.append && ax.mode == bx.mode &&
+                       optional_expr_equal(ax.when_clause, bx.when_clause);
+            } else if constexpr (std::is_same_v<T, RepeatStmt>) {
+                if (ax.collection_var != bx.collection_var ||
+                    ax.iterator_var != bx.iterator_var ||
+                    ax.body.size() != bx.body.size() ||
+                    !optional_expr_equal(ax.when_clause, bx.when_clause)) {
+                    return false;
+                }
+                for (size_t i = 0; i < ax.body.size(); ++i) {
+                    if (!stmts_equal(*ax.body[i], *bx.body[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            } else if constexpr (std::is_same_v<T, CopyStmt>) {
+                return paths_equal(ax.source, bx.source) &&
+                       paths_equal(ax.destination, bx.destination) &&
+                       ax.verbatim == bx.verbatim &&
+                       optional_expr_equal(ax.when_clause, bx.when_clause);
+            } else if constexpr (std::is_same_v<T, IncludeStmt>) {
+                return ax.name == bx.name &&
+                       optional_expr_equal(ax.when_clause, bx.when_clause);
+            } else if constexpr (std::is_same_v<T, RunStmt>) {
+                return exprs_equal_with_positions(*ax.command, *bx.command) &&
+                       optional_path_equal(ax.cwd, bx.cwd) &&
+                       optional_expr_equal(ax.when_clause, bx.when_clause);
+            }
+        },
+        a.data);
+}
+
+}  // namespace
+
+bool programs_equal(const Program& a, const Program& b) {
+    if (a.statements.size() != b.statements.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.statements.size(); ++i) {
+        if (!stmts_equal(*a.statements[i], *b.statements[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 }  // namespace spudplate
