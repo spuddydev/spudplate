@@ -29,6 +29,7 @@ void print_usage(std::ostream& err) {
         << "  run [--dry-run] [--yes] <name|file.spud>\n"
         << "                                  run an installed template by name,\n"
         << "                                  or run a .spud file directly\n"
+        << "  validate <file.spud>            parse and validate without installing\n"
         << "  list                            list installed templates\n"
         << "  inspect <name>                  print the source of an installed template\n"
         << "  uninstall <name>                remove an installed template\n";
@@ -226,6 +227,31 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     return 0;
 }
 
+int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc - 2 != 1) {
+        print_usage(err);
+        return 1;
+    }
+    std::filesystem::path source_path{argv[2]};
+    std::ifstream in(source_path);
+    if (!in) {
+        err << source_path.string() << ": cannot open: " << std::strerror(errno)
+            << "\n";
+        return 5;
+    }
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    std::string source = buffer.str();
+
+    int exit_code = 0;
+    if (!validate_template_source(source, source_path.string(), err,
+                                  exit_code)) {
+        return exit_code;
+    }
+    out << "ok\n";
+    return 0;
+}
+
 int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     if (argc != 2) {
         print_usage(err);
@@ -389,6 +415,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
     if (subcommand == "install") {
         return cmd_install(argc, argv, out, err);
+    }
+    if (subcommand == "validate" || subcommand == "check") {
+        return cmd_validate(argc, argv, out, err);
     }
     if (subcommand == "list") {
         return cmd_list(argc, argv, out, err);
