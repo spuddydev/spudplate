@@ -33,7 +33,8 @@ void print_usage(std::ostream& err) {
         << "  list                            list installed templates\n"
         << "  inspect <name>                  print the source of an installed template\n"
         << "  uninstall <name>                remove an installed template\n"
-        << "  version                         print the spudplate version\n";
+        << "  version                         print the spudplate version\n"
+        << "  update [--yes]                  fetch and install the latest spudplate release\n";
 }
 
 // Resolve the directory templates are installed into. Honours, in order:
@@ -233,6 +234,53 @@ int cmd_version(std::ostream& out) {
     return 0;
 }
 
+int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    bool skip_confirm = false;
+    int positional_start = 2;
+    while (positional_start < argc) {
+        std::string arg{argv[positional_start]};
+        if (arg == "--yes" || arg == "-y") {
+            skip_confirm = true;
+            ++positional_start;
+        } else {
+            break;
+        }
+    }
+    if (argc - positional_start != 0) {
+        print_usage(err);
+        return 1;
+    }
+
+    out << "current version: v" << SPUDPLATE_VERSION_STRING << "\n";
+    if (!skip_confirm) {
+        if (!confirm_yes_no(
+                out, "this will download and install the latest spudplate "
+                     "from github. continue? [y/N] ")) {
+            out << "aborted\n";
+            return 0;
+        }
+    }
+
+    // The default command is the same one the README documents. Tests and
+    // anyone with their own mirror can override it via the environment.
+    const char* override_cmd = std::getenv("SPUDPLATE_UPDATE_COMMAND");
+    std::string cmd =
+        override_cmd != nullptr && *override_cmd != '\0'
+            ? std::string{override_cmd}
+            : std::string{
+                  "curl -fsSL "
+                  "https://raw.githubusercontent.com/spuddydev/spudplate/"
+                  "main/install.sh | sh"};
+    out << "running: " << cmd << "\n";
+    int status = std::system(cmd.c_str());
+    if (status != 0) {
+        err << "update command failed (status " << status << ")\n";
+        return 1;
+    }
+    out << "done. run 'spudplate version' to confirm.\n";
+    return 0;
+}
+
 int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     if (argc - 2 != 1) {
         print_usage(err);
@@ -418,6 +466,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     std::string subcommand{argv[1]};
     if (subcommand == "version" || subcommand == "--version") {
         return cmd_version(out);
+    }
+    if (subcommand == "update") {
+        return cmd_update(argc, argv, out, err);
     }
     if (subcommand == "run") {
         return cmd_run(argc, argv, out, err, prompter);
