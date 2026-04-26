@@ -174,6 +174,135 @@ nlohmann::json expr_to_json(const Expr& expr) {
         expr.data);
 }
 
+nlohmann::json optional_expr_to_json(const std::optional<ExprPtr>& opt) {
+    if (!opt.has_value()) {
+        return nullptr;
+    }
+    return expr_to_json(**opt);
+}
+
+nlohmann::json optional_path_to_json(const std::optional<PathExpr>& opt) {
+    if (!opt.has_value()) {
+        return nullptr;
+    }
+    return path_expr_to_json(*opt);
+}
+
+nlohmann::json file_source_to_json(const FileSource& src) {
+    return std::visit(
+        [](const auto& s) -> nlohmann::json {
+            using T = std::decay_t<decltype(s)>;
+            if constexpr (std::is_same_v<T, FileFromSource>) {
+                return {{"type", "FromSource"},
+                        {"path", path_expr_to_json(s.path)},
+                        {"verbatim", s.verbatim}};
+            } else if constexpr (std::is_same_v<T, FileContentSource>) {
+                return {{"type", "Content"},
+                        {"value", expr_to_json(*s.value)}};
+            }
+        },
+        src);
+}
+
+nlohmann::json stmt_to_json(const Stmt& stmt);
+
+nlohmann::json stmt_to_json(const Stmt& stmt) {
+    return std::visit(
+        [](const auto& s) -> nlohmann::json {
+            using T = std::decay_t<decltype(s)>;
+            if constexpr (std::is_same_v<T, AskStmt>) {
+                nlohmann::json options = nlohmann::json::array();
+                for (const auto& opt : s.options) {
+                    options.push_back(expr_to_json(*opt));
+                }
+                return {{"type", "Ask"},
+                        {"name", s.name},
+                        {"prompt", s.prompt},
+                        {"var_type", var_type_to_string(s.var_type)},
+                        {"default_value", optional_expr_to_json(s.default_value)},
+                        {"options", std::move(options)},
+                        {"when_clause", optional_expr_to_json(s.when_clause)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, LetStmt>) {
+                return {{"type", "Let"},
+                        {"name", s.name},
+                        {"value", expr_to_json(*s.value)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, AssignStmt>) {
+                return {{"type", "Assign"},
+                        {"name", s.name},
+                        {"value", expr_to_json(*s.value)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, MkdirStmt>) {
+                return {{"type", "Mkdir"},
+                        {"path", path_expr_to_json(s.path)},
+                        {"alias", s.alias.has_value()
+                                      ? nlohmann::json(*s.alias)
+                                      : nlohmann::json(nullptr)},
+                        {"mkdir_p", s.mkdir_p},
+                        {"from_source", optional_path_to_json(s.from_source)},
+                        {"verbatim", s.verbatim},
+                        {"mode", s.mode.has_value()
+                                     ? nlohmann::json(*s.mode)
+                                     : nlohmann::json(nullptr)},
+                        {"when_clause", optional_expr_to_json(s.when_clause)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, FileStmt>) {
+                return {{"type", "File"},
+                        {"path", path_expr_to_json(s.path)},
+                        {"alias", s.alias.has_value()
+                                      ? nlohmann::json(*s.alias)
+                                      : nlohmann::json(nullptr)},
+                        {"source", file_source_to_json(s.source)},
+                        {"append", s.append},
+                        {"mode", s.mode.has_value()
+                                     ? nlohmann::json(*s.mode)
+                                     : nlohmann::json(nullptr)},
+                        {"when_clause", optional_expr_to_json(s.when_clause)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, RepeatStmt>) {
+                nlohmann::json body = nlohmann::json::array();
+                for (const auto& inner : s.body) {
+                    body.push_back(stmt_to_json(*inner));
+                }
+                return {{"type", "Repeat"},
+                        {"collection_var", s.collection_var},
+                        {"iterator_var", s.iterator_var},
+                        {"body", std::move(body)},
+                        {"when_clause", optional_expr_to_json(s.when_clause)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, CopyStmt>) {
+                return {{"type", "Copy"},
+                        {"source", path_expr_to_json(s.source)},
+                        {"destination", path_expr_to_json(s.destination)},
+                        {"verbatim", s.verbatim},
+                        {"when_clause", optional_expr_to_json(s.when_clause)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, IncludeStmt>) {
+                return {{"type", "Include"},
+                        {"name", s.name},
+                        {"when_clause", optional_expr_to_json(s.when_clause)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            } else if constexpr (std::is_same_v<T, RunStmt>) {
+                return {{"type", "Run"},
+                        {"command", expr_to_json(*s.command)},
+                        {"cwd", optional_path_to_json(s.cwd)},
+                        {"when_clause", optional_expr_to_json(s.when_clause)},
+                        {"line", s.line},
+                        {"column", s.column}};
+            }
+        },
+        stmt.data);
+}
+
 }  // namespace
 
 DeserializeError::DeserializeError(std::string message, std::string json_pointer,
@@ -185,8 +314,13 @@ DeserializeError::DeserializeError(std::string message, std::string json_pointer
       line_(line),
       column_(column) {}
 
-nlohmann::json program_to_json(const Program& /*program*/) {
-    throw std::logic_error("program_to_json: not implemented yet");
+nlohmann::json program_to_json(const Program& program) {
+    nlohmann::json statements = nlohmann::json::array();
+    for (const auto& stmt : program.statements) {
+        statements.push_back(stmt_to_json(*stmt));
+    }
+    return {{"format_version", SPUDPLATE_FORMAT_VERSION},
+            {"statements", std::move(statements)}};
 }
 
 Program program_from_json(const nlohmann::json& /*root*/) {
