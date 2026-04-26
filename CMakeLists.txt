@@ -1,14 +1,26 @@
 cmake_minimum_required(VERSION 3.20)
-project(spudplate LANGUAGES CXX)
+project(spudplate VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Allow the release workflow (or developers) to override the version with
+# `-DSPUDPLATE_VERSION=v0.2.0` so the binary reports the exact tag it was
+# built from. Falls back to the project version otherwise.
+if(NOT DEFINED SPUDPLATE_VERSION)
+    set(SPUDPLATE_VERSION "${PROJECT_VERSION}")
+endif()
+# Strip a leading `v` so `cmake -DSPUDPLATE_VERSION=v0.1.0` and
+# `cmake -DSPUDPLATE_VERSION=0.1.0` produce the same baked string.
+string(REGEX REPLACE "^v" "" SPUDPLATE_VERSION "${SPUDPLATE_VERSION}")
+
 # Library
 add_library(spudplate_lib src/lexer.cpp src/parser.cpp src/validator.cpp
                           src/interpreter.cpp src/cli.cpp)
 target_include_directories(spudplate_lib PUBLIC include)
+target_compile_definitions(spudplate_lib PUBLIC
+    SPUDPLATE_VERSION_STRING="${SPUDPLATE_VERSION}")
 
 # Executable
 add_executable(spudplate src/main.cpp)
