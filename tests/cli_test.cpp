@@ -501,6 +501,73 @@ TEST(CliTest, UninstallRemovesTemplate) {
     EXPECT_FALSE(std::filesystem::exists(home / "demo"));
 }
 
+// --- validate ---
+
+TEST(CliTest, ValidateOkExitsZero) {
+    TmpDir td;
+    auto src = td.path() / "ok.spud";
+    write_file(src, "ask name \"Project name?\" string\nmkdir {name}\n");
+    Argv args({"spudplate", "validate", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("ok"), std::string::npos);
+}
+
+TEST(CliTest, CheckIsAliasForValidate) {
+    TmpDir td;
+    auto src = td.path() / "ok.spud";
+    write_file(src, "mkdir foo\n");
+    Argv args({"spudplate", "check", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+}
+
+TEST(CliTest, ValidateParseErrorExitsTwo) {
+    TmpDir td;
+    auto src = td.path() / "broken.spud";
+    write_file(src, "ask\n");
+    Argv args({"spudplate", "validate", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 2);
+}
+
+TEST(CliTest, ValidateSemanticErrorExitsThree) {
+    TmpDir td;
+    auto src = td.path() / "bad.spud";
+    // Reference an undeclared name from outside a popped repeat scope.
+    write_file(src,
+               "let n = 1\n"
+               "repeat n as i\n"
+               "  let local = 0\n"
+               "end\n"
+               "mkdir {local}\n");
+    Argv args({"spudplate", "validate", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 3);
+}
+
+TEST(CliTest, ValidateMissingFileExitsFive) {
+    TmpDir td;
+    Argv args({"spudplate", "validate", (td.path() / "absent.spud").string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+}
+
 TEST(CliTest, UninstallUnknownExitsFive) {
     TmpDir td;
     auto home = td.path() / "home";
