@@ -32,7 +32,8 @@ void print_usage(std::ostream& err) {
         << "  validate <file.spud>            parse and validate without installing\n"
         << "  list                            list installed templates\n"
         << "  inspect <name>                  print the source of an installed template\n"
-        << "  uninstall <name>                remove an installed template\n";
+        << "  uninstall <name>                remove an installed template\n"
+        << "  version                         print the spudplate version\n";
 }
 
 // Resolve the directory templates are installed into. Honours, in order:
@@ -227,6 +228,11 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     return 0;
 }
 
+int cmd_version(std::ostream& out) {
+    out << "spudplate v" << SPUDPLATE_VERSION_STRING << "\n";
+    return 0;
+}
+
 int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     if (argc - 2 != 1) {
         print_usage(err);
@@ -410,6 +416,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
         return 1;
     }
     std::string subcommand{argv[1]};
+    if (subcommand == "version" || subcommand == "--version") {
+        return cmd_version(out);
+    }
     if (subcommand == "run") {
         return cmd_run(argc, argv, out, err, prompter);
     }
