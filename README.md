@@ -34,6 +34,8 @@ To share a template, export it as a `.spudpack` (a signed zip) and the recipient
 
 ```
 spudplate install my_template.spud      # validate, store under the install root
+spudplate install --yes my_template.spud  # overwrite an existing install without prompting
+spudplate validate my_template.spud     # parse and validate without installing (also: `check`)
 spudplate run my_template               # run by installed name
 spudplate run path/to/file.spud         # or run a file directly
 spudplate list                          # list installed templates
@@ -42,6 +44,8 @@ spudplate uninstall my_template         # remove
 
 spudplate export my_template -o my_template.spudpack
 ```
+
+`install` prompts before overwriting an existing template. Pass `--yes` to skip the prompt (useful for scripts and CI).
 
 The install root is `$SPUDPLATE_HOME` if set, otherwise `$XDG_DATA_HOME/spudplate` (default `~/.local/share/spudplate` on most systems).
 
