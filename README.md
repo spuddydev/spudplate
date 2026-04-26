@@ -42,10 +42,13 @@ spudplate list                          # list installed templates
 spudplate inspect my_template           # print the source
 spudplate uninstall my_template         # remove
 
+spudplate version                       # print the spudplate version
+spudplate update                        # fetch and install the latest spudplate release
+
 spudplate export my_template -o my_template.spudpack
 ```
 
-`install` prompts before overwriting an existing template. Pass `--yes` to skip the prompt (useful for scripts and CI).
+`install` prompts before overwriting an existing template. Pass `--yes` to skip the prompt (useful for scripts and CI). `update` fetches the latest release of spudplate itself by re-running the install script.
 
 The install root is `$SPUDPLATE_HOME` if set, otherwise `$XDG_DATA_HOME/spudplate` (default `~/.local/share/spudplate` on most systems).
 
