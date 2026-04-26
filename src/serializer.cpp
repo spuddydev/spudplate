@@ -303,6 +303,459 @@ nlohmann::json stmt_to_json(const Stmt& stmt) {
         stmt.data);
 }
 
+// ---------------------------------------------------------------------------
+// Decoder
+// ---------------------------------------------------------------------------
+
+[[noreturn]] void fail(const std::string& message, const std::string& pointer,
+                       std::optional<int> line = std::nullopt,
+                       std::optional<int> column = std::nullopt) {
+    throw DeserializeError(message, pointer, line, column);
+}
+
+ExprPtr make_expr(ExprData data) {
+    return std::unique_ptr<Expr>(new Expr{std::move(data)});
+}
+
+StmtPtr make_stmt(StmtData data) {
+    return std::unique_ptr<Stmt>(new Stmt{std::move(data)});
+}
+
+const nlohmann::json& require_field(const nlohmann::json& obj,
+                                    const std::string& field,
+                                    const std::string& pointer) {
+    auto it = obj.find(field);
+    if (it == obj.end()) {
+        fail("missing field '" + field + "'", pointer);
+    }
+    return *it;
+}
+
+std::string require_string(const nlohmann::json& obj, const std::string& field,
+                           const std::string& pointer) {
+    const auto& v = require_field(obj, field, pointer);
+    if (!v.is_string()) {
+        fail("field '" + field + "' must be a string", pointer);
+    }
+    return v.get<std::string>();
+}
+
+int require_int(const nlohmann::json& obj, const std::string& field,
+                const std::string& pointer) {
+    const auto& v = require_field(obj, field, pointer);
+    if (!v.is_number_integer()) {
+        fail("field '" + field + "' must be an integer", pointer);
+    }
+    return v.get<int>();
+}
+
+bool require_bool(const nlohmann::json& obj, const std::string& field,
+                  const std::string& pointer) {
+    const auto& v = require_field(obj, field, pointer);
+    if (!v.is_boolean()) {
+        fail("field '" + field + "' must be a boolean", pointer);
+    }
+    return v.get<bool>();
+}
+
+std::optional<int> require_optional_int(const nlohmann::json& obj,
+                                        const std::string& field,
+                                        const std::string& pointer) {
+    const auto& v = require_field(obj, field, pointer);
+    if (v.is_null()) {
+        return std::nullopt;
+    }
+    if (!v.is_number_integer()) {
+        fail("field '" + field + "' must be an integer or null", pointer);
+    }
+    return v.get<int>();
+}
+
+std::optional<std::string> require_optional_string(const nlohmann::json& obj,
+                                                   const std::string& field,
+                                                   const std::string& pointer) {
+    const auto& v = require_field(obj, field, pointer);
+    if (v.is_null()) {
+        return std::nullopt;
+    }
+    if (!v.is_string()) {
+        fail("field '" + field + "' must be a string or null", pointer);
+    }
+    return v.get<std::string>();
+}
+
+const nlohmann::json& require_array(const nlohmann::json& obj,
+                                    const std::string& field,
+                                    const std::string& pointer) {
+    const auto& v = require_field(obj, field, pointer);
+    if (!v.is_array()) {
+        fail("field '" + field + "' must be an array", pointer);
+    }
+    return v;
+}
+
+TokenType string_to_op(const std::string& s, const std::string& pointer) {
+    if (s == "NOT") return TokenType::NOT;
+    if (s == "PLUS") return TokenType::PLUS;
+    if (s == "MINUS") return TokenType::MINUS;
+    if (s == "STAR") return TokenType::STAR;
+    if (s == "SLASH") return TokenType::SLASH;
+    if (s == "EQUALS") return TokenType::EQUALS;
+    if (s == "NOT_EQUALS") return TokenType::NOT_EQUALS;
+    if (s == "GREATER") return TokenType::GREATER;
+    if (s == "LESS") return TokenType::LESS;
+    if (s == "GREATER_EQUAL") return TokenType::GREATER_EQUAL;
+    if (s == "LESS_EQUAL") return TokenType::LESS_EQUAL;
+    if (s == "AND") return TokenType::AND;
+    if (s == "OR") return TokenType::OR;
+    fail("unknown operator '" + s + "'", pointer);
+}
+
+VarType string_to_var_type(const std::string& s, const std::string& pointer) {
+    if (s == "string") return VarType::String;
+    if (s == "bool") return VarType::Bool;
+    if (s == "int") return VarType::Int;
+    fail("unknown var_type '" + s + "'", pointer);
+}
+
+ExprPtr expr_from_json(const nlohmann::json& j, const std::string& pointer);
+
+PathSegment path_segment_from_json(const nlohmann::json& j,
+                                   const std::string& pointer) {
+    if (!j.is_object()) {
+        fail("path segment must be an object", pointer);
+    }
+    std::string type = require_string(j, "type", pointer);
+    int line = require_int(j, "line", pointer);
+    int column = require_int(j, "column", pointer);
+    if (type == "Literal") {
+        return PathLiteral{
+            .value = require_string(j, "value", pointer),
+            .line = line,
+            .column = column,
+        };
+    }
+    if (type == "Var") {
+        return PathVar{
+            .name = require_string(j, "name", pointer),
+            .line = line,
+            .column = column,
+        };
+    }
+    if (type == "Interp") {
+        return PathInterp{
+            .expression = expr_from_json(require_field(j, "expression", pointer),
+                                         pointer + "/expression"),
+            .line = line,
+            .column = column,
+        };
+    }
+    fail("unknown path segment type '" + type + "'", pointer, line, column);
+}
+
+PathExpr path_expr_from_json(const nlohmann::json& j,
+                             const std::string& pointer) {
+    if (!j.is_object()) {
+        fail("path expression must be an object", pointer);
+    }
+    const auto& segs_json = require_array(j, "segments", pointer);
+    std::vector<PathSegment> segs;
+    segs.reserve(segs_json.size());
+    for (size_t i = 0; i < segs_json.size(); ++i) {
+        segs.push_back(path_segment_from_json(
+            segs_json[i], pointer + "/segments/" + std::to_string(i)));
+    }
+    return PathExpr{
+        .segments = std::move(segs),
+        .line = require_int(j, "line", pointer),
+        .column = require_int(j, "column", pointer),
+    };
+}
+
+ExprPtr expr_from_json(const nlohmann::json& j, const std::string& pointer) {
+    if (!j.is_object()) {
+        fail("expression must be an object", pointer);
+    }
+    std::string type = require_string(j, "type", pointer);
+    int line = require_int(j, "line", pointer);
+    int column = require_int(j, "column", pointer);
+    if (type == "StringLiteral") {
+        return make_expr(StringLiteralExpr{
+            .value = require_string(j, "value", pointer),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "IntegerLiteral") {
+        return make_expr(IntegerLiteralExpr{
+            .value = require_int(j, "value", pointer),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "BoolLiteral") {
+        return make_expr(BoolLiteralExpr{
+            .value = require_bool(j, "value", pointer),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Identifier") {
+        return make_expr(IdentifierExpr{
+            .name = require_string(j, "name", pointer),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Unary") {
+        return make_expr(UnaryExpr{
+            .op = string_to_op(require_string(j, "op", pointer), pointer + "/op"),
+            .operand = expr_from_json(require_field(j, "operand", pointer),
+                                      pointer + "/operand"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Binary") {
+        return make_expr(BinaryExpr{
+            .op = string_to_op(require_string(j, "op", pointer), pointer + "/op"),
+            .left = expr_from_json(require_field(j, "left", pointer),
+                                   pointer + "/left"),
+            .right = expr_from_json(require_field(j, "right", pointer),
+                                    pointer + "/right"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "FunctionCall") {
+        const auto& args_json = require_array(j, "arguments", pointer);
+        std::vector<ExprPtr> args;
+        args.reserve(args_json.size());
+        for (size_t i = 0; i < args_json.size(); ++i) {
+            args.push_back(expr_from_json(
+                args_json[i], pointer + "/arguments/" + std::to_string(i)));
+        }
+        return make_expr(FunctionCallExpr{
+            .name = require_string(j, "name", pointer),
+            .arguments = std::move(args),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "TemplateString") {
+        const auto& parts_json = require_array(j, "parts", pointer);
+        std::vector<std::variant<std::string, ExprPtr>> parts;
+        parts.reserve(parts_json.size());
+        for (size_t i = 0; i < parts_json.size(); ++i) {
+            std::string part_ptr = pointer + "/parts/" + std::to_string(i);
+            const auto& part = parts_json[i];
+            if (!part.is_object()) {
+                fail("template-string part must be an object", part_ptr);
+            }
+            std::string part_type = require_string(part, "type", part_ptr);
+            if (part_type == "Literal") {
+                parts.emplace_back(require_string(part, "value", part_ptr));
+            } else if (part_type == "Expression") {
+                parts.emplace_back(expr_from_json(
+                    require_field(part, "expression", part_ptr),
+                    part_ptr + "/expression"));
+            } else {
+                fail("unknown template-string part type '" + part_type + "'",
+                     part_ptr);
+            }
+        }
+        return make_expr(TemplateStringExpr{
+            .parts = std::move(parts),
+            .line = line,
+            .column = column,
+        });
+    }
+    fail("unknown expression type '" + type + "'", pointer, line, column);
+}
+
+std::optional<ExprPtr> optional_expr_from_json(const nlohmann::json& j,
+                                               const std::string& pointer) {
+    if (j.is_null()) {
+        return std::nullopt;
+    }
+    return expr_from_json(j, pointer);
+}
+
+std::optional<PathExpr> optional_path_from_json(const nlohmann::json& j,
+                                                const std::string& pointer) {
+    if (j.is_null()) {
+        return std::nullopt;
+    }
+    return path_expr_from_json(j, pointer);
+}
+
+FileSource file_source_from_json(const nlohmann::json& j,
+                                 const std::string& pointer) {
+    if (!j.is_object()) {
+        fail("file source must be an object", pointer);
+    }
+    std::string type = require_string(j, "type", pointer);
+    if (type == "FromSource") {
+        return FileFromSource{
+            .path = path_expr_from_json(require_field(j, "path", pointer),
+                                        pointer + "/path"),
+            .verbatim = require_bool(j, "verbatim", pointer),
+        };
+    }
+    if (type == "Content") {
+        return FileContentSource{
+            .value = expr_from_json(require_field(j, "value", pointer),
+                                    pointer + "/value"),
+        };
+    }
+    fail("unknown file source type '" + type + "'", pointer);
+}
+
+StmtPtr stmt_from_json(const nlohmann::json& j, const std::string& pointer);
+
+StmtPtr stmt_from_json(const nlohmann::json& j, const std::string& pointer) {
+    if (!j.is_object()) {
+        fail("statement must be an object", pointer);
+    }
+    std::string type = require_string(j, "type", pointer);
+    int line = require_int(j, "line", pointer);
+    int column = require_int(j, "column", pointer);
+    if (type == "Ask") {
+        const auto& options_json = require_array(j, "options", pointer);
+        std::vector<ExprPtr> options;
+        options.reserve(options_json.size());
+        for (size_t i = 0; i < options_json.size(); ++i) {
+            options.push_back(expr_from_json(
+                options_json[i], pointer + "/options/" + std::to_string(i)));
+        }
+        return make_stmt(AskStmt{
+            .name = require_string(j, "name", pointer),
+            .prompt = require_string(j, "prompt", pointer),
+            .var_type = string_to_var_type(
+                require_string(j, "var_type", pointer), pointer + "/var_type"),
+            .default_value = optional_expr_from_json(
+                require_field(j, "default_value", pointer),
+                pointer + "/default_value"),
+            .options = std::move(options),
+            .when_clause = optional_expr_from_json(
+                require_field(j, "when_clause", pointer),
+                pointer + "/when_clause"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Let") {
+        return make_stmt(LetStmt{
+            .name = require_string(j, "name", pointer),
+            .value = expr_from_json(require_field(j, "value", pointer),
+                                    pointer + "/value"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Assign") {
+        return make_stmt(AssignStmt{
+            .name = require_string(j, "name", pointer),
+            .value = expr_from_json(require_field(j, "value", pointer),
+                                    pointer + "/value"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Mkdir") {
+        return make_stmt(MkdirStmt{
+            .path = path_expr_from_json(require_field(j, "path", pointer),
+                                        pointer + "/path"),
+            .alias = require_optional_string(j, "alias", pointer),
+            .mkdir_p = require_bool(j, "mkdir_p", pointer),
+            .from_source = optional_path_from_json(
+                require_field(j, "from_source", pointer),
+                pointer + "/from_source"),
+            .verbatim = require_bool(j, "verbatim", pointer),
+            .mode = require_optional_int(j, "mode", pointer),
+            .when_clause = optional_expr_from_json(
+                require_field(j, "when_clause", pointer),
+                pointer + "/when_clause"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "File") {
+        return make_stmt(FileStmt{
+            .path = path_expr_from_json(require_field(j, "path", pointer),
+                                        pointer + "/path"),
+            .alias = require_optional_string(j, "alias", pointer),
+            .source = file_source_from_json(require_field(j, "source", pointer),
+                                            pointer + "/source"),
+            .append = require_bool(j, "append", pointer),
+            .mode = require_optional_int(j, "mode", pointer),
+            .when_clause = optional_expr_from_json(
+                require_field(j, "when_clause", pointer),
+                pointer + "/when_clause"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Repeat") {
+        const auto& body_json = require_array(j, "body", pointer);
+        std::vector<StmtPtr> body;
+        body.reserve(body_json.size());
+        for (size_t i = 0; i < body_json.size(); ++i) {
+            body.push_back(stmt_from_json(
+                body_json[i], pointer + "/body/" + std::to_string(i)));
+        }
+        return make_stmt(RepeatStmt{
+            .collection_var = require_string(j, "collection_var", pointer),
+            .iterator_var = require_string(j, "iterator_var", pointer),
+            .body = std::move(body),
+            .when_clause = optional_expr_from_json(
+                require_field(j, "when_clause", pointer),
+                pointer + "/when_clause"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Copy") {
+        return make_stmt(CopyStmt{
+            .source = path_expr_from_json(require_field(j, "source", pointer),
+                                          pointer + "/source"),
+            .destination = path_expr_from_json(
+                require_field(j, "destination", pointer),
+                pointer + "/destination"),
+            .verbatim = require_bool(j, "verbatim", pointer),
+            .when_clause = optional_expr_from_json(
+                require_field(j, "when_clause", pointer),
+                pointer + "/when_clause"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Include") {
+        return make_stmt(IncludeStmt{
+            .name = require_string(j, "name", pointer),
+            .when_clause = optional_expr_from_json(
+                require_field(j, "when_clause", pointer),
+                pointer + "/when_clause"),
+            .line = line,
+            .column = column,
+        });
+    }
+    if (type == "Run") {
+        return make_stmt(RunStmt{
+            .command = expr_from_json(require_field(j, "command", pointer),
+                                      pointer + "/command"),
+            .cwd = optional_path_from_json(require_field(j, "cwd", pointer),
+                                           pointer + "/cwd"),
+            .when_clause = optional_expr_from_json(
+                require_field(j, "when_clause", pointer),
+                pointer + "/when_clause"),
+            .line = line,
+            .column = column,
+        });
+    }
+    fail("unknown statement type '" + type + "'", pointer, line, column);
+}
+
 }  // namespace
 
 DeserializeError::DeserializeError(std::string message, std::string json_pointer,
@@ -323,8 +776,37 @@ nlohmann::json program_to_json(const Program& program) {
             {"statements", std::move(statements)}};
 }
 
-Program program_from_json(const nlohmann::json& /*root*/) {
-    throw std::logic_error("program_from_json: not implemented yet");
+Program program_from_json(const nlohmann::json& root) {
+    try {
+        if (!root.is_object()) {
+            throw DeserializeError("root must be a JSON object", "");
+        }
+        const auto& version = require_field(root, "format_version", "");
+        if (!version.is_number_integer()) {
+            throw DeserializeError("'format_version' must be an integer",
+                                   "/format_version");
+        }
+        int got = version.get<int>();
+        if (got != SPUDPLATE_FORMAT_VERSION) {
+            throw DeserializeError(
+                "format_version mismatch: expected " +
+                    std::to_string(SPUDPLATE_FORMAT_VERSION) + ", got " +
+                    std::to_string(got),
+                "/format_version");
+        }
+        const auto& stmts_json = require_array(root, "statements", "");
+        Program out;
+        out.statements.reserve(stmts_json.size());
+        for (size_t i = 0; i < stmts_json.size(); ++i) {
+            out.statements.push_back(stmt_from_json(
+                stmts_json[i], "/statements/" + std::to_string(i)));
+        }
+        return out;
+    } catch (const DeserializeError&) {
+        throw;
+    } catch (const nlohmann::json::exception& e) {
+        throw DeserializeError(std::string("json error: ") + e.what(), "");
+    }
 }
 
 bool programs_equal(const Program& /*a*/, const Program& /*b*/) {
