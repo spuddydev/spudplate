@@ -17,7 +17,7 @@ string(REGEX REPLACE "^v" "" SPUDPLATE_VERSION "${SPUDPLATE_VERSION}")
 
 # Library
 add_library(spudplate_lib src/lexer.cpp src/parser.cpp src/validator.cpp
-                          src/interpreter.cpp src/cli.cpp)
+                          src/interpreter.cpp src/cli.cpp src/serializer.cpp)
 target_include_directories(spudplate_lib PUBLIC include)
 target_compile_definitions(spudplate_lib PUBLIC
     SPUDPLATE_VERSION_STRING="${SPUDPLATE_VERSION}")
@@ -33,23 +33,35 @@ target_link_libraries(spudplate PRIVATE spudplate_lib)
 include(GNUInstallDirs)
 install(TARGETS spudplate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# Testing
+# Dependencies
 include(FetchContent)
-# `INSTALL_GTEST OFF` keeps googletest's headers and static libraries out
-# of `cmake --install`, so the install only contains the spudplate binary.
+
+# `INSTALL_GTEST OFF` and `JSON_Install OFF` keep these dependencies'
+# headers and static libraries out of `cmake --install`, so the install
+# prefix only contains the spudplate binary.
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
     GIT_TAG v1.16.0
 )
-FetchContent_MakeAvailable(googletest)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(googletest nlohmann_json)
+
+target_link_libraries(spudplate_lib PUBLIC nlohmann_json::nlohmann_json)
 
 enable_testing()
 
 add_executable(spudplate_tests tests/lexer_test.cpp tests/parser_test.cpp
                tests/validator_test.cpp tests/interpreter_test.cpp
-               tests/cli_test.cpp)
+               tests/cli_test.cpp tests/serializer_test.cpp)
 target_link_libraries(spudplate_tests PRIVATE spudplate_lib GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(spudplate_tests)
