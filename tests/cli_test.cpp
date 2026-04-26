@@ -558,6 +558,67 @@ TEST(CliTest, ValidateSemanticErrorExitsThree) {
     EXPECT_EQ(code, 3);
 }
 
+// --- version / update ---
+
+TEST(CliTest, VersionPrintsBakedString) {
+    Argv args({"spudplate", "version"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("spudplate v"), std::string::npos);
+}
+
+TEST(CliTest, VersionFlagAcceptsDoubleDash) {
+    Argv args({"spudplate", "--version"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("spudplate v"), std::string::npos);
+}
+
+TEST(CliTest, UpdateWithYesRunsOverrideCommand) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    override.set("true");  // /bin/true succeeds, no network access
+    Argv args({"spudplate", "update", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("done"), std::string::npos);
+    EXPECT_NE(out.str().find("running: true"), std::string::npos);
+}
+
+TEST(CliTest, UpdateFailingCommandExitsOne) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    override.set("false");  // /bin/false exits non-zero
+    Argv args({"spudplate", "update", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("update command failed"), std::string::npos);
+}
+
+TEST(CliTest, UpdateDeclinedPromptAbortsCleanly) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    // Set to a command that would fail loudly so the test catches any
+    // accidental fall-through to execution.
+    override.set("false");
+    Argv args({"spudplate", "update"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("aborted"), std::string::npos);
+}
+
 TEST(CliTest, ValidateMissingFileExitsFive) {
     TmpDir td;
     Argv args({"spudplate", "validate", (td.path() / "absent.spud").string()});
