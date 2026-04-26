@@ -277,23 +277,61 @@ TEST(CliTest, InstallSuccessStoresTemplate) {
     EXPECT_NE(out.str().find("installed demo"), std::string::npos);
 }
 
-TEST(CliTest, InstallRejectsDuplicate) {
+TEST(CliTest, InstallWithYesOverwritesExisting) {
     TmpDir td;
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
     write_file(src, "mkdir foo\n");
-    Argv args({"spudplate", "install", src.string()});
-    std::stringstream out1;
-    std::stringstream err1;
+    {
+        Argv args({"spudplate", "install", src.string()});
+        std::stringstream o;
+        std::stringstream e;
+        ScriptedPrompter p({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+    }
+    // Rewrite the source so we can detect that the new content landed.
+    write_file(src, "mkdir bar\n");
+    Argv args({"spudplate", "install", "--yes", src.string()});
+    std::stringstream out;
+    std::stringstream err;
     ScriptedPrompter prompter({});
-    ASSERT_EQ(cli_main(args.argc(), args.argv(), out1, err1, prompter), 0)
-        << err1.str();
-    std::stringstream out2;
-    std::stringstream err2;
-    int code = cli_main(args.argc(), args.argv(), out2, err2, prompter);
-    EXPECT_EQ(code, 1);
-    EXPECT_NE(err2.str().find("already installed"), std::string::npos);
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("reinstalled demo"), std::string::npos);
+    std::ifstream installed(home / "demo" / "template.spud");
+    std::stringstream contents;
+    contents << installed.rdbuf();
+    EXPECT_EQ(contents.str(), "mkdir bar\n");
+}
+
+TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir foo\n");
+    {
+        Argv args({"spudplate", "install", src.string()});
+        std::stringstream o;
+        std::stringstream e;
+        ScriptedPrompter p({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+    }
+    // No `--yes` and no stdin available — confirm() returns false and the
+    // command aborts cleanly with exit 0.
+    write_file(src, "mkdir bar\n");
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("aborted"), std::string::npos);
+    std::ifstream installed(home / "demo" / "template.spud");
+    std::stringstream contents;
+    contents << installed.rdbuf();
+    EXPECT_EQ(contents.str(), "mkdir foo\n");
 }
 
 TEST(CliTest, InstallRejectsBrokenTemplateAndLeavesNoTrace) {
