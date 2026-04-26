@@ -1,11 +1,13 @@
 #include "spudplate/cli.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -22,10 +24,12 @@ namespace {
 
 void print_usage(std::ostream& err) {
     err << "usage: spudplate <command> [args...]\n"
-        << "  install <file.spud>             validate and store a template\n"
+        << "  install [--yes] <file.spud>     validate and store a template;\n"
+        << "                                  prompts before overwriting an existing one\n"
         << "  run [--dry-run] [--yes] <name|file.spud>\n"
         << "                                  run an installed template by name,\n"
         << "                                  or run a .spud file directly\n"
+        << "  validate <file.spud>            parse and validate without installing\n"
         << "  list                            list installed templates\n"
         << "  inspect <name>                  print the source of an installed template\n"
         << "  uninstall <name>                remove an installed template\n";
@@ -111,13 +115,41 @@ bool validate_template_source(const std::string& source,
     return true;
 }
 
+// Read a single line from stdin and return true if it parses as
+// affirmative (`y`, `yes`, case-insensitive). Empty input returns false so
+// the prompt's `[y/N]` default is "no".
+bool confirm_yes_no(std::ostream& out, const std::string& prompt) {
+    out << prompt << std::flush;
+    std::string line;
+    if (!std::getline(std::cin, line)) {
+        return false;
+    }
+    std::string lc;
+    lc.reserve(line.size());
+    for (char c : line) {
+        lc.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    return lc == "y" || lc == "yes";
+}
+
 int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
-    if (argc - 2 != 1) {
+    bool skip_confirm = false;
+    int positional_start = 2;
+    while (positional_start < argc) {
+        std::string arg{argv[positional_start]};
+        if (arg == "--yes" || arg == "-y") {
+            skip_confirm = true;
+            ++positional_start;
+        } else {
+            break;
+        }
+    }
+    if (argc - positional_start != 1) {
         print_usage(err);
         return 1;
     }
 
-    std::filesystem::path source_path{argv[2]};
+    std::filesystem::path source_path{argv[positional_start]};
     std::ifstream in(source_path);
     if (!in) {
         err << source_path.string() << ": cannot open: " << std::strerror(errno)
@@ -148,11 +180,24 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
 
     std::filesystem::path target_dir = home / name;
-    if (std::filesystem::exists(target_dir)) {
-        err << name
-            << ": already installed (use 'spudplate uninstall " << name
-            << "' first)\n";
-        return 1;
+    bool overwriting = std::filesystem::exists(target_dir);
+    if (overwriting && !skip_confirm) {
+        if (!confirm_yes_no(
+                out, "this will overwrite the existing '" + name +
+                         "' template. continue? [y/N] ")) {
+            out << "aborted\n";
+            return 0;
+        }
+    }
+    if (overwriting) {
+        std::error_code rm_ec;
+        std::filesystem::remove_all(target_dir, rm_ec);
+        if (rm_ec) {
+            err << target_dir.string()
+                << ": cannot remove existing install: " << rm_ec.message()
+                << "\n";
+            return 1;
+        }
     }
 
     std::error_code ec;
@@ -177,7 +222,33 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
 
-    out << "installed " << name << " to " << target_dir.string() << "\n";
+    out << (overwriting ? "reinstalled " : "installed ") << name << " to "
+        << target_dir.string() << "\n";
+    return 0;
+}
+
+int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc - 2 != 1) {
+        print_usage(err);
+        return 1;
+    }
+    std::filesystem::path source_path{argv[2]};
+    std::ifstream in(source_path);
+    if (!in) {
+        err << source_path.string() << ": cannot open: " << std::strerror(errno)
+            << "\n";
+        return 5;
+    }
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    std::string source = buffer.str();
+
+    int exit_code = 0;
+    if (!validate_template_source(source, source_path.string(), err,
+                                  exit_code)) {
+        return exit_code;
+    }
+    out << "ok\n";
     return 0;
 }
 
@@ -344,6 +415,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
     if (subcommand == "install") {
         return cmd_install(argc, argv, out, err);
+    }
+    if (subcommand == "validate" || subcommand == "check") {
+        return cmd_validate(argc, argv, out, err);
     }
     if (subcommand == "list") {
         return cmd_list(argc, argv, out, err);
