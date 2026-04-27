@@ -256,6 +256,7 @@ class SourceProvider {
  */
 class AssetMapSourceProvider final : public SourceProvider {
   public:
+    /** @brief Construct over a borrowed asset vector; the caller owns the lifetime. */
     explicit AssetMapSourceProvider(const std::vector<SpudpackAsset>& assets);
 
     std::pair<std::vector<std::uint8_t>, std::uint16_t> read(

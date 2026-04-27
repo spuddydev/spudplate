@@ -78,6 +78,7 @@ class BinarySerializeError : public std::runtime_error {
  */
 class BinaryDeserializeError : public std::runtime_error {
   public:
+    /** @brief Construct with a message and the byte offset where decoding failed. */
     BinaryDeserializeError(std::string message, std::size_t offset);
 
     /** @brief Byte offset within the decoded buffer where the failure occurred. */
