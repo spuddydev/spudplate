@@ -132,6 +132,10 @@ struct Scope {
 struct AliasCtx {
     std::unordered_map<std::string, std::optional<ExprPtr>> registry;
     TypeMap type_map;
+    // Flag flipped by an `if` body walker so the when-requires-default rule
+    // can grant a context-sensitive exemption. Save/restore around the body
+    // walk; default false at program scope.
+    bool inside_if_body{false};
 };
 
 void walk_expr(const Expr& expr, const Scope& scope);
@@ -228,6 +232,17 @@ void check_shadowing(const std::string& name, int line, int column,
     }
 }
 
+void check_when_requires_default(const AskStmt& s, const AliasCtx& ctx) {
+    if (ctx.inside_if_body) {
+        return;
+    }
+    if (s.when_clause.has_value() && !s.default_value.has_value()) {
+        throw SemanticError("when-gated ask '" + s.name +
+                                "' requires a default value (add: default <value>)",
+                            s.line, s.column);
+    }
+}
+
 // Called by mkdir/file to record an alias binding in the registry if the
 // binding is outside any repeat body.
 void register_alias_binding(const std::string& name,
@@ -248,6 +263,7 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
         [&](const auto& s) {
             using T = std::decay_t<decltype(s)>;
             if constexpr (std::is_same_v<T, AskStmt>) {
+                check_when_requires_default(s, ctx);
                 if (s.default_value.has_value()) {
                     walk_expr(**s.default_value, scope);
                 }
