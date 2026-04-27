@@ -374,7 +374,7 @@ use_tests
 
 Spudlang interpolates `{expr}` in three places:
 
-- **String literals** in any expression - `let s = "hello {name}"`, `run "echo {label}"`, `ask q "{prompt_for}?" string`. The full expression grammar applies inside the braces (identifiers, arithmetic, function calls, string concatenation). Each interpolation result is stringified and concatenated with the surrounding literal text. Brace pairs are balanced, so `{f({x})}` parses as a single interpolation. A `"` inside an interpolation closes the surrounding string literal - keep the inner expression to identifiers and operations on them, or bind a value with `let` first.
+- **String literals** in any expression - `let s = "hello {name}"`, `run "echo {label}"`, `ask q "{prompt_for}?" string`. The full expression grammar applies inside the braces (identifiers, arithmetic, function calls, string concatenation). Each interpolation result is stringified and concatenated with the surrounding literal text. Brace pairs are balanced, so `{f({x})}` parses as a single interpolation. A literal double-quote inside an interpolation closes the surrounding string literal - keep the inner expression to identifiers and operations on them, or bind a value with `let` first.
 - **Path expressions** in `mkdir`, `file`, `copy` - `mkdir week_{n}`, `mkdir {prefix}/notes`. Same expression grammar, with no surrounding quotes.
 - **`from` source files** and files copied by `copy` - only bare `{ident}` substitution is applied to file contents read from disk; no function calls or arithmetic inside the braces. Use `verbatim` to copy file contents byte-for-byte without any substitution. A literal `{` or `}` in a non-verbatim source is a runtime error; switch the statement to `verbatim` if you need literal braces.
 
