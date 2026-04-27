@@ -116,6 +116,43 @@ class Reader {
         return s;
     }
 
+    // Read a varint that names a vector element count and bound it against
+    // the bytes left in the input. Each AST element encodes to at least one
+    // byte (a tag), so the count cannot legitimately exceed `remaining()`.
+    // This stops a hand-crafted `n = 2^60` from triggering a multi-gigabyte
+    // `vector::reserve` before the truncation error fires.
+    std::size_t read_count() {
+        const std::size_t start = pos_;
+        const std::uint64_t n = read_varint();
+        if (n > remaining()) {
+            throw BinaryDeserializeError(
+                "element count exceeds remaining input", start);
+        }
+        return static_cast<std::size_t>(n);
+    }
+
+    // Recursion-depth tracker for expression / statement decoding. Real
+    // programs nest a handful of levels at most (a few binary operators
+    // inside a `when` clause, a couple of nested `repeat` blocks). A
+    // pathological `.spp` could chain thousands of `repeat` or binary-op
+    // nodes and blow the call stack; the cap keeps the worst case bounded.
+    class DepthGuard {
+      public:
+        explicit DepthGuard(Reader& r) : r_(r) {
+            constexpr std::size_t kMaxDepth = 256;
+            if (++r_.depth_ > kMaxDepth) {
+                throw BinaryDeserializeError(
+                    "recursion depth exceeds 256", r_.pos_);
+            }
+        }
+        ~DepthGuard() { --r_.depth_; }
+        DepthGuard(const DepthGuard&) = delete;
+        DepthGuard& operator=(const DepthGuard&) = delete;
+
+      private:
+        Reader& r_;
+    };
+
   private:
     void require(std::size_t n, const char* msg) {
         if (pos_ + n > size_) {
@@ -136,6 +173,7 @@ class Reader {
     const std::uint8_t* data_;
     std::size_t size_;
     std::size_t pos_ = 0;
+    std::size_t depth_ = 0;
 };
 
 // ----- Token / VarType wire encoding --------------------------------------
@@ -262,10 +300,10 @@ void encode_expr_vector(Writer& w, const std::vector<ExprPtr>& v) {
 }
 
 std::vector<ExprPtr> decode_expr_vector(Reader& r) {
-    const std::uint64_t n = r.read_varint();
+    const std::size_t n = r.read_count();
     std::vector<ExprPtr> v;
-    v.reserve(static_cast<std::size_t>(n));
-    for (std::uint64_t i = 0; i < n; ++i) {
+    v.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
         v.push_back(decode_expr(r));
     }
     return v;
@@ -332,9 +370,9 @@ void encode_path_expr(Writer& w, const PathExpr& p) {
 
 PathExpr decode_path_expr(Reader& r) {
     PathExpr p;
-    const std::uint64_t n = r.read_varint();
-    p.segments.reserve(static_cast<std::size_t>(n));
-    for (std::uint64_t i = 0; i < n; ++i) {
+    const std::size_t n = r.read_count();
+    p.segments.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
         p.segments.push_back(decode_path_segment(r));
     }
     p.line = static_cast<int>(r.read_zigzag());
@@ -431,6 +469,7 @@ void encode_expr(Writer& w, const Expr& e) {
 }
 
 ExprPtr decode_expr(Reader& r) {
+    Reader::DepthGuard guard(r);
     const std::size_t at = r.pos();
     const std::uint8_t tag = r.read_u8();
     auto wrap = [](auto&& data) {
@@ -511,10 +550,10 @@ ExprPtr decode_expr(Reader& r) {
                                          .column = column});
         }
         case ExprTag::TemplateString: {
-            const std::uint64_t n = r.read_varint();
+            const std::size_t n = r.read_count();
             std::vector<std::variant<std::string, ExprPtr>> parts;
-            parts.reserve(static_cast<std::size_t>(n));
-            for (std::uint64_t i = 0; i < n; ++i) {
+            parts.reserve(n);
+            for (std::size_t i = 0; i < n; ++i) {
                 const std::size_t sub_at = r.pos();
                 const std::uint8_t sub = r.read_u8();
                 switch (static_cast<TemplatePartTag>(sub)) {
@@ -603,6 +642,7 @@ void encode_stmt(Writer& w, const Stmt& s) {
 }
 
 StmtPtr decode_stmt(Reader& r) {
+    Reader::DepthGuard guard(r);
     const std::size_t at = r.pos();
     const std::uint8_t tag = r.read_u8();
     auto wrap = [](auto&& data) {
@@ -690,10 +730,10 @@ StmtPtr decode_stmt(Reader& r) {
         case StmtTag::Repeat: {
             std::string collection_var = r.read_string();
             std::string iterator_var = r.read_string();
-            const std::uint64_t n = r.read_varint();
+            const std::size_t n = r.read_count();
             std::vector<StmtPtr> body;
-            body.reserve(static_cast<std::size_t>(n));
-            for (std::uint64_t i = 0; i < n; ++i) {
+            body.reserve(n);
+            for (std::size_t i = 0; i < n; ++i) {
                 body.push_back(decode_stmt(r));
             }
             auto when_clause = decode_opt_expr(r);
@@ -760,9 +800,9 @@ std::vector<std::uint8_t> serialize_program(const Program& program) {
 Program deserialize_program(const std::uint8_t* data, std::size_t size) {
     Reader r(data, size);
     Program p;
-    const std::uint64_t n = r.read_varint();
-    p.statements.reserve(static_cast<std::size_t>(n));
-    for (std::uint64_t i = 0; i < n; ++i) {
+    const std::size_t n = r.read_count();
+    p.statements.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
         p.statements.push_back(decode_stmt(r));
     }
     return p;

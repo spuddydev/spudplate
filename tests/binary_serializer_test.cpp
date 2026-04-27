@@ -462,6 +462,35 @@ TEST(BinarySerializer, EmptyProgramRoundTrips) {
     expect_round_trip(program_with({}));
 }
 
+TEST(BinarySerializer, RejectsHugeStatementCount) {
+    // Statement count varint encodes a huge value with no statements
+    // following. The decoder must reject without OOM-reserving.
+    std::vector<std::uint8_t> bytes;
+    // Varint for ~2^60 — 9 continuation bytes plus a high terminator.
+    for (int i = 0; i < 9; ++i) bytes.push_back(0xFF);
+    bytes.push_back(0x0F);
+    EXPECT_THROW(deserialize_program(bytes.data(), bytes.size()),
+                 BinaryDeserializeError);
+}
+
+TEST(BinarySerializer, RejectsDeeplyNestedExpressions) {
+    // A chain of unary `not` ops nested 1000 deep. Each level encodes as
+    // [tag, op_token, ...nested...]; the decoder caps recursion at 256.
+    std::vector<std::uint8_t> bytes;
+    bytes.push_back(0x01);  // statement count = 1
+    bytes.push_back(static_cast<std::uint8_t>(StmtTag::Let));
+    bytes.push_back(0x01);  // name length = 1
+    bytes.push_back('x');   // name
+    for (int i = 0; i < 300; ++i) {
+        bytes.push_back(static_cast<std::uint8_t>(ExprTag::Unary));
+        bytes.push_back(static_cast<std::uint8_t>(TokenType::NOT));
+    }
+    // Inner-most operand and the rest of the encoding will be truncated;
+    // we only need to verify the depth cap fires before stack overflow.
+    EXPECT_THROW(deserialize_program(bytes.data(), bytes.size()),
+                 BinaryDeserializeError);
+}
+
 TEST(BinarySerializer, DeserializeErrorCarriesOffset) {
     // Single byte 0xFF: invalid as a varint (would need continuation), but
     // legal as a single 7-bit value of 127 — actually 0xFF has the high bit
