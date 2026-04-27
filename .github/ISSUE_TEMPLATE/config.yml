@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Syntax reference
+    url: https://spuddydev.github.io/spudplate/
+    about: Full spudlang language reference (Doxygen site).
+  - name: VS Code extension
+    url: https://github.com/spuddydev/spudlang-vscode
+    about: Syntax highlighting for .spud files.
