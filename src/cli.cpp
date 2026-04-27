@@ -55,9 +55,9 @@ void print_usage(std::ostream& err) {
 }
 
 // Resolve the directory templates are installed into. Honours, in order:
-//   1. `SPUDPLATE_HOME` — explicit override (used by tests and dev setups).
-//   2. `XDG_DATA_HOME/spudplate` — the XDG Base Directory standard.
-//   3. `$HOME/.local/share/spudplate` — XDG default when the env var is unset.
+//   1. `SPUDPLATE_HOME` - explicit override (used by tests and dev setups).
+//   2. `XDG_DATA_HOME/spudplate` - the XDG Base Directory standard.
+//   3. `$HOME/.local/share/spudplate` - XDG default when the env var is unset.
 // Returns an empty path if none of those sources is available so the caller
 // can surface a usable error.
 std::filesystem::path install_dir() {
@@ -263,7 +263,7 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::filesystem::path final_path = home / (name + ".spp");
     std::filesystem::path tmp_path = home / (name + ".spp.tmp");
 
-    // Step 7a — refuse to clobber a stray non-regular file/dir that
+    // Step 7a - refuse to clobber a stray non-regular file/dir that
     // happens to sit at the destination. Surfacing this here gives a
     // friendlier diagnostic than letting the rename fail later.
     if (std::filesystem::exists(final_path) &&
@@ -273,7 +273,7 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
 
-    // Step 7b — overwrite prompt fires when either form (`<name>.spp` or
+    // Step 7b - overwrite prompt fires when either form (`<name>.spp` or
     // legacy `<name>/`) is present. Capture the legacy flag now so the
     // step-11 cleanup runs even when the prompt is suppressed by `--yes`.
     bool spp_existed = std::filesystem::exists(final_path);
@@ -419,7 +419,7 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
     if (!std::filesystem::is_directory(home)) {
-        return 0;  // No installs yet — empty output, success.
+        return 0;  // No installs yet - empty output, success.
     }
     std::vector<std::string> names;
     std::vector<std::string> shadowed_legacy;

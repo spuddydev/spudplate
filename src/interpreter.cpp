@@ -92,7 +92,7 @@ struct PendingCheckDir {
 };
 
 // A `run` statement queued for flush-time execution. The command stored
-// here is the *evaluated* expression result — what /bin/sh -c will run.
+// here is the *evaluated* expression result - what /bin/sh -c will run.
 // `cwd` is the optional resolved working directory from the `in <path>`
 // clause. The user authorised the literal source at the start of the run,
 // before any expression evaluated. Source-vs-resolved drift (the shell-
@@ -156,7 +156,7 @@ class DiskSourceProvider final : public SourceProvider {
             } else if (it->is_regular_file()) {
                 out.push_back({std::move(rel), /*is_directory=*/false, 0});
             }
-            // symlinks, fifos, etc. silently skipped — preserves v1
+            // symlinks, fifos, etc. silently skipped - preserves v1
             // bare-`.spud` behaviour byte-for-byte.
         }
         return out;
@@ -185,7 +185,7 @@ std::pair<std::string, std::uint16_t> read_source_file(
     }
 }
 
-// A source file is treated as binary — and therefore not interpolated —
+// A source file is treated as binary - and therefore not interpolated -
 // when it contains any NUL byte. This is the unambiguous binary signal:
 // every common binary format (PNG, JPEG, ELF, fonts, gzip) carries NUL
 // bytes in the first kilobyte. Latin-1 templates with stray high bytes
@@ -197,7 +197,7 @@ bool content_is_binary(std::string_view content) {
 
 // Substitute `{ident}` occurrences in `content` with the stringified value
 // of `ident` looked up in `env`. The grammar is deliberately narrow for v1
-// — only bare identifiers are accepted; arbitrary expressions are not. Use
+// - only bare identifiers are accepted; arbitrary expressions are not. Use
 // `verbatim` to copy file contents byte-for-byte without substitution.
 std::string interpolate_content(const std::string& content,
                                 const Environment& env, int line, int column) {
@@ -297,7 +297,7 @@ const char* type_name(const Value& v) {
     throw RuntimeError(msg, line, column);
 }
 
-// Wrap-around helpers — signed overflow is UB in C++, so route arithmetic
+// Wrap-around helpers - signed overflow is UB in C++, so route arithmetic
 // through unsigned and cast the bit pattern back.
 std::int64_t wrap_add(std::int64_t a, std::int64_t b) {
     return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) +
@@ -335,7 +335,7 @@ bool int_compare(TokenType op, std::int64_t a, std::int64_t b) {
         case TokenType::LESS_EQUAL:
             return a <= b;
         default:
-            return false;  // unreachable — caller restricts the op set
+            return false;  // unreachable - caller restricts the op set
     }
 }
 
@@ -385,7 +385,7 @@ Value eval_binary(const BinaryExpr& bin, const Environment& env) {
                                  std::get<std::int64_t>(right))};
     }
 
-    // Arithmetic — `+` accepts both int+int and string+string; the others
+    // Arithmetic - `+` accepts both int+int and string+string; the others
     // are int-only.
     if (bin.op == TokenType::PLUS && std::holds_alternative<std::string>(left) &&
         std::holds_alternative<std::string>(right)) {
@@ -485,7 +485,7 @@ const char* expected_message(VarType type) {
 }
 
 // Render an expression as a readable approximation of its source text. Used
-// only by the trust prompt — users see the *structure* of each `run`
+// only by the trust prompt - users see the *structure* of each `run`
 // command before authorising, even though the actual value executed at
 // flush time may differ (interpolated identifiers, computed strings, etc).
 std::string preview_expr(const Expr& expr) {
@@ -552,7 +552,7 @@ std::string preview_expr(const Expr& expr) {
 // Walk every RunStmt in the program (top-level and inside repeat bodies)
 // and append a one-line preview of each command's source-form expression
 // to `out`. Repeat-internal commands are tagged so the user knows they
-// may run multiple times — or not at all.
+// may run multiple times - or not at all.
 // Render a path expression as a readable approximation of its source. Used
 // by the trust prompt to surface the `in <path>` clause on `run` statements.
 std::string preview_path(const PathExpr& path) {
@@ -586,7 +586,7 @@ void collect_run_previews(const std::vector<StmtPtr>& body,
                         line += " in " + preview_path(*s.cwd);
                     }
                     if (inside_repeat) {
-                        line += "  (inside repeat — may run 0 or many times)";
+                        line += "  (inside repeat - may run 0 or many times)";
                     }
                     if (s.when_clause.has_value()) {
                         line += "  (conditional)";
@@ -834,7 +834,7 @@ class Interpreter {
         }
         std::int64_t count = std::get<std::int64_t>(*count_v);
         if (count < 0) {
-            return;  // matches n == 0 — empty loop, no throw
+            return;  // matches n == 0 - empty loop, no throw
         }
 
         for (std::int64_t i = 0; i < count; ++i) {
@@ -932,7 +932,7 @@ class Interpreter {
     // its tree under `dst_root`. recursive_directory_iterator visits parents
     // before children, so the queued ops naturally satisfy create-parent-
     // first ordering at flush time. Symlinks and other non-regular entries
-    // are skipped — v1 has no defined behaviour for them.
+    // are skipped - v1 has no defined behaviour for them.
     void walk_source_into_pending(const std::string& src,
                                   const std::string& dst_root, bool verbatim,
                                   int line, int column) {
@@ -946,7 +946,7 @@ class Interpreter {
         // The disk-backed provider returns nothing for a missing source.
         // The historical behaviour is to surface a precise error in that
         // case, so the walker double-checks existence here when the
-        // provider produced no entries — but only against the disk so
+        // provider produced no entries - but only against the disk so
         // the asset-map case is not regressed.
         if (entries.empty()) {
             std::error_code ec;
@@ -1038,7 +1038,7 @@ class Interpreter {
                 content = interpolate_content(content, env_, s.line, s.column);
             }
             // Explicit `mode` on the statement wins over the source's mode;
-            // otherwise propagate the source mode (asset-map only — disk
+            // otherwise propagate the source mode (asset-map only - disk
             // provider always reports zero so bare-`.spud` runs preserve
             // the historical `nullopt`).
             if (!mode.has_value() && src_mode != 0) {
@@ -1126,7 +1126,7 @@ class Interpreter {
 
     void run_op(const PendingFile& op) {
         // For non-append, the path may have been written earlier in this run
-        // (a prior `PendingFile` to the same path) — that's an in-run
+        // (a prior `PendingFile` to the same path) - that's an in-run
         // overwrite, allowed. The pre-existing check only fires for paths
         // that existed before the run started.
         check_pre_existing(op.path, op.line, op.column);
@@ -1181,7 +1181,7 @@ class Interpreter {
             std::filesystem::permissions(
                 op.path, static_cast<std::filesystem::perms>(*op.mode),
                 std::filesystem::perm_options::replace);
-            // Skip the RAII guard's restore — the caller's explicit mode
+            // Skip the RAII guard's restore - the caller's explicit mode
             // wins over the original permissions.
             guard.active = false;
         }
@@ -1555,7 +1555,7 @@ void render_pending(std::ostream& out, const std::vector<PendingOp>& pending,
                 } else if constexpr (std::is_same_v<T, PendingFile>) {
                     insert_path(root, o.path, /*is_dir=*/false, o.append);
                 }
-                // PendingCheckDir is intentionally skipped — it doesn't
+                // PendingCheckDir is intentionally skipped - it doesn't
                 // create anything and dry-run can't validate it without
                 // hitting the real filesystem.
             },

@@ -155,7 +155,7 @@ void check_alias(const PathVar& pv, const std::optional<ExprPtr>& current_when,
     }
     const auto& stored = it->second;
     if (!stored.has_value()) {
-        return;  // Unconditional binding — references are unrestricted.
+        return;  // Unconditional binding - references are unrestricted.
     }
     if (!current_when.has_value()) {
         throw SemanticError("alias '" + pv.name +

@@ -19,7 +19,7 @@ TEST(Crc32, EmptyInputIsZero) {
 
 TEST(Crc32, IsoHdlcCheckVector) {
     // The canonical CRC-32/ISO-HDLC check value for the ASCII string
-    // "123456789" — used by every reference implementation.
+    // "123456789" - used by every reference implementation.
     const char* s = "123456789";
     EXPECT_EQ(spudplate::crc32(as_bytes(s), 9), 0xCBF43926u);
 }

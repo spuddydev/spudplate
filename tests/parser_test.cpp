@@ -898,7 +898,7 @@ TEST(ParserTest, FileContentUnquotedPath) {
     ASSERT_EQ(file.path.segments.size(), 1u);
     EXPECT_EQ(std::get<PathLiteral>(file.path.segments[0]).value,
               "static/notes/README.md");
-    std::get<FileContentSource>(file.source);  // NOLINT — just verifying variant
+    std::get<FileContentSource>(file.source);  // NOLINT - just verifying variant
 }
 
 TEST(ParserTest, FileFromUnquotedPath) {
@@ -1117,7 +1117,7 @@ TEST(ParserTest, RepeatWithWhenClause) {
 
 TEST(ParserTest, RepeatHeaderWhenWithBodyStatementWhen) {
     // Proves the header when binds to repeat and the body statement's when
-    // binds to the body statement — no lexical collision.
+    // binds to the body statement - no lexical collision.
     auto program = parse_program(
         "repeat n as i when outer\n"
         "  mkdir \"x\" when inner\n"
@@ -1141,7 +1141,7 @@ TEST(ParserTest, RepeatWithoutWhenClauseHasEmptyOptional) {
 }
 
 TEST(ParserTest, RepeatBareWhenRaisesError) {
-    // `repeat n as i when\n ... end` — bare when with no expression.
+    // `repeat n as i when\n ... end` - bare when with no expression.
     // parseExpression sees NEWLINE and throws.
     EXPECT_THROW(parse_program("repeat n as i when\n"
                                "  mkdir \"x\"\n"

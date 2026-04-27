@@ -8,31 +8,31 @@ namespace spudplate {
 /** @brief All token types produced by the Lexer. */
 enum class TokenType {
     // Keywords
-    ASK,       ///< `ask` — declare a user prompt
-    LET,       ///< `let` — declare a derived variable
-    MKDIR,     ///< `mkdir` — create a directory
-    FILE,      ///< `file` — create or append to a file
-    FROM,      ///< `from` — source file path for file statements
-    CONTENT,   ///< `content` — inline content for file statements
-    WHEN,      ///< `when` — conditional modifier
-    REPEAT,    ///< `repeat` — begin a loop block
-    END,       ///< `end` — close a repeat block
-    VERBATIM,  ///< `verbatim` — suppress interpolation in from-file contents
-    APPEND,    ///< `append` — append to file instead of overwriting
-    MODE,      ///< `mode` — set file/directory permissions (octal)
-    AS,        ///< `as` — bind loop iterator variable in repeat
-    DEFAULT,   ///< `default` — fallback value for an ask when the user skips it
-    OPTIONS,   ///< `options` — restrict an ask to a bounded list of literals
-    COPY,      ///< `copy` — copy a source directory into an existing destination
-    INTO,      ///< `into` — destination marker used by `copy`
-    INCLUDE,   ///< `include` — run another installed template as a subprocess
-    RUN,       ///< `run` — execute a shell command (gated by trust prompt)
-    IN,        ///< `in` — working-directory marker on `run` statements
+    ASK,       ///< `ask` - declare a user prompt
+    LET,       ///< `let` - declare a derived variable
+    MKDIR,     ///< `mkdir` - create a directory
+    FILE,      ///< `file` - create or append to a file
+    FROM,      ///< `from` - source file path for file statements
+    CONTENT,   ///< `content` - inline content for file statements
+    WHEN,      ///< `when` - conditional modifier
+    REPEAT,    ///< `repeat` - begin a loop block
+    END,       ///< `end` - close a repeat block
+    VERBATIM,  ///< `verbatim` - suppress interpolation in from-file contents
+    APPEND,    ///< `append` - append to file instead of overwriting
+    MODE,      ///< `mode` - set file/directory permissions (octal)
+    AS,        ///< `as` - bind loop iterator variable in repeat
+    DEFAULT,   ///< `default` - fallback value for an ask when the user skips it
+    OPTIONS,   ///< `options` - restrict an ask to a bounded list of literals
+    COPY,      ///< `copy` - copy a source directory into an existing destination
+    INTO,      ///< `into` - destination marker used by `copy`
+    INCLUDE,   ///< `include` - run another installed template as a subprocess
+    RUN,       ///< `run` - execute a shell command (gated by trust prompt)
+    IN,        ///< `in` - working-directory marker on `run` statements
 
     // Logical operators (keywords)
-    AND,  ///< `and` — logical AND
-    OR,   ///< `or`  — logical OR
-    NOT,  ///< `not` — logical NOT
+    AND,  ///< `and` - logical AND
+    OR,   ///< `or`  - logical OR
+    NOT,  ///< `not` - logical NOT
 
     // Type keywords
     STRING_TYPE,  ///< `string` type annotation
@@ -55,10 +55,10 @@ enum class TokenType {
     LESS_EQUAL,     ///< `<=`
 
     // Arithmetic operators
-    PLUS,   ///< `+` — addition or string concatenation
-    MINUS,  ///< `-` — subtraction
-    STAR,   ///< `*` — multiplication
-    SLASH,  ///< `/` — division
+    PLUS,   ///< `+` - addition or string concatenation
+    MINUS,  ///< `-` - subtraction
+    STAR,   ///< `*` - multiplication
+    SLASH,  ///< `/` - division
 
     // Assignment
     ASSIGN,  ///< `=`
@@ -67,10 +67,10 @@ enum class TokenType {
     NEWLINE,  ///< Logical line break (newline or semicolon)
     LPAREN,   ///< `(`
     RPAREN,   ///< `)`
-    LBRACE,   ///< `{` — open inline interpolation in path expressions
-    RBRACE,   ///< `}` — close inline interpolation in path expressions
-    DOT,      ///< `.` — separator in path expressions (e.g. `README.md`)
-    COMMA,    ///< `,` — argument separator in function calls
+    LBRACE,   ///< `{` - open inline interpolation in path expressions
+    RBRACE,   ///< `}` - close inline interpolation in path expressions
+    DOT,      ///< `.` - separator in path expressions (e.g. `README.md`)
+    COMMA,    ///< `,` - argument separator in function calls
 
     // Special
     EOF_TOKEN,  ///< End of input

@@ -141,7 +141,7 @@ TEST(Bundler, RejectsDynamicSegmentMidFilename) {
     Program p = parse(
         "ask n \"n?\" int default 1\n"
         "file out.txt from tpl/file_{n}\n");
-    // tpl/file_{n} — the literal prefix "tpl/file_" does not end with /,
+    // tpl/file_{n} - the literal prefix "tpl/file_" does not end with /,
     // so this is the mid-filename-dynamic case.
     EXPECT_THROW(bundle_assets(p, tmp.path()), BundleError);
 }
@@ -239,10 +239,10 @@ TEST(Bundler, SymlinkLoopBroken) {
 
     Program p = parse("mkdir project from loop\n");
     // Should not infinite-recurse. The walker may produce zero assets (only
-    // the dir loop) or report an error — either way it must terminate.
+    // the dir loop) or report an error - either way it must terminate.
     try {
         bundle_assets(p, tmp.path());
     } catch (const BundleError&) {
-        // Acceptable — escaping or unsupported types may surface here.
+        // Acceptable - escaping or unsupported types may surface here.
     }
 }

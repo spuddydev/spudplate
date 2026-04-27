@@ -15,7 +15,7 @@ namespace spudplate {
 /**
  * @brief One bundled asset entry inside a spudpack.
  *
- * `path` is normalised — forward-slash separators, no leading `/`, no `.` or
+ * `path` is normalised - forward-slash separators, no leading `/`, no `.` or
  * `..` segments, no embedded NUL. A trailing `/` means "empty leaf
  * directory" and the corresponding `data` is empty.
  */
@@ -26,7 +26,7 @@ struct SpudpackAsset {
 };
 
 /**
- * @brief A decoded spudpack — the source text, the opaque compiled program,
+ * @brief A decoded spudpack - the source text, the opaque compiled program,
  * and every bundled asset.
  *
  * `program_bytes` is held opaquely; this header does not include the
@@ -81,7 +81,7 @@ Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size);
 /**
  * @brief Write a `Spudpack` to disk.
  *
- * **Not atomic** — callers that need atomic install must write to a
+ * **Not atomic** - callers that need atomic install must write to a
  * temporary path and rename themselves.
  */
 void spudpack_write_file(const std::filesystem::path& path, const Spudpack& pack);

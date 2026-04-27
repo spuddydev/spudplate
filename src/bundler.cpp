@@ -18,7 +18,7 @@ BundleError::BundleError(std::string message, int line, int column)
 namespace {
 
 // Result of classifying a source PathExpr. The bundler distinguishes the
-// two legal shapes — a fully-literal path (walk the exact target) and a
+// two legal shapes - a fully-literal path (walk the exact target) and a
 // path with a static prefix that ends in `/` followed by dynamic segments
 // (walk the static-prefix directory). Anything else is a BundleError.
 struct ClassifiedSource {
@@ -62,8 +62,8 @@ ClassifiedSource classify_source_path(const PathExpr& path) {
     return {ClassifiedSource::Shape::StaticPrefix, std::move(literal)};
 }
 
-// Read a regular file's bytes off disk. Errors here are unusual — the
-// walker has already established the entry is a regular file — so they
+// Read a regular file's bytes off disk. Errors here are unusual - the
+// walker has already established the entry is a regular file - so they
 // surface as a BundleError pointing at the originating statement.
 std::vector<std::uint8_t> read_file_bytes(const fs::path& p, int line, int column) {
     std::ifstream in(p, std::ios::binary);
@@ -140,11 +140,11 @@ class Bundler {
             stmt.data);
     }
 
-    // `file ... from <path>` — the path may resolve to a regular file
+    // `file ... from <path>` - the path may resolve to a regular file
     // (whole-file embed) or to a directory whose contents are walked. The
     // static-prefix-with-dynamic-suffix form means "the static prefix is a
     // directory, and the runtime resolution picks one of the bundled files
-    // inside it" — same effect on bundling as the directory case.
+    // inside it" - same effect on bundling as the directory case.
     void process_file_source(const PathExpr& path, int line, int column) {
         auto cls = classify_source_path(path);
         fs::path target = resolve_under_root(cls.literal_prefix, line, column);
@@ -169,7 +169,7 @@ class Bundler {
         }
     }
 
-    // `mkdir ... from <path>` and `copy <path> into ...` — both must
+    // `mkdir ... from <path>` and `copy <path> into ...` - both must
     // resolve to a directory. CopyStmt explicitly disallows a regular-file
     // source per the language spec.
     void process_dir_source(const PathExpr& path, int line, int column,
@@ -361,7 +361,7 @@ class Bundler {
     }
 
     // Insert a normalised asset record. If the key is already present the
-    // bytes and mode must match — otherwise the bundler reports the more
+    // bytes and mode must match - otherwise the bundler reports the more
     // specific of the two diagnostics so a template author can see whether
     // the conflict is content or permissions.
     void insert_or_collide(const std::string& raw_key, std::uint16_t mode,
@@ -389,7 +389,7 @@ class Bundler {
         if (it->second.mode != mode) {
             throw BundleError("conflicting mode for asset " + key, line, column);
         }
-        // Identical record — fine; collapse silently.
+        // Identical record - fine; collapse silently.
     }
 
     fs::path root_;

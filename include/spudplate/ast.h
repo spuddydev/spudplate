@@ -136,7 +136,7 @@ struct PathInterp {
 using PathSegment = std::variant<PathLiteral, PathVar, PathInterp>;
 
 /**
- * @brief A path expression — an ordered sequence of segments.
+ * @brief A path expression - an ordered sequence of segments.
  *
  * Used by `mkdir`, `file`, and `file ... from` for destination and source paths.
  * Segments are concatenated at runtime, with literals inserted verbatim and
@@ -167,7 +167,7 @@ using FileSource = std::variant<FileFromSource, FileContentSource>;
 // ---------------------------------------------------------------------------
 
 /**
- * @brief An `ask` statement — declares a variable and prompts the user.
+ * @brief An `ask` statement - declares a variable and prompts the user.
  *
  * Example: `ask license "License?" string default "MIT"`
  *
@@ -186,7 +186,7 @@ struct AskStmt {
 };
 
 /**
- * @brief A `let` statement — declares a derived variable.
+ * @brief A `let` statement - declares a derived variable.
  *
  * Example: `let slug = lower(trim(name))`
  */
@@ -198,7 +198,7 @@ struct LetStmt {
 };
 
 /**
- * @brief A bare assignment statement — rebinds an existing variable.
+ * @brief A bare assignment statement - rebinds an existing variable.
  *
  * Example: `count = count + 1`
  *
@@ -215,7 +215,7 @@ struct AssignStmt {
 };
 
 /**
- * @brief A `mkdir` statement — creates a directory.
+ * @brief A `mkdir` statement - creates a directory.
  *
  * Example: `mkdir src/modules mode 0755`
  *
@@ -225,7 +225,7 @@ struct AssignStmt {
 struct MkdirStmt {
     PathExpr path;                         ///< Directory path expression.
     std::optional<std::string> alias;      ///< Optional `as <name>` binding; empty if no `as` clause.
-    bool mkdir_p;                          ///< Always true — create intermediate directories.
+    bool mkdir_p;                          ///< Always true - create intermediate directories.
     std::optional<PathExpr> from_source;   ///< Optional source directory to populate from.
     bool verbatim;                         ///< If true with from_source, suppress interpolation.
     std::optional<int> mode;               ///< Optional permission bits (e.g. 0755).
@@ -235,7 +235,7 @@ struct MkdirStmt {
 };
 
 /**
- * @brief A `file` statement — creates or appends to a file.
+ * @brief A `file` statement - creates or appends to a file.
  *
  * Example: `file "{slug}/README.md" content "# " + name`
  */
@@ -256,7 +256,7 @@ struct Stmt;
 using StmtPtr = std::unique_ptr<Stmt>;
 
 /**
- * @brief A `repeat` statement — loops a block N times.
+ * @brief A `repeat` statement - loops a block N times.
  *
  * Example:
  * @code
@@ -275,7 +275,7 @@ struct RepeatStmt {
 };
 
 /**
- * @brief A `copy` statement — copies contents from a source directory into
+ * @brief A `copy` statement - copies contents from a source directory into
  * an existing destination directory.
  *
  * Example: `copy standard_templates/ into templatepath`
@@ -293,13 +293,13 @@ struct CopyStmt {
 };
 
 /**
- * @brief A `run` statement — executes a shell command after user authorisation.
+ * @brief A `run` statement - executes a shell command after user authorisation.
  *
  * Example: `run "git init" in {dir} when use_git`
  *
  * The command expression is evaluated to a string at runtime and dispatched
  * via `/bin/sh -c`. The optional `in <path>` clause pins the working
- * directory for the command — without it, the command inherits the cwd of
+ * directory for the command - without it, the command inherits the cwd of
  * the `spudplate` process. Each `spudplate run` invocation prompts the
  * user once, up front, listing every literal command (and its `in <path>`,
  * if any) before any statement executes; declining aborts cleanly with no
@@ -314,7 +314,7 @@ struct RunStmt {
 };
 
 /**
- * @brief An `include` statement — runs another installed template as a subprocess.
+ * @brief An `include` statement - runs another installed template as a subprocess.
  *
  * Example: `include claude_setup when use_claude`
  *

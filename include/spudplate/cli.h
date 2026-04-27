@@ -18,12 +18,12 @@ namespace spudplate {
  *                                         (caller has vetted the source)
  *
  * Exit codes:
- *   0 — success
- *   1 — unrecognised invocation (usage printed to `err`)
- *   2 — parse error
- *   3 — semantic error
- *   4 — runtime error
- *   5 — file not found or unreadable
+ *   0 - success
+ *   1 - unrecognised invocation (usage printed to `err`)
+ *   2 - parse error
+ *   3 - semantic error
+ *   4 - runtime error
+ *   5 - file not found or unreadable
  *
  * Errors are formatted as `<file>:<line>:<col>: <kind>: <message>` on `err`.
  */

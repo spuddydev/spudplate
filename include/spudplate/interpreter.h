@@ -71,7 +71,7 @@ class Environment {
     /**
      * @brief Bind `name` to `value` in the innermost frame.
      *
-     * Throws `std::logic_error` if `name` is already visible in any frame —
+     * Throws `std::logic_error` if `name` is already visible in any frame -
      * the language never silently shadows.
      */
     void declare(const std::string& name, Value value);
@@ -79,7 +79,7 @@ class Environment {
     /**
      * @brief Replace the value of an existing binding, innermost first.
      *
-     * Throws `std::logic_error` if `name` is not visible — the validator
+     * Throws `std::logic_error` if `name` is not visible - the validator
      * is expected to have rejected such inputs before the interpreter runs.
      */
     void assign(const std::string& name, Value value);
@@ -95,8 +95,8 @@ class Environment {
  * @brief Structured description of an `ask` prompt for the prompter to render.
  *
  * The interpreter populates this struct from an `AskStmt` and the live
- * environment, then hands it to the prompter. Rendering — colour, layout,
- * `[Y/n]` hints, numbered option menus, rejection feedback — is the
+ * environment, then hands it to the prompter. Rendering - colour, layout,
+ * `[Y/n]` hints, numbered option menus, rejection feedback - is the
  * prompter's responsibility.
  */
 struct PromptRequest {
@@ -210,7 +210,7 @@ class ScriptedPrompter : public Prompter {
  * or `..` segments, no embedded NUL). A trailing `/` on a returned `Entry`
  * path means "empty leaf directory".
  *
- * `mode == 0` is the documented "no mode information" sentinel — the
+ * `mode == 0` is the documented "no mode information" sentinel - the
  * disk-backed provider always reports zero so callers preserve the
  * pre-existing `nullopt`-mode behaviour of bare-`.spud` runs.
  */
@@ -279,7 +279,7 @@ class AssetMapSourceProvider final : public SourceProvider {
  * called once before any statement executes, with a summary of every
  * literal command. A `false` return aborts the run cleanly with no side
  * effects. The `skip_authorization` flag bypasses the prompt for non-
- * interactive callers — they take responsibility for having vetted the
+ * interactive callers - they take responsibility for having vetted the
  * source.
  *
  * `source` overrides where `from`/`copy` reads come from. A null `source`
@@ -302,8 +302,8 @@ Environment run_for_tests(const Program& program, Prompter& prompter,
 /**
  * @brief Run a program without touching the filesystem.
  *
- * Walks the program exactly like `run` — same prompts, same expression
- * evaluation, same alias bindings — but instead of flushing the deferred
+ * Walks the program exactly like `run` - same prompts, same expression
+ * evaluation, same alias bindings - but instead of flushing the deferred
  * write queue prints a `Would create:` tree of every path that would have
  * been created to `out`. `copy` destination-existence checks are skipped
  * (they would always fail in dry-run since nothing was written).

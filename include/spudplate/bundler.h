@@ -15,7 +15,7 @@ namespace spudplate {
  * @brief The set of assets a parsed program references on disk.
  *
  * Asset paths are normalised (forward-slash separators, no leading `/`,
- * no `.` or `..` segments, no embedded NUL) and deduped by path — entries
+ * no `.` or `..` segments, no embedded NUL) and deduped by path - entries
  * with the same normalised path are collapsed iff their bytes and mode
  * match. A trailing `/` on a path means "empty leaf directory" and the
  * data field is empty.
@@ -47,7 +47,7 @@ class BundleError : public std::runtime_error {
 /**
  * @brief Walk a parsed program and collect every asset it references.
  *
- * `source_root` is the directory the source `.spud` lives in — relative
+ * `source_root` is the directory the source `.spud` lives in - relative
  * source paths in `file ... from`, `mkdir ... from`, and `copy` resolve
  * against it. The bundler dereferences symlinks, breaks loops on
  * canonical directory paths, and rejects:
