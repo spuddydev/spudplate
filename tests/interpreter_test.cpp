@@ -17,6 +17,7 @@
 #include "spudplate/lexer.h"
 #include "spudplate/parser.h"
 #include "spudplate/token.h"
+#include "test_helpers.h"
 
 using spudplate::AliasMap;
 using spudplate::BinaryExpr;
@@ -138,35 +139,7 @@ PathExpr path(std::vector<PathSegment> segs) {
     return PathExpr{.segments = std::move(segs), .line = 1, .column = 1};
 }
 
-// Per-test scratch directory. Created on construction with a randomised name
-// under the system temp dir; the previous working directory is restored and
-// the directory is wiped on destruction. Tests that touch the filesystem
-// `chdir` into one of these so `mkdir foo` etc. resolve under it.
-class TmpDir {
-  public:
-    TmpDir() {
-        prev_ = std::filesystem::current_path();
-        std::random_device rd;
-        std::stringstream ss;
-        ss << "spudplate-test-" << std::hex << rd() << rd();
-        path_ = std::filesystem::temp_directory_path() / ss.str();
-        std::filesystem::create_directories(path_);
-        std::filesystem::current_path(path_);
-    }
-    TmpDir(const TmpDir&) = delete;
-    TmpDir& operator=(const TmpDir&) = delete;
-    ~TmpDir() {
-        std::error_code ec;
-        std::filesystem::current_path(prev_, ec);
-        std::filesystem::remove_all(path_, ec);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
-  private:
-    std::filesystem::path path_;
-    std::filesystem::path prev_;
-};
+using spudplate::test::TmpDir;
 
 std::string read_file(const std::filesystem::path& p) {
     std::ifstream in(p);

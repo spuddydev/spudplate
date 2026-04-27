@@ -18,7 +18,7 @@ string(REGEX REPLACE "^v" "" SPUDPLATE_VERSION "${SPUDPLATE_VERSION}")
 # Library
 add_library(spudplate_lib src/lexer.cpp src/parser.cpp src/validator.cpp
                           src/interpreter.cpp src/cli.cpp src/crc32.cpp
-                          src/binary_serializer.cpp)
+                          src/binary_serializer.cpp src/spudpack.cpp)
 target_include_directories(spudplate_lib PUBLIC include)
 target_compile_definitions(spudplate_lib PUBLIC
     SPUDPLATE_VERSION_STRING="${SPUDPLATE_VERSION}")
@@ -51,7 +51,8 @@ enable_testing()
 add_executable(spudplate_tests tests/lexer_test.cpp tests/parser_test.cpp
                tests/validator_test.cpp tests/interpreter_test.cpp
                tests/cli_test.cpp tests/crc32_test.cpp
-               tests/test_helpers.cpp tests/binary_serializer_test.cpp)
+               tests/test_helpers.cpp tests/binary_serializer_test.cpp
+               tests/spudpack_test.cpp)
 target_include_directories(spudplate_tests PRIVATE tests)
 target_link_libraries(spudplate_tests PRIVATE spudplate_lib GTest::gtest_main)
 include(GoogleTest)
