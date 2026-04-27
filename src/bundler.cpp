@@ -251,12 +251,6 @@ class Bundler {
         // recursive_directory_iterator with follow_directory_symlink does
         // the *following* but does not break loops.
         std::unordered_map<std::string, bool> dir_has_children;
-        auto canonical_key = [&ec](const fs::path& p) {
-            return fs::weakly_canonical(p, ec).string();
-        };
-
-        std::vector<std::pair<fs::path, std::string>> dir_keys;
-        dir_keys.emplace_back(dir, normalise_dir_key(key_prefix));
 
         fs::recursive_directory_iterator it(
             dir, fs::directory_options::follow_directory_symlink, ec);

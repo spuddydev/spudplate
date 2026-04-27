@@ -27,28 +27,27 @@ Alternatives:
 ## How it works
 
 1. Write a `.spud` file describing your template
-2. Install it with `spudplate install my_template.spud`
-3. Run it any time with `spudplate run my_template`
-
-To share a template, export it as a `.spudpack` (a signed zip) and the recipient installs it the same way.
+2. Install it with `spudplate install my_template.spud` — spudplate bundles every asset the template references and stores everything as a single `<name>.spp` file under the install root
+3. Run it any time with `spudplate run my_template` — runs work from any working directory because the assets travel with the template
 
 ```
-spudplate install my_template.spud      # validate, store under the install root
+spudplate install my_template.spud      # bundle assets, write <name>.spp under the install root
 spudplate install --yes my_template.spud  # overwrite an existing install without prompting
 spudplate validate my_template.spud     # parse and validate without installing (also: `check`)
 spudplate run my_template               # run by installed name
-spudplate run path/to/file.spud         # or run a file directly
+spudplate run path/to/file.spud         # or run a file directly (cwd-relative assets)
+spudplate run path/to/file.spp          # or run a built spudpack directly
 spudplate list                          # list installed templates
-spudplate inspect my_template           # print the source
+spudplate inspect my_template           # print the source captured at install time
 spudplate uninstall my_template         # remove
 
 spudplate version                       # print the spudplate version
 spudplate update                        # fetch and install the latest spudplate release
-
-spudplate export my_template -o my_template.spudpack
 ```
 
 `install` prompts before overwriting an existing template. Pass `--yes` to skip the prompt (useful for scripts and CI). `update` fetches the latest release of spudplate itself by re-running the install script.
+
+To share a template, send the `<name>.spp` file. The recipient runs it with `spudplate run path/to/template.spp`. (Direct `install` from a `.spp` is intentionally not supported in this version — share the source instead, or run the spudpack directly.)
 
 The install root is `$SPUDPLATE_HOME` if set, otherwise `$XDG_DATA_HOME/spudplate` (default `~/.local/share/spudplate` on most systems).
 

@@ -571,12 +571,23 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
 
     std::string raw_arg{argv[positional_start]};
-    bool is_path = looks_like_path(raw_arg);
-    bool is_spud = is_path && ends_with_spud(std::filesystem::path(raw_arg));
-    bool is_spp = !is_path || ends_with_spp(std::filesystem::path(raw_arg));
+    // Three legal shapes: bare name (resolves to a `.spp` under the install
+    // root), path to a `.spud` source (cwd-relative assets), or path to a
+    // pre-built `.spp` (bundled assets). The bare-name path additionally
+    // detects a directory-shaped legacy install and surfaces a precise
+    // diagnostic before any open is attempted.
+    enum class RunShape { InstalledSpp, SpudFile, SpudpackFile };
+    RunShape shape;
+    if (!looks_like_path(raw_arg)) {
+        shape = RunShape::InstalledSpp;
+    } else if (ends_with_spud(std::filesystem::path(raw_arg))) {
+        shape = RunShape::SpudFile;
+    } else {
+        shape = RunShape::SpudpackFile;
+    }
 
     std::filesystem::path file_path;
-    if (is_path) {
+    if (shape != RunShape::InstalledSpp) {
         file_path = raw_arg;
     } else {
         std::filesystem::path home = install_dir();
@@ -606,7 +617,7 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
     std::string source;
     bool have_pack = false;
 
-    if (is_spud) {
+    if (shape == RunShape::SpudFile) {
         std::ifstream in(file_path);
         if (!in) {
             err << file_path.string() << ": cannot open: " << std::strerror(errno)
@@ -625,7 +636,7 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
                         e.column(), e.what());
             return 2;
         }
-    } else if (is_spp) {
+    } else {
         if (!std::filesystem::exists(file_path)) {
             err << file_path.string() << ": cannot open: "
                 << std::strerror(ENOENT) << "\n";
