@@ -378,12 +378,39 @@ Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size) {
     return pack;
 }
 
-void spudpack_write_file(const std::filesystem::path&, const Spudpack&) {
-    throw SpudpackError("spudpack_write_file not yet implemented");
+void spudpack_write_file(const std::filesystem::path& path, const Spudpack& pack) {
+    std::vector<std::uint8_t> bytes = spudpack_encode(pack);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        throw SpudpackError("could not open spudpack for writing: " +
+                            path.string());
+    }
+    out.write(reinterpret_cast<const char*>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    if (!out) {
+        throw SpudpackError("could not write spudpack: " + path.string());
+    }
 }
 
-Spudpack spudpack_read_file(const std::filesystem::path&) {
-    throw SpudpackError("spudpack_read_file not yet implemented");
+Spudpack spudpack_read_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw SpudpackError("could not open spudpack: " + path.string());
+    }
+    std::vector<std::uint8_t> buf;
+    in.seekg(0, std::ios::end);
+    auto end = in.tellg();
+    if (end < 0) {
+        throw SpudpackError("could not size spudpack: " + path.string());
+    }
+    buf.resize(static_cast<std::size_t>(end));
+    in.seekg(0, std::ios::beg);
+    in.read(reinterpret_cast<char*>(buf.data()),
+            static_cast<std::streamsize>(buf.size()));
+    if (in.gcount() != static_cast<std::streamsize>(buf.size())) {
+        throw SpudpackError("could not read spudpack: " + path.string());
+    }
+    return spudpack_decode(buf.data(), buf.size());
 }
 
 }  // namespace spudplate
