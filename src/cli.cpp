@@ -10,15 +10,32 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
+#include "spudplate/binary_serializer.h"
+#include "spudplate/bundler.h"
+#include "spudplate/cli_internal.h"
 #include "spudplate/interpreter.h"
 #include "spudplate/lexer.h"
 #include "spudplate/parser.h"
+#include "spudplate/spudpack.h"
 #include "spudplate/validator.h"
 
 namespace spudplate {
+
+namespace cli_internal {
+
+RenameFn& install_rename_fn() {
+    static RenameFn fn = [](const std::filesystem::path& a,
+                            const std::filesystem::path& b) {
+        std::filesystem::rename(a, b);
+    };
+    return fn;
+}
+
+}  // namespace cli_internal
 
 namespace {
 
@@ -56,15 +73,25 @@ std::filesystem::path install_dir() {
     return {};
 }
 
-// Heuristic: an argument that contains a slash or ends with `.spud` is
-// treated as a path. Anything else is an installed-template name.
+// Heuristic: an argument that contains a slash or ends with `.spud`/`.spp`
+// is treated as a path. Anything else is an installed-template name.
 bool looks_like_path(const std::string& arg) {
     if (arg.find('/') != std::string::npos) {
         return true;
     }
-    constexpr std::string_view ext = ".spud";
-    return arg.size() >= ext.size() &&
-           arg.compare(arg.size() - ext.size(), ext.size(), ext) == 0;
+    auto ends_with = [&](std::string_view ext) {
+        return arg.size() >= ext.size() &&
+               arg.compare(arg.size() - ext.size(), ext.size(), ext) == 0;
+    };
+    return ends_with(".spud") || ends_with(".spp");
+}
+
+bool ends_with_spp(const std::filesystem::path& p) {
+    return p.extension() == ".spp";
+}
+
+bool ends_with_spud(const std::filesystem::path& p) {
+    return p.extension() == ".spud";
 }
 
 void print_error(std::ostream& err, const std::string& file, const char* kind,
@@ -73,11 +100,11 @@ void print_error(std::ostream& err, const std::string& file, const char* kind,
         << message << "\n";
 }
 
-// Resolve a `run`/`inspect`/`uninstall` argument to a `.spud` file path on
-// disk. If the argument looks like a path it is returned as-is; otherwise
-// it is treated as an installed template name. Returns the empty path and
-// writes a diagnostic to `err` if the install dir cannot be located. The
-// caller is responsible for checking whether the returned path exists.
+// Resolve a `run` argument to an on-disk file path. If the argument
+// looks like a path it is returned as-is; otherwise it is treated as an
+// installed template name and resolves to `<install_dir>/<name>.spp`.
+// Returns the empty path and writes a diagnostic to `err` if the install
+// dir cannot be located.
 std::filesystem::path resolve_template_arg(const std::string& arg,
                                            std::ostream& err) {
     if (looks_like_path(arg)) {
@@ -89,7 +116,15 @@ std::filesystem::path resolve_template_arg(const std::string& arg,
            "XDG_DATA_HOME, or HOME\n";
         return {};
     }
-    return dir / arg / "template.spud";
+    return dir / (arg + ".spp");
+}
+
+// Diagnose the legacy directory-shaped install (pre-`.spp` layout) and
+// emit a stderr warning. Returns true iff a legacy directory was found
+// at `<install_dir>/<name>/template.spud`.
+bool legacy_install_exists(const std::filesystem::path& home,
+                           const std::string& name) {
+    return std::filesystem::is_regular_file(home / name / "template.spud");
 }
 
 // Parse and validate `source` so install rejects broken templates before
@@ -152,7 +187,14 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
 
     std::filesystem::path source_path{argv[positional_start]};
-    std::ifstream in(source_path);
+    if (ends_with_spp(source_path)) {
+        err << source_path.string()
+            << ": installing pre-built spudpacks is not supported in this "
+               "version\n";
+        return 1;
+    }
+
+    std::ifstream in(source_path, std::ios::binary);
     if (!in) {
         err << source_path.string() << ": cannot open: " << std::strerror(errno)
             << "\n";
@@ -162,10 +204,39 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     buffer << in.rdbuf();
     std::string source = buffer.str();
 
-    int exit_code = 0;
-    if (!validate_template_source(source, source_path.string(), err,
-                                  exit_code)) {
-        return exit_code;
+    Program program;
+    try {
+        Lexer lexer(source);
+        Parser parser(std::move(lexer));
+        program = parser.parse();
+        validate(program);
+    } catch (const ParseError& e) {
+        print_error(err, source_path.string(), "parse error", e.line(),
+                    e.column(), e.what());
+        return 2;
+    } catch (const SemanticError& e) {
+        print_error(err, source_path.string(), "semantic error", e.line(),
+                    e.column(), e.what());
+        return 3;
+    }
+
+    std::vector<SpudpackAsset> assets;
+    try {
+        BundleResult bundled =
+            bundle_assets(program, source_path.parent_path());
+        assets = std::move(bundled.assets);
+    } catch (const BundleError& e) {
+        print_error(err, source_path.string(), "bundle error", e.line(),
+                    e.column(), e.what());
+        return 3;
+    }
+
+    std::vector<std::uint8_t> program_bytes;
+    try {
+        program_bytes = serialize_program(program);
+    } catch (const BinarySerializeError& e) {
+        err << source_path.string() << ": " << e.what() << "\n";
+        return 3;
     }
 
     std::filesystem::path home = install_dir();
@@ -181,9 +252,33 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
 
-    std::filesystem::path target_dir = home / name;
-    bool overwriting = std::filesystem::exists(target_dir);
-    if (overwriting && !skip_confirm) {
+    std::error_code ec;
+    std::filesystem::create_directories(home, ec);
+    if (ec) {
+        err << home.string()
+            << ": cannot create install directory: " << ec.message() << "\n";
+        return 1;
+    }
+
+    std::filesystem::path final_path = home / (name + ".spp");
+    std::filesystem::path tmp_path = home / (name + ".spp.tmp");
+
+    // Step 7a — refuse to clobber a stray non-regular file/dir that
+    // happens to sit at the destination. Surfacing this here gives a
+    // friendlier diagnostic than letting the rename fail later.
+    if (std::filesystem::exists(final_path) &&
+        !std::filesystem::is_regular_file(final_path)) {
+        err << "refusing to install: '" << final_path.filename().string()
+            << "' exists but is not a regular file\n";
+        return 1;
+    }
+
+    // Step 7b — overwrite prompt fires when either form (`<name>.spp` or
+    // legacy `<name>/`) is present. Capture the legacy flag now so the
+    // step-11 cleanup runs even when the prompt is suppressed by `--yes`.
+    bool spp_existed = std::filesystem::exists(final_path);
+    bool legacy_existed = legacy_install_exists(home, name);
+    if ((spp_existed || legacy_existed) && !skip_confirm) {
         if (!confirm_yes_no(
                 out, "this will overwrite the existing '" + name +
                          "' template. continue? [y/N] ")) {
@@ -191,41 +286,41 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
             return 0;
         }
     }
-    if (overwriting) {
+
+    Spudpack pack;
+    pack.source = std::move(source);
+    pack.program_bytes = std::move(program_bytes);
+    pack.assets = std::move(assets);
+
+    try {
+        spudpack_write_file(tmp_path, pack);
+    } catch (const std::exception& e) {
+        std::filesystem::remove(tmp_path, ec);
+        err << final_path.string() << ": cannot write: " << e.what() << "\n";
+        return 1;
+    }
+
+    try {
+        cli_internal::install_rename_fn()(tmp_path, final_path);
+    } catch (const std::exception& e) {
+        std::filesystem::remove(tmp_path, ec);
+        err << final_path.string() << ": cannot finalise install: " << e.what()
+            << "\n";
+        return 1;
+    }
+
+    if (legacy_existed) {
+        err << "replacing legacy install '" << name << "'\n";
         std::error_code rm_ec;
-        std::filesystem::remove_all(target_dir, rm_ec);
+        std::filesystem::remove_all(home / name, rm_ec);
         if (rm_ec) {
-            err << target_dir.string()
-                << ": cannot remove existing install: " << rm_ec.message()
-                << "\n";
-            return 1;
+            err << "warning: install succeeded but could not remove legacy '"
+                << name << "': " << rm_ec.message() << "\n";
         }
     }
 
-    std::error_code ec;
-    std::filesystem::create_directories(target_dir, ec);
-    if (ec) {
-        err << target_dir.string()
-            << ": cannot create install directory: " << ec.message() << "\n";
-        return 1;
-    }
-    std::filesystem::path target_file = target_dir / "template.spud";
-    std::ofstream sink(target_file, std::ios::binary);
-    if (!sink) {
-        err << target_file.string()
-            << ": cannot write: " << std::strerror(errno) << "\n";
-        std::filesystem::remove_all(target_dir, ec);
-        return 1;
-    }
-    sink << source;
-    if (!sink.good()) {
-        err << target_file.string() << ": write failed\n";
-        std::filesystem::remove_all(target_dir, ec);
-        return 1;
-    }
-
-    out << (overwriting ? "reinstalled " : "installed ") << name << " to "
-        << target_dir.string() << "\n";
+    out << (spp_existed ? "reinstalled " : "installed ") << name << " to "
+        << final_path.string() << "\n";
     return 0;
 }
 
@@ -287,6 +382,12 @@ int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
     std::filesystem::path source_path{argv[2]};
+    if (ends_with_spp(source_path)) {
+        err << source_path.string()
+            << ": installing pre-built spudpacks is not supported in this "
+               "version\n";
+        return 1;
+    }
     std::ifstream in(source_path);
     if (!in) {
         err << source_path.string() << ": cannot open: " << std::strerror(errno)
@@ -321,16 +422,39 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 0;  // No installs yet — empty output, success.
     }
     std::vector<std::string> names;
+    std::vector<std::string> shadowed_legacy;
+    std::vector<std::string> only_legacy;
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
-        if (entry.is_directory() &&
-            std::filesystem::is_regular_file(entry.path() / "template.spud")) {
-            names.push_back(entry.path().filename().string());
+        if (entry.is_regular_file() && ends_with_spp(entry.path())) {
+            names.push_back(entry.path().stem().string());
+        }
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
+        if (!entry.is_directory()) continue;
+        std::string n = entry.path().filename().string();
+        if (!std::filesystem::is_regular_file(entry.path() / "template.spud")) {
+            continue;
+        }
+        if (std::find(names.begin(), names.end(), n) != names.end()) {
+            shadowed_legacy.push_back(n);
+        } else {
+            only_legacy.push_back(n);
         }
     }
     std::sort(names.begin(), names.end());
+    std::sort(shadowed_legacy.begin(), shadowed_legacy.end());
+    std::sort(only_legacy.begin(), only_legacy.end());
     for (const auto& n : names) {
         out << n << "\n";
+    }
+    for (const auto& n : shadowed_legacy) {
+        err << "warning: legacy install '" << n
+            << "' is shadowed by '" << n << ".spp'\n";
+    }
+    for (const auto& n : only_legacy) {
+        err << "warning: legacy install '" << n
+            << "'; reinstall to upgrade\n";
     }
     return 0;
 }
@@ -341,19 +465,39 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
     std::string name{argv[2]};
+    if (looks_like_path(name)) {
+        err << "inspect takes an installed template name, not a path\n";
+        return 1;
+    }
     std::filesystem::path home = install_dir();
     if (home.empty()) {
         err << "cannot determine install directory: set SPUDPLATE_HOME, "
            "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
-    std::filesystem::path file_path = home / name / "template.spud";
-    std::ifstream in(file_path);
-    if (!in) {
+    std::filesystem::path spp_path = home / (name + ".spp");
+    if (std::filesystem::exists(spp_path) &&
+        !std::filesystem::is_regular_file(spp_path)) {
+        err << "refusing to read: '" << name
+            << ".spp' exists but is not a regular file\n";
+        return 1;
+    }
+    if (!std::filesystem::exists(spp_path)) {
+        if (legacy_install_exists(home, name)) {
+            err << "legacy install '" << name << "'; reinstall to upgrade\n";
+            return 1;
+        }
         err << name << ": not installed\n";
         return 5;
     }
-    out << in.rdbuf();
+    try {
+        Spudpack pack = spudpack_read_file(spp_path);
+        out.write(pack.source.data(),
+                  static_cast<std::streamsize>(pack.source.size()));
+    } catch (const SpudpackError& e) {
+        err << name << ": " << e.what() << "\n";
+        return 1;
+    }
     return 0;
 }
 
@@ -363,22 +507,42 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
         return 1;
     }
     std::string name{argv[2]};
+    if (looks_like_path(name)) {
+        err << "uninstall takes an installed template name, not a path\n";
+        return 1;
+    }
     std::filesystem::path home = install_dir();
     if (home.empty()) {
         err << "cannot determine install directory: set SPUDPLATE_HOME, "
            "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
-    std::filesystem::path target = home / name;
-    if (!std::filesystem::is_directory(target)) {
+    std::filesystem::path spp_path = home / (name + ".spp");
+    std::filesystem::path legacy_dir = home / name;
+
+    bool removed_anything = false;
+    std::error_code ec;
+    if (std::filesystem::exists(spp_path)) {
+        std::filesystem::remove_all(spp_path, ec);
+        if (ec) {
+            err << name << ": cannot remove: " << ec.message() << "\n";
+            return 1;
+        }
+        removed_anything = true;
+    }
+    if (legacy_install_exists(home, name)) {
+        std::error_code rm_ec;
+        std::filesystem::remove_all(legacy_dir, rm_ec);
+        if (rm_ec) {
+            err << name << ": cannot remove legacy: " << rm_ec.message()
+                << "\n";
+            return 1;
+        }
+        removed_anything = true;
+    }
+    if (!removed_anything) {
         err << name << ": not installed\n";
         return 5;
-    }
-    std::error_code ec;
-    std::filesystem::remove_all(target, ec);
-    if (ec) {
-        err << name << ": cannot remove: " << ec.message() << "\n";
-        return 1;
     }
     out << "uninstalled " << name << "\n";
     return 0;
@@ -407,29 +571,78 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
 
     std::string raw_arg{argv[positional_start]};
-    std::filesystem::path file_path = resolve_template_arg(raw_arg, err);
-    if (file_path.empty()) {
-        return 1;
+    bool is_path = looks_like_path(raw_arg);
+    bool is_spud = is_path && ends_with_spud(std::filesystem::path(raw_arg));
+    bool is_spp = !is_path || ends_with_spp(std::filesystem::path(raw_arg));
+
+    std::filesystem::path file_path;
+    if (is_path) {
+        file_path = raw_arg;
+    } else {
+        std::filesystem::path home = install_dir();
+        if (home.empty()) {
+            err << "cannot determine install directory: set SPUDPLATE_HOME, "
+                   "XDG_DATA_HOME, or HOME\n";
+            return 1;
+        }
+        file_path = home / (raw_arg + ".spp");
+
+        if (!std::filesystem::exists(file_path) &&
+            legacy_install_exists(home, raw_arg)) {
+            err << "legacy install '" << raw_arg
+                << "'; reinstall to upgrade\n";
+            return 1;
+        }
+        if (std::filesystem::exists(file_path) &&
+            !std::filesystem::is_regular_file(file_path)) {
+            err << "refusing to read: '" << raw_arg
+                << ".spp' exists but is not a regular file\n";
+            return 1;
+        }
     }
-    std::ifstream in(file_path);
-    if (!in) {
-        err << file_path.string() << ": cannot open: " << std::strerror(errno)
-            << "\n";
-        return 5;
-    }
-    std::stringstream buffer;
-    buffer << in.rdbuf();
-    std::string source = buffer.str();
 
     Program program;
-    try {
-        Lexer lexer(source);
-        Parser parser(std::move(lexer));
-        program = parser.parse();
-    } catch (const ParseError& e) {
-        print_error(err, file_path.string(), "parse error", e.line(),
-                    e.column(), e.what());
-        return 2;
+    Spudpack pack;  // outlives `provider` and the run() call
+    std::string source;
+    bool have_pack = false;
+
+    if (is_spud) {
+        std::ifstream in(file_path);
+        if (!in) {
+            err << file_path.string() << ": cannot open: " << std::strerror(errno)
+                << "\n";
+            return 5;
+        }
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        source = buffer.str();
+        try {
+            Lexer lexer(source);
+            Parser parser(std::move(lexer));
+            program = parser.parse();
+        } catch (const ParseError& e) {
+            print_error(err, file_path.string(), "parse error", e.line(),
+                        e.column(), e.what());
+            return 2;
+        }
+    } else if (is_spp) {
+        if (!std::filesystem::exists(file_path)) {
+            err << file_path.string() << ": cannot open: "
+                << std::strerror(ENOENT) << "\n";
+            return 5;
+        }
+        try {
+            pack = spudpack_read_file(file_path);
+            program = deserialize_program(pack.program_bytes.data(),
+                                          pack.program_bytes.size());
+            have_pack = true;
+        } catch (const SpudpackError& e) {
+            err << file_path.string() << ": " << e.what() << "\n";
+            return 1;
+        } catch (const BinaryDeserializeError& e) {
+            err << file_path.string() << ": " << e.what() << "\n";
+            return 1;
+        }
     }
 
     try {
@@ -440,11 +653,19 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         return 3;
     }
 
+    std::optional<AssetMapSourceProvider> provider;
+    const SourceProvider* source_ptr = nullptr;
+    if (have_pack) {
+        provider.emplace(pack.assets);
+        source_ptr = &*provider;
+    }
+
     try {
         if (dry_run_mode) {
-            dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8());
+            dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8(),
+                    source_ptr);
         } else {
-            run(program, prompter, skip_authorization);
+            run(program, prompter, skip_authorization, source_ptr);
         }
     } catch (const RuntimeError& e) {
         print_error(err, file_path.string(), "runtime error", e.line(),
