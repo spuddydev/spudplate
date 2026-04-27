@@ -32,6 +32,40 @@ constexpr std::size_t kMaxAssetCount = std::size_t{1} << 20;
 // to give us forward room without accepting nonsense.
 constexpr std::uint16_t kModeMask = 07777;
 
+// LEB128 unsigned varint writer. The reader (added with the decoder) caps
+// length at 10 bytes; the writer's longest encoding for a 64-bit value is
+// also 10 bytes, so the cap stays consistent on both sides.
+void write_varint(std::vector<std::uint8_t>& out, std::uint64_t value) {
+    while (value >= 0x80) {
+        out.push_back(static_cast<std::uint8_t>((value & 0x7F) | 0x80));
+        value >>= 7;
+    }
+    out.push_back(static_cast<std::uint8_t>(value));
+}
+
+void write_u16_le(std::vector<std::uint8_t>& out, std::uint16_t value) {
+    out.push_back(static_cast<std::uint8_t>(value & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+}
+
+void write_u32_le(std::vector<std::uint8_t>& out, std::uint32_t value) {
+    out.push_back(static_cast<std::uint8_t>(value & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFF));
+}
+
+void write_bytes(std::vector<std::uint8_t>& out, const void* data, std::size_t size) {
+    const auto* p = static_cast<const std::uint8_t*>(data);
+    out.insert(out.end(), p, p + size);
+}
+
+void write_length_prefixed(std::vector<std::uint8_t>& out, const void* data,
+                           std::size_t size) {
+    write_varint(out, static_cast<std::uint64_t>(size));
+    write_bytes(out, data, size);
+}
+
 }  // namespace
 
 SpudpackError::SpudpackError(std::string message, std::optional<std::size_t> offset)
@@ -106,8 +140,54 @@ std::string normalize_asset_path(std::string_view raw) {
     return out;
 }
 
-std::vector<std::uint8_t> spudpack_encode(const Spudpack&) {
-    throw SpudpackError("spudpack_encode not yet implemented");
+std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack) {
+    if (pack.assets.size() > kMaxAssetCount) {
+        throw SpudpackError("spudpack asset_count exceeds maximum");
+    }
+
+    std::vector<std::uint8_t> out;
+    out.reserve(pack.source.size() + pack.program_bytes.size() + 64);
+
+    write_bytes(out, kMagic.data(), kMagic.size());
+    out.push_back(kVersion);
+    out.push_back(kFlags);
+
+    write_length_prefixed(out, pack.source.data(), pack.source.size());
+    write_length_prefixed(out, pack.program_bytes.data(), pack.program_bytes.size());
+
+    write_varint(out, static_cast<std::uint64_t>(pack.assets.size()));
+    for (const SpudpackAsset& asset : pack.assets) {
+        if (!is_normalized_asset_path(asset.path)) {
+            throw SpudpackError("spudpack asset path is not normalised: " + asset.path);
+        }
+        if (asset.data.size() > kMaxAssetBytes) {
+            throw SpudpackError("spudpack asset exceeds 256MiB cap: " + asset.path);
+        }
+        if (!asset.path.empty() && asset.path.back() == '/' && !asset.data.empty()) {
+            throw SpudpackError(
+                "spudpack empty-leaf path carries data: " + asset.path);
+        }
+        if ((asset.mode & ~kModeMask) != 0) {
+            throw SpudpackError(
+                "spudpack asset mode has reserved bits set: " + asset.path);
+        }
+        write_length_prefixed(out, asset.path.data(), asset.path.size());
+        write_u16_le(out, asset.mode);
+        write_length_prefixed(out, asset.data.data(), asset.data.size());
+    }
+
+    // dep_count: spudpack v1 does not bundle dependencies. Reserved as a
+    // varint (rather than a fixed byte) so a future version that wants
+    // hundreds of deps does not need a layout change.
+    write_varint(out, 0);
+
+    if (out.size() + 4 > kMaxTotalBytes) {
+        throw SpudpackError("spudpack exceeds 2GiB total cap");
+    }
+
+    std::uint32_t crc = crc32(out.data(), out.size());
+    write_u32_le(out, crc);
+    return out;
 }
 
 Spudpack spudpack_decode(const std::uint8_t*, std::size_t) {
