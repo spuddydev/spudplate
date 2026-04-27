@@ -14,7 +14,7 @@ The interpreter runs the file in a single pass. Internal state (variables, loops
 
 ## Statements
 
-### `ask` - Prompt the user for input
+### ask - Prompt the user for input
 
 ```
 ask <name> "<prompt>" <type> [options <v1> <v2> ...] [default <value>] [when <condition>]
@@ -52,7 +52,7 @@ ask slug "Slug?" string default lower(trim(project_name))
 
 ---
 
-### `let` - Declare a derived variable
+### let - Declare a derived variable
 
 ```
 let <name> = <expression>
@@ -119,7 +119,7 @@ Hyphens are allowed inside a path but cannot start one - `mkdir -foo` would be a
 
 `mkdir` creates intermediate directories automatically (`mkdir -p` semantics).
 
-#### `as <varname>` - bind a path alias
+#### Path aliases with as
 
 The `as <varname>` clause binds the path to a variable for reuse. Any identifier in a subsequent path expression is checked against bound aliases - if it matches, it is a variable reference; if not, it is a literal path component. This applies to every segment, not just the leading one:
 
@@ -141,7 +141,7 @@ If the binding is unconditional, it can be referenced anywhere.
 
 ---
 
-### `mkdir` - Create a directory
+### mkdir - Create a directory
 
 ```
 mkdir <path> [from <source>] [verbatim] [mode <octal>] [when <condition>] [as <name>]
@@ -165,7 +165,7 @@ mkdir templates from base_templates verbatim when use_templates as templatepath
 
 ---
 
-### `copy` - Copy a directory into an existing destination
+### copy - Copy a directory into an existing destination
 
 ```
 copy <source> into <destination> [verbatim] [when <condition>]
@@ -186,7 +186,7 @@ copy assets into staticpath/assets verbatim
 
 ---
 
-### `file` - Create or append to a file
+### file - Create or append to a file
 
 ```
 file <path> [append] from <source> [verbatim] [mode <octal>] [when <condition>] [as <name>]
@@ -222,7 +222,7 @@ file readme append content "## Testing\n" when use_tests
 
 ---
 
-### `repeat` - Loop over a range
+### repeat - Loop over a range
 
 ```
 repeat <int_var> as <iter> [when <condition>]
@@ -252,7 +252,7 @@ end
 
 ---
 
-### `include` - Run another installed template
+### include - Run another installed template
 
 ```
 include <name> [when <condition>]
@@ -271,7 +271,7 @@ There is no source-level inlining; all template reuse goes through `include` and
 
 ---
 
-### `run` - Execute a shell command
+### run - Execute a shell command
 
 ```
 run <expression> [in <path>] [when <condition>]
