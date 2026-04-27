@@ -10,7 +10,9 @@
 #include <utility>
 #include <vector>
 
+#include "spudplate/cli_internal.h"
 #include "spudplate/interpreter.h"
+#include "spudplate/spudpack.h"
 
 using spudplate::cli_main;
 using spudplate::Prompter;
@@ -273,7 +275,7 @@ TEST(CliTest, InstallSuccessStoresTemplate) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0) << err.str();
-    EXPECT_TRUE(std::filesystem::is_regular_file(home / "demo" / "template.spud"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(home / "demo.spp"));
     EXPECT_NE(out.str().find("installed demo"), std::string::npos);
 }
 
@@ -299,10 +301,8 @@ TEST(CliTest, InstallWithYesOverwritesExisting) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0) << err.str();
     EXPECT_NE(out.str().find("reinstalled demo"), std::string::npos);
-    std::ifstream installed(home / "demo" / "template.spud");
-    std::stringstream contents;
-    contents << installed.rdbuf();
-    EXPECT_EQ(contents.str(), "mkdir bar\n");
+    spudplate::Spudpack pack = spudplate::spudpack_read_file(home / "demo.spp");
+    EXPECT_EQ(pack.source, "mkdir bar\n");
 }
 
 TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
@@ -328,10 +328,8 @@ TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0);
     EXPECT_NE(out.str().find("aborted"), std::string::npos);
-    std::ifstream installed(home / "demo" / "template.spud");
-    std::stringstream contents;
-    contents << installed.rdbuf();
-    EXPECT_EQ(contents.str(), "mkdir foo\n");
+    spudplate::Spudpack pack = spudplate::spudpack_read_file(home / "demo.spp");
+    EXPECT_EQ(pack.source, "mkdir foo\n");
 }
 
 TEST(CliTest, InstallRejectsBrokenTemplateAndLeavesNoTrace) {
@@ -365,7 +363,7 @@ TEST(CliTest, InstallUsesXdgDataHomeWhenNoSpudplateHome) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0) << err.str();
     EXPECT_TRUE(std::filesystem::is_regular_file(
-        xdg_root / "spudplate" / "demo" / "template.spud"));
+        xdg_root / "spudplate" / "demo.spp"));
 }
 
 TEST(CliTest, InstallMissingFileExitsFive) {
@@ -491,14 +489,14 @@ TEST(CliTest, UninstallRemovesTemplate) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     install_template(td.path() / "demo.spud", "mkdir x\n");
-    ASSERT_TRUE(std::filesystem::is_directory(home / "demo"));
+    ASSERT_TRUE(std::filesystem::is_regular_file(home / "demo.spp"));
     Argv args({"spudplate", "uninstall", "demo"});
     std::stringstream out;
     std::stringstream err;
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0);
-    EXPECT_FALSE(std::filesystem::exists(home / "demo"));
+    EXPECT_FALSE(std::filesystem::exists(home / "demo.spp"));
 }
 
 // --- validate ---
@@ -639,4 +637,281 @@ TEST(CliTest, UninstallUnknownExitsFive) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 5);
+}
+
+// --- spudpack format ---
+
+TEST(CliTest, InstallProducesValidSpudpack) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir foo\n");
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    ASSERT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
+        << err.str();
+    spudplate::Spudpack pack =
+        spudplate::spudpack_read_file(home / "demo.spp");
+    EXPECT_EQ(pack.source, "mkdir foo\n");
+    EXPECT_FALSE(pack.program_bytes.empty());
+}
+
+TEST(CliTest, InstallRejectsSpudpackInputBeforeFileRead) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    // Path does not exist on disk. If the rejection fires before the open,
+    // the diagnostic is the documented message; otherwise it would be
+    // "cannot open: No such file or directory".
+    Argv args({"spudplate", "install", "/tmp/does-not-exist.spp"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("installing pre-built spudpacks"),
+              std::string::npos);
+}
+
+TEST(CliTest, ValidateRejectsSpudpackInput) {
+    TmpDir td;
+    Argv args({"spudplate", "validate", "/tmp/does-not-exist.spp"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("installing pre-built spudpacks"),
+              std::string::npos);
+}
+
+TEST(CliTest, RunByNameOnLegacyOnlyAsksForReinstall) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    std::filesystem::create_directories(home / "legacy");
+    write_file(home / "legacy" / "template.spud", "mkdir x\n");
+
+    Argv args({"spudplate", "run", "legacy"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("legacy install"), std::string::npos);
+    EXPECT_NE(err.str().find("reinstall to upgrade"), std::string::npos);
+}
+
+TEST(CliTest, UninstallRemovesLegacyDirectory) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    std::filesystem::create_directories(home / "legacy");
+    write_file(home / "legacy" / "template.spud", "mkdir x\n");
+
+    Argv args({"spudplate", "uninstall", "legacy"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0);
+    EXPECT_FALSE(std::filesystem::exists(home / "legacy"));
+}
+
+TEST(CliTest, InspectRejectsPathFormArguments) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "inspect", "./demo.spp"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("inspect takes an installed template name"),
+              std::string::npos);
+}
+
+TEST(CliTest, UninstallRejectsPathFormArguments) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "uninstall", "foo.spud"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("uninstall takes an installed template name"),
+              std::string::npos);
+}
+
+TEST(CliTest, InstallYesRemovesLegacyDirectory) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    std::filesystem::create_directories(home / "demo");
+    write_file(home / "demo" / "template.spud", "mkdir old\n");
+
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir new\n");
+    Argv args({"spudplate", "install", "--yes", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
+        << err.str();
+    EXPECT_FALSE(std::filesystem::exists(home / "demo"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(home / "demo.spp"));
+}
+
+TEST(CliTest, InstallRejectsStrayDirectoryAtTarget) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    std::filesystem::create_directories(home / "demo.spp");  // stray dir
+
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir x\n");
+    Argv args({"spudplate", "install", "--yes", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("not a regular file"), std::string::npos);
+    // The stray dir is preserved; no .spp.tmp left behind.
+    EXPECT_TRUE(std::filesystem::is_directory(home / "demo.spp"));
+    EXPECT_FALSE(std::filesystem::exists(home / "demo.spp.tmp"));
+}
+
+TEST(CliTest, InstallRenameFailureCleansUpTempFile) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir x\n");
+
+    struct RenameGuard {
+        spudplate::cli_internal::RenameFn prev;
+        RenameGuard() {
+            prev = spudplate::cli_internal::install_rename_fn();
+            spudplate::cli_internal::install_rename_fn() =
+                [](const std::filesystem::path&,
+                   const std::filesystem::path&) {
+                    throw std::filesystem::filesystem_error(
+                        "stub failure", std::error_code{});
+                };
+        }
+        ~RenameGuard() {
+            spudplate::cli_internal::install_rename_fn() = prev;
+        }
+    } guard;
+
+    Argv args({"spudplate", "install", "--yes", src.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("cannot finalise install"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(home / "demo.spp"));
+    EXPECT_FALSE(std::filesystem::exists(home / "demo.spp.tmp"));
+}
+
+TEST(CliTest, InspectPrintsSourceFromSpudpack) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    std::string body = "ask name \"Name?\" string\nmkdir {name}\n";
+    write_file(src, body);
+    {
+        Argv args({"spudplate", "install", src.string()});
+        std::stringstream o, e;
+        ScriptedPrompter p({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+    }
+
+    Argv args({"spudplate", "inspect", "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
+        << err.str();
+    EXPECT_EQ(out.str(), body);
+}
+
+TEST(CliTest, InstallRunDeleteSourceMaterialisesAssets) {
+    // Headline end-to-end: install a template that bundles assets, delete
+    // the source tree, then run by name from a fresh cwd. The bundled
+    // bytes must materialise even though /tmp/<source> is gone.
+    TmpDir source_td;
+    auto source_root = source_td.path() / "src_root";
+    std::filesystem::create_directories(source_root / "tpl");
+    std::filesystem::create_directories(source_root / "assets");
+    std::vector<std::uint8_t> bytes{0x89, 'P', 'N', 'G', 0x00, 0x42, 0xFF};
+    std::ofstream(source_root / "assets" / "logo.bin", std::ios::binary)
+        .write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+    write_file(source_root / "tpl" / "main.txt", "hello\n");
+    write_file(source_root / "demo.spud",
+               "mkdir out\n"
+               "mkdir out/assets\n"
+               "file out/main.txt from tpl/main.txt\n"
+               "file out/assets/logo.bin from assets/logo.bin\n");
+
+    auto home = source_td.path() / "home";
+    ScopedHome scoped(home);
+    {
+        Argv args({"spudplate", "install", (source_root / "demo.spud").string()});
+        std::stringstream o, e;
+        ScriptedPrompter p({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+    }
+
+    // Wipe the source tree to prove the run is cwd-independent.
+    std::filesystem::remove_all(source_root);
+
+    TmpDir run_td;  // fresh cwd
+    Argv args({"spudplate", "run", "--yes", "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
+        << err.str();
+
+    auto materialised = run_td.path() / "out" / "assets" / "logo.bin";
+    ASSERT_TRUE(std::filesystem::is_regular_file(materialised));
+    std::ifstream in(materialised, std::ios::binary);
+    std::vector<std::uint8_t> got((std::istreambuf_iterator<char>(in)),
+                                  std::istreambuf_iterator<char>());
+    EXPECT_EQ(got, bytes);
+}
+
+TEST(CliTest, ListWarnsAboutShadowedLegacy) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    auto src = td.path() / "demo.spud";
+    write_file(src, "mkdir x\n");
+    {
+        Argv args({"spudplate", "install", src.string()});
+        std::stringstream o, e;
+        ScriptedPrompter p({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0);
+    }
+    // Hand-craft a parallel legacy directory.
+    std::filesystem::create_directories(home / "demo");
+    write_file(home / "demo" / "template.spud", "mkdir y\n");
+
+    Argv args({"spudplate", "list"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0);
+    EXPECT_EQ(out.str(), "demo\n");
+    EXPECT_NE(err.str().find("shadowed"), std::string::npos);
 }
