@@ -4,6 +4,7 @@
 
 #include <climits>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -2342,4 +2343,135 @@ mkdir {name}
     std::stringstream out;
     dry_run(p, prompter, out);
     EXPECT_NE(out.str().find("hello/"), std::string::npos);
+}
+
+// ----- SourceProvider plumbing --------------------------------------------
+
+namespace {
+
+std::string read_text(const std::filesystem::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+}  // namespace
+
+TEST(SourceProvider, AssetMapMaterialisesFileAndMode) {
+    TmpDir td;
+    std::vector<spudplate::SpudpackAsset> assets;
+    assets.push_back(
+        {"tpl/main.cpp", 0644, {'h', 'i', '\n'}});
+    spudplate::AssetMapSourceProvider provider(assets);
+    auto p = parse(
+        "mkdir out\n"
+        "file out/main.cpp from tpl/main.cpp\n");
+    ScriptedPrompter prompter({});
+    spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
+    EXPECT_EQ(read_text(td.path() / "out/main.cpp"), "hi\n");
+}
+
+TEST(SourceProvider, MkdirFromAssetMapNestedTree) {
+    TmpDir td;
+    std::vector<spudplate::SpudpackAsset> assets;
+    assets.push_back({"src/a/b/c.txt", 0644, {'x'}});
+    spudplate::AssetMapSourceProvider provider(assets);
+    auto p = parse(
+        "mkdir tree from src\n"
+        "file tree/a/extra.txt content \"more\"\n");
+    ScriptedPrompter prompter({});
+    spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "tree/a/b/c.txt"));
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "tree/a/extra.txt"));
+}
+
+TEST(SourceProvider, MkdirFromEmptyLeafDir) {
+    TmpDir td;
+    std::vector<spudplate::SpudpackAsset> assets;
+    assets.push_back({"scaffold/logs/", 0755, {}});
+    spudplate::AssetMapSourceProvider provider(assets);
+    auto p = parse("mkdir project from scaffold\n");
+    ScriptedPrompter prompter({});
+    spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "project/logs"));
+}
+
+TEST(SourceProvider, AssetMissSurfacesRuntimeError) {
+    TmpDir td;
+    std::vector<spudplate::SpudpackAsset> assets;
+    spudplate::AssetMapSourceProvider provider(assets);
+    auto p = parse("file out.txt from missing.txt\n");
+    ScriptedPrompter prompter({});
+    try {
+        spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
+        FAIL() << "expected throw";
+    } catch (const RuntimeError& e) {
+        EXPECT_NE(std::string(e.what()).find("was not bundled"),
+                  std::string::npos);
+        EXPECT_GT(e.line(), 0);
+    }
+}
+
+TEST(SourceProvider, BinaryContentSkipsInterpolation) {
+    TmpDir td;
+    std::vector<std::uint8_t> png{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n',
+                                  0x00, 0x01, '{', 'x', '}'};
+    std::vector<spudplate::SpudpackAsset> assets;
+    assets.push_back({"logo.png", 0644, png});
+    spudplate::AssetMapSourceProvider provider(assets);
+    auto p = parse(
+        "mkdir out\n"
+        "file out/logo.png from logo.png\n");
+    ScriptedPrompter prompter({});
+    spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
+    auto materialised = read_text(td.path() / "out/logo.png");
+    EXPECT_EQ(materialised.size(), png.size());
+    EXPECT_EQ(std::memcmp(materialised.data(), png.data(), png.size()), 0);
+}
+
+TEST(SourceProvider, AppendOverReadonlyRestoresPriorMode) {
+    TmpDir td;
+    std::vector<spudplate::SpudpackAsset> assets;
+    assets.push_back({"readonly.txt", 0444, {'b', 'a', 's', 'e', '\n'}});
+    spudplate::AssetMapSourceProvider provider(assets);
+    auto p = parse(
+        "file out.txt from readonly.txt\n"
+        "file out.txt append content \"more\"\n");
+    ScriptedPrompter prompter({});
+    spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
+    EXPECT_EQ(read_text(td.path() / "out.txt"), "base\nmore");
+    auto perms = std::filesystem::status(td.path() / "out.txt").permissions();
+    EXPECT_EQ(static_cast<unsigned>(perms) & 0777, 0444u);
+}
+
+TEST(SourceProvider, DiskBackedSkipsBrokenSymlinks) {
+    TmpDir td;
+    std::filesystem::create_directories(td.path() / "tree");
+    std::ofstream(td.path() / "tree/regular.txt") << "hi\n";
+    // Broken symlink — target does not exist. Today's behaviour skips
+    // these silently rather than aborting the run; the provider
+    // preserves that.
+    std::filesystem::create_symlink(td.path() / "no/such/target",
+                                    td.path() / "tree/dangling");
+    auto p = parse("mkdir out from tree\n");
+    ScriptedPrompter prompter({});
+    spudplate::run(p, prompter, /*skip_authorization=*/true);
+    EXPECT_TRUE(std::filesystem::exists(td.path() / "out/regular.txt"));
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "out/dangling"));
+}
+
+TEST(SourceProvider, UnclosedBraceStillSurfacedOnTextWithHighBytes) {
+    TmpDir td;
+    // Latin-1 bytes (no NUL) plus a stray '{' should still hit the
+    // interpolation path and report `unclosed '{'`.
+    std::vector<std::uint8_t> body{0xC3, 0xA9, '{', 'a'};  // "é{a"
+    std::vector<spudplate::SpudpackAsset> assets;
+    assets.push_back({"latin.txt", 0644, body});
+    spudplate::AssetMapSourceProvider provider(assets);
+    auto p = parse("file out.txt from latin.txt\n");
+    ScriptedPrompter prompter({});
+    EXPECT_THROW(
+        spudplate::run(p, prompter, /*skip_authorization=*/true, &provider),
+        RuntimeError);
 }

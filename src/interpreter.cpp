@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include "spudplate/ast.h"
+#include "spudplate/spudpack.h"
 #include "spudplate/token.h"
 
 namespace spudplate {
@@ -107,32 +108,91 @@ struct PendingRun {
 using PendingOp =
     std::variant<PendingMkdir, PendingFile, PendingCheckDir, PendingRun>;
 
+// Disk-backed implementation of `SourceProvider`. Reads run against
+// `std::filesystem` rooted at the current working directory; mode is
+// always zero so callers preserve the bare-`.spud` behaviour where mode
+// information is absent and `PendingFile.mode` stays `nullopt`.
+//
+// `list_under` matches the historical walk: directories visited
+// pre-order, file symlinks visited as-is, non-regular non-directory
+// entries silently skipped (preserving the legacy comment "symlinks,
+// fifos, etc. are silently skipped for v1").
+class DiskSourceProvider final : public SourceProvider {
+  public:
+    std::pair<std::vector<std::uint8_t>, std::uint16_t> read(
+        std::string_view path) const override {
+        std::filesystem::path p(path);
+        std::error_code ec;
+        auto status = std::filesystem::status(p, ec);
+        if (ec || !std::filesystem::exists(status)) {
+            throw std::runtime_error(
+                "source file '" + std::string(path) + "' does not exist");
+        }
+        if (!std::filesystem::is_regular_file(status)) {
+            throw std::runtime_error(
+                "source '" + std::string(path) + "' is not a regular file");
+        }
+        std::ifstream in(p, std::ios::binary);
+        if (!in) {
+            throw std::runtime_error(
+                "cannot open source '" + std::string(path) + "' for reading");
+        }
+        std::vector<std::uint8_t> bytes(
+            (std::istreambuf_iterator<char>(in)),
+            std::istreambuf_iterator<char>());
+        return {std::move(bytes), 0};
+    }
+
+    std::vector<Entry> list_under(std::string_view prefix) const override {
+        std::vector<Entry> out;
+        std::filesystem::path root(prefix);
+        std::error_code ec;
+        for (auto it = std::filesystem::recursive_directory_iterator(root, ec);
+             it != std::filesystem::recursive_directory_iterator{}; ++it) {
+            const auto& p = it->path();
+            std::string rel = p.lexically_relative(root).generic_string();
+            if (it->is_directory()) {
+                out.push_back({std::move(rel), /*is_directory=*/true, 0});
+            } else if (it->is_regular_file()) {
+                out.push_back({std::move(rel), /*is_directory=*/false, 0});
+            }
+            // symlinks, fifos, etc. silently skipped — preserves v1
+            // bare-`.spud` behaviour byte-for-byte.
+        }
+        return out;
+    }
+};
+
+// Default disk-backed provider used when the caller passes `nullptr`.
+// Lives at process scope so a single instance is shared across runs and
+// the no-allocation back-compat path never touches the heap.
+const SourceProvider& default_source_provider() {
+    static DiskSourceProvider instance;
+    return instance;
+}
+
 // Read a regular file (cwd-relative) into a string. The position arguments
 // point at the *.spud* statement that triggered the read so error messages
 // surface there rather than at some unhelpful internal site.
-std::string read_source_file(const std::string& path, int line, int column) {
-    std::error_code ec;
-    auto status = std::filesystem::status(path, ec);
-    if (ec) {
-        throw RuntimeError("cannot stat source '" + path + "': " + ec.message(),
-                           line, column);
+std::pair<std::string, std::uint16_t> read_source_file(
+    const SourceProvider& source, const std::string& path, int line, int column) {
+    try {
+        auto [bytes, mode] = source.read(path);
+        std::string s(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        return {std::move(s), mode};
+    } catch (const std::exception& e) {
+        throw RuntimeError(e.what(), line, column);
     }
-    if (!std::filesystem::exists(status)) {
-        throw RuntimeError("source file '" + path + "' does not exist", line,
-                           column);
-    }
-    if (!std::filesystem::is_regular_file(status)) {
-        throw RuntimeError("source '" + path + "' is not a regular file", line,
-                           column);
-    }
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        throw RuntimeError("cannot open source '" + path + "' for reading", line,
-                           column);
-    }
-    std::string content((std::istreambuf_iterator<char>(in)),
-                        std::istreambuf_iterator<char>());
-    return content;
+}
+
+// A source file is treated as binary — and therefore not interpolated —
+// when it contains any NUL byte. This is the unambiguous binary signal:
+// every common binary format (PNG, JPEG, ELF, fonts, gzip) carries NUL
+// bytes in the first kilobyte. Latin-1 templates with stray high bytes
+// but no NUL still go through `interpolate_content` and surface today's
+// `unclosed '{'` / bad-identifier errors when the author has a typo.
+bool content_is_binary(std::string_view content) {
+    return content.find('\0') != std::string_view::npos;
 }
 
 // Substitute `{ident}` occurrences in `content` with the stringified value
@@ -141,6 +201,9 @@ std::string read_source_file(const std::string& path, int line, int column) {
 // `verbatim` to copy file contents byte-for-byte without substitution.
 std::string interpolate_content(const std::string& content,
                                 const Environment& env, int line, int column) {
+    if (content_is_binary(content)) {
+        return content;
+    }
     std::string out;
     out.reserve(content.size());
     std::size_t i = 0;
@@ -705,7 +768,8 @@ Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
 
 class Interpreter {
   public:
-    explicit Interpreter(Prompter& prompter) : prompter_(prompter) {}
+    Interpreter(Prompter& prompter, const SourceProvider& source)
+        : prompter_(prompter), source_(source) {}
 
     void set_ask_total(int total) { ask_total_ = total; }
 
@@ -873,46 +937,65 @@ class Interpreter {
                                   const std::string& dst_root, bool verbatim,
                                   int line, int column) {
         namespace fs = std::filesystem;
-        std::error_code ec;
-        auto src_status = fs::status(src, ec);
-        if (ec) {
-            throw RuntimeError(
-                "cannot stat source '" + src + "': " + ec.message(), line,
-                column);
+        std::vector<SourceProvider::Entry> entries;
+        try {
+            entries = source_.list_under(src);
+        } catch (const std::exception& e) {
+            throw RuntimeError(e.what(), line, column);
         }
-        if (!fs::exists(src_status)) {
-            throw RuntimeError("source directory '" + src + "' does not exist",
-                               line, column);
+        // The disk-backed provider returns nothing for a missing source.
+        // The historical behaviour is to surface a precise error in that
+        // case, so the walker double-checks existence here when the
+        // provider produced no entries — but only against the disk so
+        // the asset-map case is not regressed.
+        if (entries.empty()) {
+            std::error_code ec;
+            auto status = fs::status(src, ec);
+            if (!ec && fs::exists(status) && !fs::is_directory(status)) {
+                throw RuntimeError("source '" + src + "' is not a directory",
+                                   line, column);
+            }
+            if (ec || !fs::exists(status)) {
+                // Asset-map providers will simply have nothing to list
+                // under a non-existent prefix; if no asset-map keys
+                // matched and disk also has nothing, surface the legacy
+                // diagnostic.
+                throw RuntimeError(
+                    "source directory '" + src + "' does not exist", line,
+                    column);
+            }
         }
-        if (!fs::is_directory(src_status)) {
-            throw RuntimeError("source '" + src + "' is not a directory", line,
-                               column);
-        }
-        fs::path src_path{src};
+
         fs::path dst_path{dst_root};
-        for (auto it = fs::recursive_directory_iterator(src_path);
-             it != fs::recursive_directory_iterator{}; ++it) {
-            auto rel = fs::relative(it->path(), src_path);
-            auto target = (dst_path / rel).string();
-            if (it->is_directory()) {
+        for (auto& entry : entries) {
+            std::string target = (dst_path / entry.path).generic_string();
+            if (entry.is_directory) {
+                std::optional<int> mode_opt;
+                if (entry.mode != 0) mode_opt = static_cast<int>(entry.mode);
                 pending_.push_back(PendingMkdir{.path = std::move(target),
-                                                .mode = std::nullopt,
+                                                .mode = mode_opt,
                                                 .line = line,
                                                 .column = column});
-            } else if (it->is_regular_file()) {
-                std::string content =
-                    read_source_file(it->path().string(), line, column);
-                if (!verbatim) {
-                    content = interpolate_content(content, env_, line, column);
-                }
-                pending_.push_back(PendingFile{.path = std::move(target),
-                                               .content = std::move(content),
-                                               .append = false,
-                                               .mode = std::nullopt,
-                                               .line = line,
-                                               .column = column});
+                continue;
             }
-            // symlinks, fifos, etc. are silently skipped for v1
+            // Regular file: provider key joins to the source root for
+            // disk lookups; asset-map providers store the full key
+            // already, so passing the joined key to `provider.read` is
+            // correct in both cases.
+            std::string lookup = (fs::path(src) / entry.path).generic_string();
+            auto [content, mode] =
+                read_source_file(source_, lookup, line, column);
+            if (!verbatim) {
+                content = interpolate_content(content, env_, line, column);
+            }
+            std::optional<int> mode_opt;
+            if (mode != 0) mode_opt = static_cast<int>(mode);
+            pending_.push_back(PendingFile{.path = std::move(target),
+                                           .content = std::move(content),
+                                           .append = false,
+                                           .mode = mode_opt,
+                                           .line = line,
+                                           .column = column});
         }
     }
 
@@ -944,12 +1027,22 @@ class Interpreter {
             return;
         }
         std::string content;
+        std::optional<int> mode = s.mode;
         if (std::holds_alternative<FileFromSource>(s.source)) {
             const auto& fs = std::get<FileFromSource>(s.source);
             std::string src_path = evaluate_path(fs.path, env_, alias_map_);
-            content = read_source_file(src_path, s.line, s.column);
+            auto [bytes, src_mode] =
+                read_source_file(source_, src_path, s.line, s.column);
+            content = std::move(bytes);
             if (!fs.verbatim) {
                 content = interpolate_content(content, env_, s.line, s.column);
+            }
+            // Explicit `mode` on the statement wins over the source's mode;
+            // otherwise propagate the source mode (asset-map only — disk
+            // provider always reports zero so bare-`.spud` runs preserve
+            // the historical `nullopt`).
+            if (!mode.has_value() && src_mode != 0) {
+                mode = static_cast<int>(src_mode);
             }
         } else {
             const auto& content_src = std::get<FileContentSource>(s.source);
@@ -964,7 +1057,7 @@ class Interpreter {
         pending_.push_back(PendingFile{.path = std::move(path_str),
                                        .content = std::move(content),
                                        .append = s.append,
-                                       .mode = s.mode,
+                                       .mode = mode,
                                        .line = s.line,
                                        .column = s.column});
     }
@@ -1037,30 +1130,67 @@ class Interpreter {
         // overwrite, allowed. The pre-existing check only fires for paths
         // that existed before the run started.
         check_pre_existing(op.path, op.line, op.column);
-        std::ios::openmode mode = std::ios::out;
+        std::ios::openmode mode = std::ios::out | std::ios::binary;
         if (op.append) {
             mode |= std::ios::app;
         } else {
             mode |= std::ios::trunc;
         }
+
+        // Append over a file whose mode lacks owner_write would fail at
+        // open time. Documented case: `file foo from readonly` (mode 0444)
+        // followed by `file foo append content "..."`. Widen owner_write
+        // for the duration of the append, restore the prior mode on scope
+        // exit even if the write throws. Inert when already writable.
+        struct Restore {
+            std::filesystem::path path;
+            std::filesystem::perms prev;
+            bool active{false};
+            ~Restore() {
+                if (active) {
+                    std::error_code ec;
+                    std::filesystem::permissions(
+                        path, prev, std::filesystem::perm_options::replace, ec);
+                }
+            }
+        } guard;
+        if (op.append && std::filesystem::exists(op.path)) {
+            std::error_code ec;
+            auto prev = std::filesystem::status(op.path, ec).permissions();
+            if (!ec && (prev & std::filesystem::perms::owner_write) ==
+                           std::filesystem::perms::none) {
+                guard.path = op.path;
+                guard.prev = prev;
+                guard.active = true;
+                std::filesystem::permissions(
+                    op.path, std::filesystem::perms::owner_write,
+                    std::filesystem::perm_options::add);
+            }
+        }
+
         {
             std::ofstream out(op.path, mode);
             if (!out) {
                 throw RuntimeError("cannot open '" + op.path + "' for writing",
                                    op.line, op.column);
             }
-            out << op.content;
+            out.write(op.content.data(),
+                      static_cast<std::streamsize>(op.content.size()));
         }
         if (op.mode.has_value()) {
             std::filesystem::permissions(
                 op.path, static_cast<std::filesystem::perms>(*op.mode),
                 std::filesystem::perm_options::replace);
+            // Skip the RAII guard's restore — the caller's explicit mode
+            // wins over the original permissions.
+            guard.active = false;
         }
         created_during_run_.insert(op.path);
     }
 
     Environment env_;
     Prompter& prompter_;
+    const SourceProvider& source_;
     AliasMap alias_map_;
     std::vector<PendingOp> pending_;
     std::unordered_set<std::string> created_during_run_;
@@ -1295,19 +1425,23 @@ std::string value_to_string(const Value& value) {
         value);
 }
 
-void run(const Program& program, Prompter& prompter, bool skip_authorization) {
+void run(const Program& program, Prompter& prompter, bool skip_authorization,
+         const SourceProvider* source) {
     if (!skip_authorization) {
         std::string summary = build_authorize_summary(program);
         if (!summary.empty() && !prompter.authorize(summary)) {
             return;  // declined: clean exit, no side effects, no statements ran
         }
     }
-    Interpreter interp(prompter);
+    Interpreter interp(prompter,
+                       source != nullptr ? *source : default_source_provider());
     run_program(program, interp);
 }
 
-Environment run_for_tests(const Program& program, Prompter& prompter) {
-    Interpreter interp(prompter);
+Environment run_for_tests(const Program& program, Prompter& prompter,
+                          const SourceProvider* source) {
+    Interpreter interp(prompter,
+                       source != nullptr ? *source : default_source_provider());
     run_program(program, interp);
     return std::move(interp.env());
 }
@@ -1482,14 +1616,77 @@ bool locale_is_utf8() {
 }
 
 void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
-             bool ascii_only) {
-    Interpreter interp(prompter);
+             bool ascii_only, const SourceProvider* source) {
+    Interpreter interp(prompter,
+                       source != nullptr ? *source : default_source_provider());
     interp.set_ask_total(count_ask_statements(program));
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
     render_pending(out, interp.pending(),
                    ascii_only ? kAsciiGlyphs : kUtf8Glyphs);
+}
+
+// Public out-of-line definitions for `AssetMapSourceProvider`. The class
+// lives in the public header so callers can construct one alongside a
+// decoded `Spudpack`; the definitions sit here so the file-local
+// `DiskSourceProvider` can stay file-local and the implementation
+// details (the asset index, the dir-prefix logic) do not bleed into
+// downstream translation units.
+AssetMapSourceProvider::AssetMapSourceProvider(
+    const std::vector<SpudpackAsset>& assets)
+    : assets_(assets) {
+    index_.reserve(assets.size());
+    for (std::size_t i = 0; i < assets.size(); ++i) {
+        index_.emplace(assets[i].path, i);
+    }
+}
+
+std::pair<std::vector<std::uint8_t>, std::uint16_t>
+AssetMapSourceProvider::read(std::string_view path) const {
+    auto it = index_.find(std::string(path));
+    if (it == index_.end()) {
+        throw std::runtime_error("source '" + std::string(path) +
+                                 "' was not bundled");
+    }
+    const auto& a = assets_[it->second];
+    return {a.data, a.mode};
+}
+
+std::vector<SourceProvider::Entry>
+AssetMapSourceProvider::list_under(std::string_view raw_prefix) const {
+    std::string prefix(raw_prefix);
+    if (!prefix.empty() && prefix.back() != '/') prefix.push_back('/');
+
+    std::vector<Entry> out;
+    std::unordered_set<std::string> emitted_dirs;
+
+    for (const auto& a : assets_) {
+        if (a.path.size() < prefix.size() ||
+            a.path.compare(0, prefix.size(), prefix) != 0) {
+            continue;
+        }
+        std::string rel = a.path.substr(prefix.size());
+        if (rel.empty()) continue;
+
+        std::size_t slash = rel.find('/');
+        while (slash != std::string::npos) {
+            std::string dir = rel.substr(0, slash + 1);
+            if (emitted_dirs.insert(dir).second) {
+                out.push_back({dir, /*is_directory=*/true, 0});
+            }
+            slash = rel.find('/', slash + 1);
+        }
+
+        if (!rel.empty() && rel.back() == '/') {
+            if (emitted_dirs.insert(rel).second) {
+                out.push_back({std::move(rel), /*is_directory=*/true, a.mode});
+            }
+        } else {
+            out.push_back({std::move(rel), /*is_directory=*/false, a.mode});
+        }
+    }
+    return out;
 }
 
 }  // namespace spudplate

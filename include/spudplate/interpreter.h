@@ -6,11 +6,14 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include "spudplate/ast.h"
+#include "spudplate/spudpack.h"
 
 namespace spudplate {
 
@@ -196,6 +199,75 @@ class ScriptedPrompter : public Prompter {
 };
 
 /**
+ * @brief Source of bundled assets the interpreter draws from for `from`/`copy`.
+ *
+ * Two concrete implementations live in `src/interpreter.cpp`: a disk-backed
+ * provider (cwd-relative reads, used when no asset map is supplied) and an
+ * asset-map provider (used when running an installed `.spp`).
+ *
+ * Asset paths are bundle-root-relative and pre-normalised by
+ * `spudplate::normalize_asset_path` (forward-slash, no leading `/`, no `.`
+ * or `..` segments, no embedded NUL). A trailing `/` on a returned `Entry`
+ * path means "empty leaf directory".
+ *
+ * `mode == 0` is the documented "no mode information" sentinel — the
+ * disk-backed provider always reports zero so callers preserve the
+ * pre-existing `nullopt`-mode behaviour of bare-`.spud` runs.
+ */
+class SourceProvider {
+  public:
+    virtual ~SourceProvider() = default;
+
+    /** @brief One entry returned by `list_under`. */
+    struct Entry {
+        std::string path;       ///< Normalised bundle-root-relative path.
+        bool is_directory;      ///< True for directories (intermediate or empty leaf).
+        std::uint16_t mode;     ///< Permission bits, or 0 for "no mode information".
+    };
+
+    /**
+     * @brief Read the bytes of an asset by its normalised path.
+     *
+     * Returns the content and the asset mode (or 0 when the provider does
+     * not carry mode information).
+     */
+    virtual std::pair<std::vector<std::uint8_t>, std::uint16_t> read(
+        std::string_view path) const = 0;
+
+    /**
+     * @brief List every entry under the given prefix, including
+     * synthesised intermediate directories.
+     *
+     * The returned list is in pre-order (parent before children) so callers
+     * that map entries to filesystem operations naturally satisfy the
+     * create-parent-first ordering.
+     */
+    virtual std::vector<Entry> list_under(std::string_view prefix) const = 0;
+};
+
+/**
+ * @brief `SourceProvider` backed by a borrowed asset map.
+ *
+ * Used by `cmd_run` when running an installed `.spp`. The provider holds
+ * a reference to the asset vector inside the decoded `Spudpack`; the
+ * caller must keep that pack alive for the duration of any call into the
+ * interpreter. `cmd_run` does so by scoping the `Spudpack` and the
+ * provider in the same lexical block.
+ */
+class AssetMapSourceProvider final : public SourceProvider {
+  public:
+    explicit AssetMapSourceProvider(const std::vector<SpudpackAsset>& assets);
+
+    std::pair<std::vector<std::uint8_t>, std::uint16_t> read(
+        std::string_view path) const override;
+    std::vector<Entry> list_under(std::string_view prefix) const override;
+
+  private:
+    const std::vector<SpudpackAsset>& assets_;
+    std::unordered_map<std::string, std::size_t> index_;
+};
+
+/**
  * @brief Run a validated program.
  *
  * Walks `program.statements` top-to-bottom, prompting through `prompter` for
@@ -208,9 +280,14 @@ class ScriptedPrompter : public Prompter {
  * effects. The `skip_authorization` flag bypasses the prompt for non-
  * interactive callers — they take responsibility for having vetted the
  * source.
+ *
+ * `source` overrides where `from`/`copy` reads come from. A null `source`
+ * (the default) routes reads through a disk-backed provider so existing
+ * bare-`.spud` callers see the historical cwd-relative behaviour.
  */
 void run(const Program& program, Prompter& prompter,
-         bool skip_authorization = false);
+         bool skip_authorization = false,
+         const SourceProvider* source = nullptr);
 
 /**
  * @brief Test-only entry point: like `run`, but returns the final environment.
@@ -218,7 +295,8 @@ void run(const Program& program, Prompter& prompter,
  * Production callers should use `run`; this is exposed so tests can assert
  * on bindings without relying on filesystem side effects.
  */
-Environment run_for_tests(const Program& program, Prompter& prompter);
+Environment run_for_tests(const Program& program, Prompter& prompter,
+                          const SourceProvider* source = nullptr);
 
 /**
  * @brief Run a program without touching the filesystem.
@@ -237,7 +315,8 @@ Environment run_for_tests(const Program& program, Prompter& prompter);
  * the flush step.
  */
 void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
-             bool ascii_only = false);
+             bool ascii_only = false,
+             const SourceProvider* source = nullptr);
 
 /**
  * @brief Heuristic check: does the current environment look UTF-8 capable?
