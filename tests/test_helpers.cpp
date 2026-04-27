@@ -1,5 +1,7 @@
 #include "test_helpers.h"
 
+#include <random>
+#include <sstream>
 #include <variant>
 
 namespace spudplate::test {
@@ -244,6 +246,22 @@ bool programs_equal(const Program& a, const Program& b) {
         if (!stmts_equal(*a.statements[i], *b.statements[i])) return false;
     }
     return true;
+}
+
+TmpDir::TmpDir(bool chdir) : chdir_(chdir) {
+    if (chdir_) prev_ = std::filesystem::current_path();
+    std::random_device rd;
+    std::stringstream ss;
+    ss << "spudplate-test-" << std::hex << rd() << rd();
+    path_ = std::filesystem::temp_directory_path() / ss.str();
+    std::filesystem::create_directories(path_);
+    if (chdir_) std::filesystem::current_path(path_);
+}
+
+TmpDir::~TmpDir() {
+    std::error_code ec;
+    if (chdir_) std::filesystem::current_path(prev_, ec);
+    std::filesystem::remove_all(path_, ec);
 }
 
 }  // namespace spudplate::test
