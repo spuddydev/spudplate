@@ -16,7 +16,7 @@ namespace spudplate {
  *
  * Each enum value equals the corresponding `std::variant::index()` for the
  * variant declared in `ast.h`. The variant declaration order is therefore
- * load-bearing for wire compatibility — adding a new arm is fine, but
+ * load-bearing for wire compatibility - adding a new arm is fine, but
  * reordering existing arms silently breaks every previously-produced
  * `.spp` file. Round-trip tests in `tests/binary_serializer_test.cpp`
  * exercise every arm by name to guard against accidental reordering.
@@ -98,7 +98,7 @@ class BinaryDeserializeError : public std::runtime_error {
  * payload, signed integer fields are zigzag-encoded inside the varint.
  *
  * Throws `BinarySerializeError` only for inputs that violate the AST's
- * own contract — e.g. a `UnaryExpr.op` outside the language's operator
+ * own contract - e.g. a `UnaryExpr.op` outside the language's operator
  * subset.
  */
 std::vector<std::uint8_t> serialize_program(const Program& program);

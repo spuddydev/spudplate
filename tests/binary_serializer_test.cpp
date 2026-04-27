@@ -429,7 +429,7 @@ TEST(BinarySerializer, VarintLongerThanTenBytesThrows) {
 
 TEST(BinarySerializer, InvalidUnaryOpRejected) {
     // Hand-craft: program with one Let whose value is a Unary with op=PLUS.
-    // PLUS is a binary op — not legal in a unary slot. Encoder must throw.
+    // PLUS is a binary op - not legal in a unary slot. Encoder must throw.
     auto bad = make_expr(UnaryExpr{.op = TokenType::PLUS,
                                    .operand = ident("flag"),
                                    .line = 1,
@@ -466,7 +466,7 @@ TEST(BinarySerializer, RejectsHugeStatementCount) {
     // Statement count varint encodes a huge value with no statements
     // following. The decoder must reject without OOM-reserving.
     std::vector<std::uint8_t> bytes;
-    // Varint for ~2^60 — 9 continuation bytes plus a high terminator.
+    // Varint for ~2^60 - 9 continuation bytes plus a high terminator.
     for (int i = 0; i < 9; ++i) bytes.push_back(0xFF);
     bytes.push_back(0x0F);
     EXPECT_THROW(deserialize_program(bytes.data(), bytes.size()),
@@ -493,7 +493,7 @@ TEST(BinarySerializer, RejectsDeeplyNestedExpressions) {
 
 TEST(BinarySerializer, DeserializeErrorCarriesOffset) {
     // Single byte 0xFF: invalid as a varint (would need continuation), but
-    // legal as a single 7-bit value of 127 — actually 0xFF has the high bit
+    // legal as a single 7-bit value of 127 - actually 0xFF has the high bit
     // set so it expects a continuation, which is missing. That throws as a
     // truncated varint at offset 1.
     std::vector<std::uint8_t> bytes{0xFFU};

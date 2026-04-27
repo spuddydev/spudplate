@@ -16,7 +16,7 @@ namespace {
 // indicates either a malicious payload or a bug in the encoder.
 constexpr std::size_t kVarintMaxBytes = 10;
 
-// Static asserts pin the count of each variant — adding a new arm fails
+// Static asserts pin the count of each variant - adding a new arm fails
 // the build until the encode/decode tables grow with it. Reordering
 // existing arms is not caught by arity alone; the round-trip tests are
 // the second line of defence there.

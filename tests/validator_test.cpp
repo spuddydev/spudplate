@@ -352,7 +352,7 @@ TEST(NormalizeTest, PositiveAndNegativeBoolNotEqual) {
 }
 
 TEST(NormalizeTest, CommutativityNotApplied) {
-    // `a and b` vs `b and a` — known limitation per TODO.
+    // `a and b` vs `b and a` - known limitation per TODO.
     TypeMap tm{{"a", VarType::Bool}, {"b", VarType::Bool}};
     auto left = bin(TokenType::AND, id("a"), id("b"));
     auto right = bin(TokenType::AND, id("b"), id("a"));
@@ -360,7 +360,7 @@ TEST(NormalizeTest, CommutativityNotApplied) {
 }
 
 TEST(NormalizeTest, UnknownIdentifierKeepsStructuralForm) {
-    // `x` is NOT in the type map — bool simplification skipped.
+    // `x` is NOT in the type map - bool simplification skipped.
     // `x == true` stays as the binary form; `x` stays as the identifier.
     TypeMap tm;  // empty
     auto a = id("x");
@@ -642,7 +642,7 @@ TEST(ValidatorTest, TemplateInWhenInRunIsWalked) {
 }
 
 TEST(ValidatorTest, ComposedRulesEndToEnd) {
-    // Exercises Part A (repeat when), Part B (no ask-in-repeat — valid case),
+    // Exercises Part A (repeat when), Part B (no ask-in-repeat - valid case),
     // Part C (nested let scoping), and Part E (bool-equivalent alias when).
     auto program = parse(
         "ask use_ci \"use ci?\" bool\n"

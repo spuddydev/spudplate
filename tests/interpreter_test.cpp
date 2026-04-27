@@ -58,7 +58,7 @@ using spudplate::VarType;
 
 namespace {
 
-// Test stub — never asked, never answered. Used in Part 1 where every
+// Test stub - never asked, never answered. Used in Part 1 where every
 // statement throws "not yet supported" before the prompter is reached.
 class NullPrompter : public Prompter {
   public:
@@ -397,7 +397,7 @@ TEST(EvalExprTest, AndFalse) {
 
 TEST(EvalExprTest, AndShortCircuitsOnFalse) {
     Environment env;
-    // false and (1/0) — must not evaluate the right side
+    // false and (1/0) - must not evaluate the right side
     auto e = binop(TokenType::AND, bool_lit(false),
                    binop(TokenType::SLASH, int_lit(1), int_lit(0)));
     EXPECT_FALSE(std::get<bool>(evaluate_expr(*e, env)));
@@ -745,7 +745,7 @@ TEST(AskTest, NumberedIndexOnIntOptions) {
 
 TEST(AskTest, OutOfRangeIndexFallsThrough) {
     // "5" is outside the index range so it parses as the int 5, which is not
-    // in the options list — re-prompt rather than crash.
+    // in the options list - re-prompt rather than crash.
     auto p = parse(R"(ask v "PG?" int options 15 16 17
 )");
     ScriptedPrompter prompter({"5", "16"});
@@ -828,7 +828,7 @@ ask z "Z?" string
 )");
     ScriptedPrompter prompter({"av", "1", "loopv", "zv"});
     run_for_tests(p, prompter);
-    // Last presented prompt is `ask z` — top-level, should be (3/3).
+    // Last presented prompt is `ask z` - top-level, should be (3/3).
     EXPECT_EQ(prompter.last_request()->question_index, 3);
     EXPECT_EQ(prompter.last_request()->question_total, 3);
 }
@@ -1193,7 +1193,7 @@ let s = "{n}"
 }
 
 TEST(TemplateStringTest, RunCommandPreviewKeepsBraceForm) {
-    // The trust prompt shows the literal source — interpolations stay
+    // The trust prompt shows the literal source - interpolations stay
     // visible as `{...}` so the user sees what flows into the command.
     TmpDir td;
     auto p = parse(R"(let label = "ok"
@@ -1362,7 +1362,7 @@ TEST(MkdirTest, FromMissingSourceThrows) {
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
-    // The `from` rejection happens during execution, before flush — nothing
+    // The `from` rejection happens during execution, before flush - nothing
     // was written.
     EXPECT_FALSE(std::filesystem::exists(td.path() / "foo"));
 }
@@ -1445,7 +1445,7 @@ mkdir b from base
 TEST(MkdirTest, SkippedConditionalAliasNotBound) {
     TmpDir td;
     // Producer is skipped (`use_x=false`); consumer guarded by the same when
-    // is also skipped — neither directory is created and the alias is never
+    // is also skipped - neither directory is created and the alias is never
     // looked up. This proves the runtime does not bind aliases on skipped
     // statements.
     auto p = parse(R"(ask use_x "Use x?" bool
@@ -1939,7 +1939,7 @@ TEST(RepeatTest, InnerAliasDoesNotLeak) {
     TmpDir td;
     // `wk` is rebound each iteration to that iteration's `week_{i}` path;
     // the inner `mkdir wk/sub_{i}` resolves through the per-iteration alias.
-    // Each iteration must see only its own binding — no bleed across
+    // Each iteration must see only its own binding - no bleed across
     // iterations and no escape after the loop.
     auto p = parse(R"(let n = 2
 repeat n as i
@@ -1951,7 +1951,7 @@ end
     run(p, prompter);
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "week_0" / "sub_0"));
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "week_1" / "sub_1"));
-    // Crucially, week_0/sub_1 and week_1/sub_0 must NOT exist — they would
+    // Crucially, week_0/sub_1 and week_1/sub_0 must NOT exist - they would
     // if the alias from iteration 0 leaked into iteration 1 or vice versa.
     EXPECT_FALSE(std::filesystem::exists(td.path() / "week_0" / "sub_1"));
     EXPECT_FALSE(std::filesystem::exists(td.path() / "week_1" / "sub_0"));
@@ -2449,7 +2449,7 @@ TEST(SourceProvider, DiskBackedSkipsBrokenSymlinks) {
     TmpDir td;
     std::filesystem::create_directories(td.path() / "tree");
     std::ofstream(td.path() / "tree/regular.txt") << "hi\n";
-    // Broken symlink — target does not exist. Today's behaviour skips
+    // Broken symlink - target does not exist. Today's behaviour skips
     // these silently rather than aborting the run; the provider
     // preserves that.
     std::filesystem::create_symlink(td.path() / "no/such/target",

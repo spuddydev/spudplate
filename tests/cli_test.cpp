@@ -318,7 +318,7 @@ TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
         ScriptedPrompter p({});
         ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
     }
-    // No `--yes` and no stdin available — confirm() returns false and the
+    // No `--yes` and no stdin available - confirm() returns false and the
     // command aborts cleanly with exit 0.
     write_file(src, "mkdir bar\n");
     Argv args({"spudplate", "install", src.string()});
