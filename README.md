@@ -69,7 +69,11 @@ file project/src/main.cpp from templates/main.cpp
 file project/tests/test_main.cpp from templates/test_main.cpp when use_tests
 ```
 
-Spudlang supports questions with defaults and option lists, derived variables, conditional actions, path aliases, loops, and including other installed templates. See [docs/syntax.md](docs/syntax.md) for the full language reference.
+Spudlang supports questions with defaults and option lists, derived variables, conditional actions, path aliases, loops, and including other installed templates. See the [language reference](https://spuddydev.github.io/spudplate/) for the full syntax.
+
+## Editor support
+
+Syntax highlighting for `.spud` files is available through the [spudlang-vscode](https://github.com/spuddydev/spudlang-vscode) extension.
 
 ## Build
 
@@ -93,7 +97,11 @@ Requires [Doxygen](https://www.doxygen.nl/) (`brew install doxygen`).
 cmake --build build --target docs
 ```
 
-Opens `docs/html/index.html` - includes the full spudlang syntax reference and API documentation.
+Opens `docs/html/index.html` - includes the full spudlang syntax reference and API documentation. Published online at https://spuddydev.github.io/spudplate/.
+
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome. See [CONTRIBUTING](CONTRIBUTING.md) for build and submission guidelines, and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
