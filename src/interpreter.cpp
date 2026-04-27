@@ -1295,18 +1295,22 @@ std::string value_to_string(const Value& value) {
         value);
 }
 
-void run(const Program& program, Prompter& prompter, bool skip_authorization) {
+void run(const Program& program, Prompter& prompter, bool skip_authorization,
+         const SourceProvider* source) {
     if (!skip_authorization) {
         std::string summary = build_authorize_summary(program);
         if (!summary.empty() && !prompter.authorize(summary)) {
             return;  // declined: clean exit, no side effects, no statements ran
         }
     }
+    (void)source;  // wired in by the next commit
     Interpreter interp(prompter);
     run_program(program, interp);
 }
 
-Environment run_for_tests(const Program& program, Prompter& prompter) {
+Environment run_for_tests(const Program& program, Prompter& prompter,
+                          const SourceProvider* source) {
+    (void)source;
     Interpreter interp(prompter);
     run_program(program, interp);
     return std::move(interp.env());
@@ -1482,7 +1486,8 @@ bool locale_is_utf8() {
 }
 
 void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
-             bool ascii_only) {
+             bool ascii_only, const SourceProvider* source) {
+    (void)source;
     Interpreter interp(prompter);
     interp.set_ask_total(count_ask_statements(program));
     for (const auto& stmt : program.statements) {
