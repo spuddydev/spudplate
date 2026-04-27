@@ -49,7 +49,7 @@ enable_testing()
 
 add_executable(spudplate_tests tests/lexer_test.cpp tests/parser_test.cpp
                tests/validator_test.cpp tests/interpreter_test.cpp
-               tests/cli_test.cpp)
+               tests/cli_test.cpp tests/crc32_test.cpp)
 target_link_libraries(spudplate_tests PRIVATE spudplate_lib GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(spudplate_tests)
