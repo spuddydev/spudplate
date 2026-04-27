@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "spudplate/ast.h"
+#include "spudplate/spudpack.h"
 
 namespace spudplate {
 
@@ -242,6 +243,28 @@ class SourceProvider {
      * create-parent-first ordering.
      */
     virtual std::vector<Entry> list_under(std::string_view prefix) const = 0;
+};
+
+/**
+ * @brief `SourceProvider` backed by a borrowed asset map.
+ *
+ * Used by `cmd_run` when running an installed `.spp`. The provider holds
+ * a reference to the asset vector inside the decoded `Spudpack`; the
+ * caller must keep that pack alive for the duration of any call into the
+ * interpreter. `cmd_run` does so by scoping the `Spudpack` and the
+ * provider in the same lexical block.
+ */
+class AssetMapSourceProvider final : public SourceProvider {
+  public:
+    explicit AssetMapSourceProvider(const std::vector<SpudpackAsset>& assets);
+
+    std::pair<std::vector<std::uint8_t>, std::uint16_t> read(
+        std::string_view path) const override;
+    std::vector<Entry> list_under(std::string_view prefix) const override;
+
+  private:
+    const std::vector<SpudpackAsset>& assets_;
+    std::unordered_map<std::string, std::size_t> index_;
 };
 
 /**
