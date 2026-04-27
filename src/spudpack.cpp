@@ -66,6 +66,95 @@ void write_length_prefixed(std::vector<std::uint8_t>& out, const void* data,
     write_bytes(out, data, size);
 }
 
+class Reader {
+  public:
+    Reader(const std::uint8_t* data, std::size_t size) noexcept
+        : data_(data), size_(size) {}
+
+    std::size_t offset() const noexcept { return offset_; }
+    std::size_t remaining() const noexcept { return size_ - offset_; }
+
+    std::uint8_t read_u8() {
+        if (remaining() < 1) {
+            throw SpudpackError("spudpack truncated", offset_);
+        }
+        return data_[offset_++];
+    }
+
+    std::uint16_t read_u16_le() {
+        if (remaining() < 2) {
+            throw SpudpackError("spudpack truncated", offset_);
+        }
+        std::uint16_t v = static_cast<std::uint16_t>(data_[offset_]) |
+                          static_cast<std::uint16_t>(data_[offset_ + 1]) << 8;
+        offset_ += 2;
+        return v;
+    }
+
+    std::uint32_t read_u32_le() {
+        if (remaining() < 4) {
+            throw SpudpackError("spudpack truncated", offset_);
+        }
+        std::uint32_t v = static_cast<std::uint32_t>(data_[offset_]) |
+                          static_cast<std::uint32_t>(data_[offset_ + 1]) << 8 |
+                          static_cast<std::uint32_t>(data_[offset_ + 2]) << 16 |
+                          static_cast<std::uint32_t>(data_[offset_ + 3]) << 24;
+        offset_ += 4;
+        return v;
+    }
+
+    // LEB128 unsigned varint, capped at 10 bytes. Throws SpudpackError so
+    // overlong varints encountered while decoding the spudpack envelope
+    // do not surface as binary-serializer errors.
+    std::uint64_t read_varint() {
+        std::size_t start = offset_;
+        std::uint64_t result = 0;
+        int shift = 0;
+        for (int i = 0; i < 10; ++i) {
+            if (remaining() < 1) {
+                throw SpudpackError("spudpack truncated", offset_);
+            }
+            std::uint8_t b = data_[offset_++];
+            result |= static_cast<std::uint64_t>(b & 0x7F) << shift;
+            if ((b & 0x80) == 0) return result;
+            shift += 7;
+        }
+        throw SpudpackError("spudpack varint exceeds 10 bytes", start);
+    }
+
+    // Read a varint length and validate it against the remaining input
+    // before any allocation. The sum-overflow guard catches a hand-crafted
+    // header claiming `length = SIZE_MAX`, which would otherwise wrap to a
+    // small value during arithmetic.
+    std::size_t read_checked_length() {
+        std::size_t at = offset_;
+        std::uint64_t len = read_varint();
+        if (len > std::numeric_limits<std::size_t>::max()) {
+            throw SpudpackError("spudpack length overflow", at);
+        }
+        std::size_t lz = static_cast<std::size_t>(len);
+        if (offset_ > size_ || lz > size_ - offset_) {
+            throw SpudpackError("spudpack truncated", at);
+        }
+        return lz;
+    }
+
+    void read_bytes_into(std::string& out, std::size_t n) {
+        out.assign(reinterpret_cast<const char*>(data_ + offset_), n);
+        offset_ += n;
+    }
+
+    void read_bytes_into(std::vector<std::uint8_t>& out, std::size_t n) {
+        out.assign(data_ + offset_, data_ + offset_ + n);
+        offset_ += n;
+    }
+
+  private:
+    const std::uint8_t* data_;
+    std::size_t size_;
+    std::size_t offset_ = 0;
+};
+
 }  // namespace
 
 SpudpackError::SpudpackError(std::string message, std::optional<std::size_t> offset)
@@ -190,8 +279,103 @@ std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack) {
     return out;
 }
 
-Spudpack spudpack_decode(const std::uint8_t*, std::size_t) {
-    throw SpudpackError("spudpack_decode not yet implemented");
+Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size) {
+    if (size > kMaxTotalBytes) {
+        throw SpudpackError("spudpack exceeds 2GiB total cap", 0);
+    }
+    if (size < kMagic.size() + 2 + 4) {
+        // Need at least magic + version + flags + 4-byte CRC trailer.
+        throw SpudpackError("spudpack truncated", 0);
+    }
+
+    Reader r(data, size - 4);  // CRC trailer is verified separately
+
+    if (std::memcmp(data, kMagic.data(), kMagic.size()) != 0) {
+        throw SpudpackError("not a spudpack", 0);
+    }
+    r.read_u8(); r.read_u8(); r.read_u8(); r.read_u8();  // skip magic
+
+    std::uint8_t version = r.read_u8();
+    if (version != kVersion) {
+        throw SpudpackError(
+            "unsupported spudpack version " + std::to_string(version), 4);
+    }
+    std::uint8_t flags = r.read_u8();
+    if (flags != kFlags) {
+        throw SpudpackError(
+            "unsupported spudpack flags " + std::to_string(flags), 5);
+    }
+
+    Spudpack pack;
+
+    std::size_t source_len = r.read_checked_length();
+    r.read_bytes_into(pack.source, source_len);
+
+    std::size_t program_len = r.read_checked_length();
+    r.read_bytes_into(pack.program_bytes, program_len);
+
+    std::size_t asset_count_at = r.offset();
+    std::uint64_t asset_count_raw = r.read_varint();
+    if (asset_count_raw > kMaxAssetCount) {
+        throw SpudpackError(
+            "spudpack asset_count exceeds maximum", asset_count_at);
+    }
+    std::size_t asset_count = static_cast<std::size_t>(asset_count_raw);
+    pack.assets.reserve(asset_count);
+
+    for (std::size_t i = 0; i < asset_count; ++i) {
+        SpudpackAsset asset;
+
+        std::size_t path_at = r.offset();
+        std::size_t path_len = r.read_checked_length();
+        r.read_bytes_into(asset.path, path_len);
+        if (!is_normalized_asset_path(asset.path)) {
+            throw SpudpackError(
+                "spudpack asset path is not normalised", path_at);
+        }
+
+        std::size_t mode_at = r.offset();
+        asset.mode = r.read_u16_le();
+        if ((asset.mode & ~kModeMask) != 0) {
+            throw SpudpackError(
+                "spudpack asset mode has reserved bits set", mode_at);
+        }
+
+        std::size_t data_len_at = r.offset();
+        std::size_t data_len = r.read_checked_length();
+        if (data_len > kMaxAssetBytes) {
+            throw SpudpackError(
+                "spudpack asset exceeds 256MiB cap", data_len_at);
+        }
+        if (!asset.path.empty() && asset.path.back() == '/' && data_len != 0) {
+            throw SpudpackError(
+                "spudpack empty-leaf path carries data", path_at);
+        }
+        r.read_bytes_into(asset.data, data_len);
+
+        pack.assets.push_back(std::move(asset));
+    }
+
+    std::size_t dep_at = r.offset();
+    std::uint64_t dep_count = r.read_varint();
+    if (dep_count != 0) {
+        throw SpudpackError("spudpack v1 does not support deps", dep_at);
+    }
+
+    if (r.remaining() != 0) {
+        throw SpudpackError("spudpack has trailing bytes", r.offset());
+    }
+
+    std::uint32_t want_crc = crc32(data, size - 4);
+    std::uint32_t got_crc = static_cast<std::uint32_t>(data[size - 4]) |
+                            static_cast<std::uint32_t>(data[size - 3]) << 8 |
+                            static_cast<std::uint32_t>(data[size - 2]) << 16 |
+                            static_cast<std::uint32_t>(data[size - 1]) << 24;
+    if (want_crc != got_crc) {
+        throw SpudpackError("spudpack CRC mismatch", size - 4);
+    }
+
+    return pack;
 }
 
 void spudpack_write_file(const std::filesystem::path&, const Spudpack&) {
