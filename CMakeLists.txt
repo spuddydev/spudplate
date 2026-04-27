@@ -18,7 +18,7 @@ string(REGEX REPLACE "^v" "" SPUDPLATE_VERSION "${SPUDPLATE_VERSION}")
 # Library
 add_library(spudplate_lib src/lexer.cpp src/parser.cpp src/validator.cpp
                           src/interpreter.cpp src/cli.cpp src/crc32.cpp
-                          src/binary_serializer.cpp)
+                          src/binary_serializer.cpp src/spudpack.cpp)
 target_include_directories(spudplate_lib PUBLIC include)
 target_compile_definitions(spudplate_lib PUBLIC
     SPUDPLATE_VERSION_STRING="${SPUDPLATE_VERSION}")
