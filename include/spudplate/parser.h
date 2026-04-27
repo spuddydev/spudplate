@@ -68,6 +68,7 @@ class Parser {
     StmtPtr parseCopy();
     /** @brief Parses an `include` statement. */
     StmtPtr parseInclude();
+    /** @brief Parses a `run` statement. */
     StmtPtr parseRun();
     /** @brief Dispatches to the appropriate statement parser based on the current token.
      */

@@ -20,9 +20,9 @@ namespace spudplate {
  * directory" and the corresponding `data` is empty.
  */
 struct SpudpackAsset {
-    std::string path;
-    std::uint16_t mode;
-    std::vector<std::uint8_t> data;
+    std::string path;                ///< Normalised asset path inside the pack.
+    std::uint16_t mode;              ///< POSIX mode bits, masked to `0o0777`.
+    std::vector<std::uint8_t> data;  ///< Raw asset bytes; empty for an empty leaf directory.
 };
 
 /**
@@ -34,9 +34,9 @@ struct SpudpackAsset {
  * Decoding `program_bytes` into a `Program` is the caller's job.
  */
 struct Spudpack {
-    std::string source;
-    std::vector<std::uint8_t> program_bytes;
-    std::vector<SpudpackAsset> assets;
+    std::string source;                       ///< Original `.spud` source text.
+    std::vector<std::uint8_t> program_bytes;  ///< Opaque serialised AST; decoded by the binary serializer.
+    std::vector<SpudpackAsset> assets;        ///< Every bundled asset referenced by the program.
 };
 
 /**
@@ -47,7 +47,9 @@ struct Spudpack {
  */
 class SpudpackError : public std::runtime_error {
   public:
+    /** @brief Construct with a message and an optional decode offset. */
     SpudpackError(std::string message, std::optional<std::size_t> offset = std::nullopt);
+    /** @brief Byte offset where decoding failed, if known. */
     std::optional<std::size_t> offset() const noexcept { return offset_; }
 
   private:

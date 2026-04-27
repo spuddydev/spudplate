@@ -21,7 +21,7 @@ namespace spudplate {
  * data field is empty.
  */
 struct BundleResult {
-    std::vector<SpudpackAsset> assets;
+    std::vector<SpudpackAsset> assets;  ///< Deduped, normalised assets ready to embed in a spudpack.
 };
 
 /**
@@ -32,8 +32,11 @@ struct BundleResult {
  */
 class BundleError : public std::runtime_error {
   public:
+    /** @brief Construct with a message and the source line/column of the offending statement. */
     BundleError(std::string message, int line, int column);
+    /** @brief Source line of the offending statement (1-based). */
     int line() const noexcept { return line_; }
+    /** @brief Source column of the offending statement (1-based). */
     int column() const noexcept { return column_; }
 
   private:
