@@ -223,12 +223,19 @@ bool stmts_equal(const Stmt& a, const Stmt& b) {
                     return false;
                 }
                 return av.line == bv.line && av.column == bv.column;
-            } else {
-                static_assert(std::is_same_v<T, RunStmt>);
+            } else if constexpr (std::is_same_v<T, RunStmt>) {
                 if (!ptr_expr_equal(av.command, bv.command)) return false;
                 if (!optional_path_expr_equal(av.cwd, bv.cwd)) return false;
                 if (!optional_expr_equal(av.when_clause, bv.when_clause)) {
                     return false;
+                }
+                return av.line == bv.line && av.column == bv.column;
+            } else {
+                static_assert(std::is_same_v<T, IfStmt>);
+                if (!ptr_expr_equal(av.condition, bv.condition)) return false;
+                if (av.body.size() != bv.body.size()) return false;
+                for (std::size_t i = 0; i < av.body.size(); ++i) {
+                    if (!stmts_equal(*av.body[i], *bv.body[i])) return false;
                 }
                 return av.line == bv.line && av.column == bv.column;
             }

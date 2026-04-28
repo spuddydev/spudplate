@@ -43,6 +43,7 @@ enum class StmtTag : std::uint8_t {
     Copy = 6,
     Include = 7,
     Run = 8,
+    If = 9,
 };
 
 /** @brief Tag values for `PathSegment` arms. See `ExprTag`. */
