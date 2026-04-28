@@ -28,6 +28,7 @@ using spudplate::PathInterp;
 using spudplate::PathLiteral;
 using spudplate::PathVar;
 using spudplate::Program;
+using spudplate::IfStmt;
 using spudplate::RepeatStmt;
 using spudplate::StmtPtr;
 using spudplate::StringLiteralExpr;
@@ -1131,6 +1132,90 @@ TEST(ParserTest, RepeatHeaderWhenWithBodyStatementWhen) {
     auto& mk = std::get<MkdirStmt>(rep.body[0]->data);
     ASSERT_TRUE(mk.when_clause.has_value());
     EXPECT_EQ(std::get<IdentifierExpr>((*mk.when_clause)->data).name, "inner");
+}
+
+TEST(ParserTest, IfBasic) {
+    auto program = parse_program(
+        "if use_tests\n"
+        "  mkdir \"tests\"\n"
+        "end\n");
+    ASSERT_EQ(program.statements.size(), 1);
+    auto& ifs = std::get<IfStmt>(program.statements[0]->data);
+    auto& cond = std::get<IdentifierExpr>(ifs.condition->data);
+    EXPECT_EQ(cond.name, "use_tests");
+    ASSERT_EQ(ifs.body.size(), 1);
+    std::get<MkdirStmt>(ifs.body[0]->data);
+}
+
+TEST(ParserTest, IfEmptyBody) {
+    auto program = parse_program(
+        "if use_tests\n"
+        "end\n");
+    auto& ifs = std::get<IfStmt>(program.statements[0]->data);
+    EXPECT_TRUE(ifs.body.empty());
+}
+
+TEST(ParserTest, IfMultipleBodyStatements) {
+    auto program = parse_program(
+        "if use_tests\n"
+        "  mkdir \"tests\"\n"
+        "  file \"tests/README.md\" content \"hi\"\n"
+        "end\n");
+    auto& ifs = std::get<IfStmt>(program.statements[0]->data);
+    EXPECT_EQ(ifs.body.size(), 2u);
+}
+
+TEST(ParserTest, IfNestedInsideIf) {
+    auto program = parse_program(
+        "if use_tests\n"
+        "  if use_smoke_tests\n"
+        "    mkdir \"tests/smoke\"\n"
+        "  end\n"
+        "end\n");
+    auto& outer = std::get<IfStmt>(program.statements[0]->data);
+    ASSERT_EQ(outer.body.size(), 1u);
+    auto& inner = std::get<IfStmt>(outer.body[0]->data);
+    EXPECT_EQ(inner.body.size(), 1u);
+}
+
+TEST(ParserTest, IfNestedInsideRepeat) {
+    auto program = parse_program(
+        "repeat n as i\n"
+        "  if use_tests\n"
+        "    mkdir \"tests/{i}\"\n"
+        "  end\n"
+        "end\n");
+    auto& rep = std::get<RepeatStmt>(program.statements[0]->data);
+    ASSERT_EQ(rep.body.size(), 1u);
+    std::get<IfStmt>(rep.body[0]->data);
+}
+
+TEST(ParserTest, IfWithComplexCondition) {
+    auto program = parse_program(
+        "if a and b\n"
+        "  mkdir \"x\"\n"
+        "end\n");
+    auto& ifs = std::get<IfStmt>(program.statements[0]->data);
+    auto& bin = std::get<BinaryExpr>(ifs.condition->data);
+    EXPECT_EQ(bin.op, TokenType::AND);
+}
+
+TEST(ParserTest, IfRejectsWhenClause) {
+    try {
+        parse_program(
+            "if a when b\n"
+            "  mkdir \"x\"\n"
+            "end\n");
+        FAIL() << "expected ParseError";
+    } catch (const ParseError& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "'if' does not take a 'when' clause"),
+                  std::string::npos);
+    }
+}
+
+TEST(ParserTest, IfKeywordCannotBeIdentifier) {
+    EXPECT_THROW(parse_program("let if = 0\n"), ParseError);
 }
 
 TEST(ParserTest, RepeatWithoutWhenClauseHasEmptyOptional) {
