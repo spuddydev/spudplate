@@ -695,6 +695,64 @@ ask name "Name?" string default "anon" when use_x
     EXPECT_EQ(std::get<std::string>(*env.lookup("name")), "anon");
 }
 
+TEST(AskTest, SkippedAskDefaultVisibleToLaterWhenClause) {
+    // Reproduces the issue #59 pattern: a question gated on a prior bool, then
+    // a later action gated on the skipped question. With the default applied,
+    // the later when clause sees a real bound value rather than crashing.
+    auto p = parse(R"(ask add_git "Init git?" bool
+ask add_gitignore "Add gitignore?" bool default true when add_git
+let gate = add_gitignore
+)");
+    ScriptedPrompter prompter({"false"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_TRUE(std::get<bool>(*env.lookup("add_gitignore")));
+    EXPECT_TRUE(std::get<bool>(*env.lookup("gate")));
+}
+
+TEST(AskTest, SkippedAskInRepeatDeclaresPerIteration) {
+    auto p = parse(R"(ask n "Count?" int
+repeat n as i
+  ask use_extra "Extra?" bool
+  ask label "Label?" string default "" when use_extra
+end
+)");
+    ScriptedPrompter prompter({"2", "false", "true", "real"});
+    Environment env = run_for_tests(p, prompter);
+    // The per-iteration `label` binding is local to the repeat body and not
+    // visible at the outer scope. The run completes without "undefined
+    // variable" errors, which is the bug-fix proof.
+    EXPECT_FALSE(env.lookup("label").has_value());
+}
+
+TEST(AskTest, SkippedAskDefaultEvaluatesPriorBinding) {
+    auto p = parse(R"(ask use_x "Use X?" bool
+ask base "Base?" string
+ask label "Label?" string default base when use_x
+)");
+    ScriptedPrompter prompter({"false", "fallback"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("label")), "fallback");
+}
+
+TEST(AskTest, SkippedAskMissingDefaultThrowsValidatorGap) {
+    // Bypasses validate() via run_for_tests so we can exercise the defence-
+    // in-depth path. The interpreter should raise a clear "validator gap"
+    // error rather than silently leaving the variable unbound.
+    auto p = parse(R"(ask use_x "Use X?" bool
+ask name "Name?" string when use_x
+)");
+    ScriptedPrompter prompter({"false"});
+    try {
+        run_for_tests(p, prompter);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& e) {
+        EXPECT_NE(std::string(e.what()).find("when-gated ask 'name'"),
+                  std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("validator should have rejected"),
+                  std::string::npos);
+    }
+}
+
 TEST(AskTest, BadBoolRetries) {
     auto p = parse(R"(ask flag "Enable?" bool
 )");
