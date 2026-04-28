@@ -108,6 +108,7 @@ struct PromptRequest {
     int question_index{0};                    ///< 1-based position of this question among presented ones; 0 suppresses the counter.
     int question_total{0};                    ///< Total static `ask` statements in the program; 0 suppresses the counter.
     int indent_level{0};                      ///< Number of nested `repeat` blocks above this prompt; renders as 2 spaces per level.
+    std::vector<std::pair<std::int64_t, std::int64_t>> iterations; ///< One {current, total} pair per enclosing `repeat` block, outermost first. Empty outside any repeat.
 };
 
 /**

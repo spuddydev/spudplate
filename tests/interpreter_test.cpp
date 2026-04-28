@@ -846,7 +846,11 @@ end
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "gamma"));
 }
 
-TEST(AskTest, AskInsideRepeatGetsNoCounter) {
+TEST(AskTest, AskInsideRepeatKeepsStaticCounter) {
+    // The static `(N/M)` counter is shown inside a repeat as a positional
+    // anchor; M is the static-statement count and does not grow with
+    // iterations. Iteration position is reported separately via
+    // `iterations` (see B5 tests).
     auto p = parse(R"(ask n "Count?" int
 repeat n as i
   ask name "Module?" string
@@ -855,8 +859,8 @@ end
     ScriptedPrompter prompter({"1", "x"});
     run_for_tests(p, prompter);
     ASSERT_TRUE(prompter.last_request().has_value());
-    EXPECT_EQ(prompter.last_request()->question_index, 0);
-    EXPECT_EQ(prompter.last_request()->question_total, 0);
+    EXPECT_EQ(prompter.last_request()->question_index, 1);
+    EXPECT_EQ(prompter.last_request()->question_total, 1);
     EXPECT_EQ(prompter.last_request()->indent_level, 1);
 }
 
@@ -889,6 +893,69 @@ ask z "Z?" string
     // Last presented prompt is `ask z` - top-level, should be (3/3).
     EXPECT_EQ(prompter.last_request()->question_index, 3);
     EXPECT_EQ(prompter.last_request()->question_total, 3);
+}
+
+TEST(AskTest, AskInsideRepeatReportsIteration) {
+    auto p = parse(R"(ask n "Count?" int
+repeat n as i
+  ask name "Module?" string
+end
+)");
+    // Four iterations; we want the second iteration's prompt captured. The
+    // scripted prompter records `last_request` on every prompt, so we drive
+    // through all four and rely on the last being iteration 4 of 4.
+    ScriptedPrompter prompter({"4", "a", "b", "c", "d"});
+    run_for_tests(p, prompter);
+    ASSERT_TRUE(prompter.last_request().has_value());
+    ASSERT_EQ(prompter.last_request()->iterations.size(), 1u);
+    EXPECT_EQ(prompter.last_request()->iterations[0].first, 4);
+    EXPECT_EQ(prompter.last_request()->iterations[0].second, 4);
+}
+
+TEST(AskTest, AskInsideNestedRepeatReportsStackedIterations) {
+    auto p = parse(R"(ask n "Outer?" int
+ask m "Inner?" int
+repeat n as i
+  repeat m as j
+    ask name "Inner?" string
+  end
+end
+)");
+    // Outer count 2, inner count 3 - the final inner prompt is i=2, j=3.
+    ScriptedPrompter prompter({"2", "3",
+                               "a", "b", "c",
+                               "d", "e", "f"});
+    run_for_tests(p, prompter);
+    ASSERT_TRUE(prompter.last_request().has_value());
+    ASSERT_EQ(prompter.last_request()->iterations.size(), 2u);
+    EXPECT_EQ(prompter.last_request()->iterations[0].first, 2);
+    EXPECT_EQ(prompter.last_request()->iterations[0].second, 2);
+    EXPECT_EQ(prompter.last_request()->iterations[1].first, 3);
+    EXPECT_EQ(prompter.last_request()->iterations[1].second, 3);
+}
+
+TEST(AskTest, AskOutsideRepeatHasNoIterations) {
+    auto p = parse(R"(ask name "Name?" string
+)");
+    ScriptedPrompter prompter({"x"});
+    run_for_tests(p, prompter);
+    ASSERT_TRUE(prompter.last_request().has_value());
+    EXPECT_TRUE(prompter.last_request()->iterations.empty());
+}
+
+TEST(AskTest, ZeroIterationRepeatNeverPrompts) {
+    auto p = parse(R"(ask n "Count?" int
+repeat n as i
+  ask name "Module?" string
+end
+)");
+    ScriptedPrompter prompter({"0"});
+    run_for_tests(p, prompter);
+    // Only the outer `ask n` was prompted. The inner ask was never reached so
+    // last_request() reflects the outer prompt with empty iterations.
+    ASSERT_TRUE(prompter.last_request().has_value());
+    EXPECT_EQ(prompter.last_request()->text, "Count?");
+    EXPECT_TRUE(prompter.last_request()->iterations.empty());
 }
 
 TEST(AskTest, OffOptionPropagatesError) {

@@ -26,7 +26,7 @@ Declares a variable `<name>` and asks the user a question at runtime.
 - The `default` accepts any expression - a literal, a previously declared variable, or a computed expression like `lower(trim(project_name))`. The expression is evaluated against the live environment when the user skips the prompt.
 - `options` restricts valid answers to a fixed set, presented as a numbered menu. The user may type either the literal value or its 1-based number.
 - `when <condition>` only asks the question if the condition is true. A `when`-gated question must have a `default` so the variable is always bound after the statement, whether the user answered or the question was skipped.
-- `ask` is allowed inside `repeat`. Each iteration prompts afresh; the binding lives only for that iteration. Prompts inside `repeat` are indented by 2 spaces per nesting level and are not counted in the `(N/M)` progress indicator (since the iteration count is dynamic). Shadowing rules still apply - an `ask` cannot reuse a name visible from the surrounding scope.
+- `ask` is allowed inside `repeat`. Each iteration prompts afresh; the binding lives only for that iteration. Prompts inside `repeat` are indented by 2 spaces per nesting level. The static `(N/M)` counter still shows the position of the enclosing static `ask` statement, and an additional `iteration K of L` is rendered next to it for each enclosing repeat - for example `(3/7, iteration 2 of 4)`. Nested repeats stack the iteration counters outermost first. Shadowing rules still apply - an `ask` cannot reuse a name visible from the surrounding scope.
 
 **Types:**
 

@@ -620,7 +620,9 @@ std::string build_authorize_summary(const Program& program) {
 }
 
 void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
-                 int question_index, int question_total, int indent_level) {
+                 int question_index, int question_total, int indent_level,
+                 const std::vector<std::pair<std::int64_t, std::int64_t>>&
+                     iterations) {
     if (!when_passes(stmt.when_clause, env)) {
         if (!stmt.default_value.has_value()) {
             throw RuntimeError(
@@ -655,6 +657,7 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
         .question_index = question_index,
         .question_total = question_total,
         .indent_level = indent_level,
+        .iterations = iterations,
     };
 
     while (true) {
@@ -785,11 +788,19 @@ class Interpreter {
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, AskStmt>) {
-                    bool show_counter = ask_total_ > 0 && repeat_depth_ == 0;
-                    int index = show_counter ? ++ask_index_ : 0;
-                    int total = show_counter ? ask_total_ : 0;
+                    // ask_index_ counts top-level (static) prompts only - the
+                    // same static `ask` repeated in a `repeat` body should not
+                    // bump the counter past `ask_total_`. Inside a repeat the
+                    // already-incremented index is reused so the renderer can
+                    // still show "(N/M)" as a positional anchor alongside any
+                    // iteration counter the prompter assembles.
+                    if (ask_total_ > 0 && repeat_depth_ == 0) {
+                        ++ask_index_;
+                    }
+                    int index = ask_total_ > 0 ? ask_index_ : 0;
+                    int total = ask_total_;
                     execute_ask(s, env_, prompter_, index, total,
-                                repeat_depth_);
+                                repeat_depth_, repeat_iters_);
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
@@ -857,6 +868,7 @@ class Interpreter {
             env_.push();
             env_.declare(s.iterator_var, Value{i});
             ++repeat_depth_;
+            repeat_iters_.emplace_back(i + 1, count);
             try {
                 for (const auto& stmt : s.body) {
                     execute(*stmt);
@@ -870,6 +882,7 @@ class Interpreter {
                         ++it;
                     }
                 }
+                repeat_iters_.pop_back();
                 --repeat_depth_;
                 env_.pop();
                 throw;
@@ -882,6 +895,7 @@ class Interpreter {
                     ++it;
                 }
             }
+            repeat_iters_.pop_back();
             --repeat_depth_;
             env_.pop();
         }
@@ -1204,6 +1218,11 @@ class Interpreter {
     int ask_total_{0};
     int ask_index_{0};
     int repeat_depth_{0};
+    // One {1-based current, total} pair pushed per active `repeat` iteration,
+    // outermost first. `execute_repeat` pushes at the top of each iteration
+    // body and pops on both normal-exit and exception paths so the stack is
+    // never left dirty.
+    std::vector<std::pair<std::int64_t, std::int64_t>> repeat_iters_;
 };
 
 int count_ask_statements(const Program& program) {
@@ -1276,9 +1295,25 @@ void render_request(std::ostream& out, const PromptRequest& req,
 
     out << indent;
 
-    if (req.question_total > 0 && req.question_index > 0) {
-        std::string counter = "(" + std::to_string(req.question_index) + "/" +
-                              std::to_string(req.question_total) + ") ";
+    bool has_static_counter = req.question_total > 0 && req.question_index > 0;
+    bool has_iter_counter = !req.iterations.empty();
+    if (has_static_counter || has_iter_counter) {
+        std::string counter = "(";
+        bool first = true;
+        if (has_static_counter) {
+            counter += std::to_string(req.question_index) + "/" +
+                       std::to_string(req.question_total);
+            first = false;
+        }
+        for (const auto& [k, n] : req.iterations) {
+            if (!first) {
+                counter += ", ";
+            }
+            counter += "iteration " + std::to_string(k) + " of " +
+                       std::to_string(n);
+            first = false;
+        }
+        counter += ") ";
         out << wrap(counter, kAccent, use_colour);
     }
 
