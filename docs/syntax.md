@@ -25,7 +25,7 @@ Declares a variable `<name>` and asks the user a question at runtime.
 - A question is **required** unless it has a `default` value. With a `default`, the user may skip the prompt (empty input) and the default value is used in its place.
 - The `default` accepts any expression - a literal, a previously declared variable, or a computed expression like `lower(trim(project_name))`. The expression is evaluated against the live environment when the user skips the prompt.
 - `options` restricts valid answers to a fixed set, presented as a numbered menu. The user may type either the literal value or its 1-based number.
-- `when <condition>` only asks the question if the condition is true.
+- `when <condition>` only asks the question if the condition is true. A `when`-gated question must have a `default` so the variable is always bound after the statement, whether the user answered or the question was skipped.
 - `ask` is allowed inside `repeat`. Each iteration prompts afresh; the binding lives only for that iteration. Prompts inside `repeat` are indented by 2 spaces per nesting level and are not counted in the `(N/M)` progress indicator (since the iteration count is dynamic). Shadowing rules still apply - an `ask` cannot reuse a name visible from the surrounding scope.
 
 **Types:**
@@ -42,7 +42,7 @@ Declares a variable `<name>` and asks the user a question at runtime.
 ask project_name "What is the project name?" string
 ask use_tests "Include a test suite?" bool default false
 ask license "License?" string default "MIT"
-ask num_weeks "How many weeks?" int when use_tests
+ask num_weeks "How many weeks?" int default 0 when use_tests
 ask format "Output format?" string options "pdf" "html" "latex" default "pdf"
 ask postgres_version "Postgres version?" int options 15 16 17
 
