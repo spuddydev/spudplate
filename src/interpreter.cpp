@@ -857,6 +857,7 @@ class Interpreter {
             env_.push();
             env_.declare(s.iterator_var, Value{i});
             ++repeat_depth_;
+            repeat_iters_.emplace_back(i + 1, count);
             try {
                 for (const auto& stmt : s.body) {
                     execute(*stmt);
@@ -870,6 +871,7 @@ class Interpreter {
                         ++it;
                     }
                 }
+                repeat_iters_.pop_back();
                 --repeat_depth_;
                 env_.pop();
                 throw;
@@ -882,6 +884,7 @@ class Interpreter {
                     ++it;
                 }
             }
+            repeat_iters_.pop_back();
             --repeat_depth_;
             env_.pop();
         }
@@ -1204,6 +1207,11 @@ class Interpreter {
     int ask_total_{0};
     int ask_index_{0};
     int repeat_depth_{0};
+    // One {1-based current, total} pair pushed per active `repeat` iteration,
+    // outermost first. `execute_repeat` pushes at the top of each iteration
+    // body and pops on both normal-exit and exception paths so the stack is
+    // never left dirty.
+    std::vector<std::pair<std::int64_t, std::int64_t>> repeat_iters_;
 };
 
 int count_ask_statements(const Program& program) {
