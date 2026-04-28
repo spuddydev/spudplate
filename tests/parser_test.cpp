@@ -1395,6 +1395,35 @@ TEST(ParserTest, RunWithWhen) {
     EXPECT_EQ(cond.name, "use_git");
 }
 
+TEST(ParserTest, RunWithTimeout) {
+    auto stmt = parse_run("run \"slow\" timeout 30\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    ASSERT_TRUE(r.timeout.has_value());
+    auto& lit = std::get<IntegerLiteralExpr>((*r.timeout)->data);
+    EXPECT_EQ(lit.value, 30);
+}
+
+TEST(ParserTest, RunWithInTimeoutAndWhen) {
+    auto stmt = parse_run(
+        "run \"slow\" in dir timeout 30 when use_slow\n");
+    auto& r = std::get<spudplate::RunStmt>(stmt->data);
+    ASSERT_TRUE(r.cwd.has_value());
+    ASSERT_TRUE(r.timeout.has_value());
+    ASSERT_TRUE(r.when_clause.has_value());
+}
+
+TEST(ParserTest, RunRejectsZeroTimeout) {
+    EXPECT_THROW(parse_run("run \"x\" timeout 0\n"), ParseError);
+}
+
+TEST(ParserTest, RunRejectsNegativeTimeout) {
+    EXPECT_THROW(parse_run("run \"x\" timeout -5\n"), ParseError);
+}
+
+TEST(ParserTest, TimeoutKeywordCannotBeIdentifier) {
+    EXPECT_THROW(parse_let("let timeout = 30\n"), ParseError);
+}
+
 TEST(ParserTest, RunConcatenatedExpression) {
     // Commands can be assembled from runtime values so a template can
     // interpolate ask answers into the command string.

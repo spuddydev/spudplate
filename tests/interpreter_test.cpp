@@ -2281,6 +2281,50 @@ TEST(RunTest, DryRunShowsCommandsButDoesNotExecute) {
     EXPECT_FALSE(std::filesystem::exists(td.path() / "should_not_exist"));
 }
 
+TEST(RunTest, ExplicitTimeoutFires) {
+    TmpDir td;
+    auto p = parse(R"(run "sleep 5" timeout 1
+)");
+    ScriptedPrompter prompter({});
+    try {
+        run(p, prompter, /*skip_authorization=*/true);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& e) {
+        EXPECT_NE(std::string(e.what()).find("timed out after 1s"),
+                  std::string::npos);
+    }
+}
+
+TEST(RunTest, NoTimeoutFlagOverridesPerStatementTimeout) {
+    // Explicit `timeout 1` would normally kill `sleep 1` after 1s, but
+    // --no-timeout disables timeouts for the whole invocation. A sleep of
+    // 0 finishes immediately so this stays fast.
+    TmpDir td;
+    auto p = parse(R"(run "sleep 0" timeout 1
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_NO_THROW(run(p, prompter, /*skip_authorization=*/true,
+                        /*source=*/nullptr,
+                        /*timeouts_disabled=*/true));
+}
+
+TEST(RunTest, TimeoutKillsGrandchildViaProcessGroup) {
+    // The shell forks a `sleep 5` into the background and waits. If the
+    // interpreter only killed the shell, the grandchild would survive and
+    // the wait would never complete, hanging the test. Killing the whole
+    // process group ensures both die.
+    TmpDir td;
+    auto p = parse(R"(run "sleep 5 & wait" timeout 1
+)");
+    ScriptedPrompter prompter({});
+    auto start = std::chrono::steady_clock::now();
+    EXPECT_THROW(run(p, prompter, /*skip_authorization=*/true), RuntimeError);
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start);
+    // Should die within the 1s timeout plus a small grace window.
+    EXPECT_LT(elapsed.count(), 4);
+}
+
 // --- Dry run ---
 
 TEST(DryRunTest, EmptyProgramRendersNothing) {
