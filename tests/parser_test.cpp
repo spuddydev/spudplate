@@ -289,7 +289,8 @@ TEST(ParserTest, AskIntType) {
 }
 
 TEST(ParserTest, AskWhenClause) {
-    auto stmt = parse_ask("ask port \"Port?\" int when use_server\n");
+    auto stmt = parse_ask(
+        "ask port \"Port?\" int default 8080 when use_server\n");
     auto& ask = std::get<AskStmt>(stmt->data);
     ASSERT_TRUE(ask.when_clause.has_value());
     auto& cond = std::get<IdentifierExpr>((*ask.when_clause)->data);
@@ -410,7 +411,8 @@ TEST(ParserTest, AskRequiredKeywordRejected) {
 }
 
 TEST(ParserTest, AskWhenExpression) {
-    auto stmt = parse_ask("ask x \"X?\" string when a and b\n");
+    auto stmt = parse_ask(
+        "ask x \"X?\" string default \"\" when a and b\n");
     auto& ask = std::get<AskStmt>(stmt->data);
     ASSERT_TRUE(ask.when_clause.has_value());
     auto& bin = std::get<BinaryExpr>((*ask.when_clause)->data);
