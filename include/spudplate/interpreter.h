@@ -286,6 +286,11 @@ class AssetMapSourceProvider final : public SourceProvider {
  * `source` overrides where `from`/`copy` reads come from. A null `source`
  * (the default) routes reads through a disk-backed provider so existing
  * bare-`.spud` callers see the historical cwd-relative behaviour.
+ *
+ * `timeouts_disabled` (mapped to `--no-timeout` on the CLI) skips the
+ * per-`run` timeout enforcement entirely - both the 60-second default and
+ * any per-statement `timeout <int>` clause. Useful for known-slow templates
+ * and CI runs where an outer scheduler already enforces wall-clock limits.
  */
 void run(const Program& program, Prompter& prompter,
          bool skip_authorization = false,

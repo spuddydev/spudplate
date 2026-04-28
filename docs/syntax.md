@@ -325,7 +325,7 @@ run "git remote add origin " + repo_url in proj when repo_url != ""
 run "npm install" in proj timeout 600
 ```
 
-A short status banner (`running '<cmd>' (timeout Ns)` or `(no timeout)`) is printed to stderr before each command so a long-running command does not look frozen.
+A short status banner of the form `running '...' (timeout Ns)` (or `(no timeout)`) is printed to stderr before each command so a long-running command does not look frozen.
 
 #### Trust prompt
 
