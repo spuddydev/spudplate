@@ -170,6 +170,91 @@ void check_alias(const PathVar& pv, const std::optional<ExprPtr>& current_when,
     }
 }
 
+// Best-effort static type inference for the right-hand side of `let`. Returns
+// nullopt when the expression type is not deducible from the static
+// information available (e.g. a chain through a let whose own type was
+// inscrutable). The validator's path-identifier check treats nullopt as
+// "string-compatible" so we never raise false negatives on opaque expressions.
+std::optional<VarType> infer_expr_type(const Expr& expr, const TypeMap& tm) {
+    return std::visit(
+        [&](const auto& e) -> std::optional<VarType> {
+            using T = std::decay_t<decltype(e)>;
+            if constexpr (std::is_same_v<T, StringLiteralExpr>) {
+                return VarType::String;
+            } else if constexpr (std::is_same_v<T, TemplateStringExpr>) {
+                return VarType::String;
+            } else if constexpr (std::is_same_v<T, IntegerLiteralExpr>) {
+                return VarType::Int;
+            } else if constexpr (std::is_same_v<T, BoolLiteralExpr>) {
+                return VarType::Bool;
+            } else if constexpr (std::is_same_v<T, IdentifierExpr>) {
+                auto it = tm.find(e.name);
+                if (it == tm.end()) {
+                    return std::nullopt;
+                }
+                return it->second;
+            } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+                if (e.op == TokenType::NOT) {
+                    return VarType::Bool;
+                }
+                if (e.op == TokenType::MINUS) {
+                    return VarType::Int;
+                }
+                return std::nullopt;
+            } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+                switch (e.op) {
+                    case TokenType::PLUS: {
+                        auto l = infer_expr_type(*e.left, tm);
+                        auto r = infer_expr_type(*e.right, tm);
+                        if (l == VarType::String || r == VarType::String) {
+                            return VarType::String;
+                        }
+                        if (l == VarType::Int && r == VarType::Int) {
+                            return VarType::Int;
+                        }
+                        return std::nullopt;
+                    }
+                    case TokenType::MINUS:
+                    case TokenType::STAR:
+                    case TokenType::SLASH:
+                        return VarType::Int;
+                    case TokenType::EQUALS:
+                    case TokenType::NOT_EQUALS:
+                    case TokenType::LESS:
+                    case TokenType::GREATER:
+                    case TokenType::LESS_EQUAL:
+                    case TokenType::GREATER_EQUAL:
+                    case TokenType::AND:
+                    case TokenType::OR:
+                        return VarType::Bool;
+                    default:
+                        return std::nullopt;
+                }
+            } else if constexpr (std::is_same_v<T, FunctionCallExpr>) {
+                if (e.name == "lower" || e.name == "upper" || e.name == "trim" ||
+                    e.name == "replace") {
+                    return VarType::String;
+                }
+                return std::nullopt;
+            }
+            return std::nullopt;
+        },
+        expr.data);
+}
+
+// Render a VarType for diagnostics.
+const char* var_type_name(VarType t) {
+    switch (t) {
+        case VarType::String:
+            return "string";
+        case VarType::Bool:
+            return "bool";
+        case VarType::Int:
+            return "int";
+    }
+    return "unknown";
+}
+
 void walk_expr(const Expr& expr, const Scope& scope) {
     std::visit(
         [&](const auto& e) {
@@ -205,6 +290,27 @@ void walk_path(const PathExpr& path, const Scope& scope, const AliasCtx& ctx,
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, PathVar>) {
                     check_reference(s.name, s.line, s.column, scope);
+                    // A path identifier must resolve to either a registered
+                    // path alias (declared via `as`) or a name whose static
+                    // type is `string`. Bare literal directory names must
+                    // be quoted to disambiguate.
+                    bool is_alias = ctx.registry.find(s.name) != ctx.registry.end();
+                    if (!is_alias) {
+                        auto it = ctx.type_map.find(s.name);
+                        if (it == ctx.type_map.end()) {
+                            throw SemanticError(
+                                "unresolved path identifier '" + s.name +
+                                    "' (use quotes for a literal directory name)",
+                                s.line, s.column);
+                        }
+                        if (it->second != VarType::String) {
+                            throw SemanticError(
+                                std::string("path identifier '") + s.name +
+                                    "' must be a string, got " +
+                                    var_type_name(it->second),
+                                s.line, s.column);
+                        }
+                    }
                     check_alias(s, current_when, ctx);
                 } else if constexpr (std::is_same_v<T, PathInterp>) {
                     walk_expr(*s.expression, scope);
@@ -274,6 +380,9 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                 walk_expr(*s.value, scope);
                 check_shadowing(s.name, s.line, s.column, scope);
                 scope.declare_mutable(s.name);
+                if (auto t = infer_expr_type(*s.value, ctx.type_map)) {
+                    ctx.type_map[s.name] = *t;
+                }
             } else if constexpr (std::is_same_v<T, AssignStmt>) {
                 walk_expr(*s.value, scope);
                 if (!scope.visible(s.name)) {

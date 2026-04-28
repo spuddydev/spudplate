@@ -19,16 +19,19 @@ namespace {
 
 // Result of classifying a source PathExpr. The bundler distinguishes the
 // two legal shapes - a fully-literal path (walk the exact target) and a
-// path with a static prefix that ends in `/` followed by dynamic segments
-// (walk the static-prefix directory). Anything else is a BundleError.
+// path whose leading run of literal segments is followed by one or more
+// dynamic segments (walk the static-prefix directory). The split-on-`/`
+// parser keeps separators out of segment values, so the prefix is built by
+// joining leading PathLiterals with `/` and appending a trailing `/` once
+// a dynamic segment is encountered.
 struct ClassifiedSource {
     enum class Shape {
         Static,        ///< Every segment is a PathLiteral.
         StaticPrefix,  ///< Some segments are dynamic; the literal prefix
-                       ///< ends with `/`.
+                       ///< covers entire path components and ends with `/`.
     };
     Shape shape;
-    std::string literal_prefix;  ///< Concatenated leading PathLiteral values.
+    std::string literal_prefix;  ///< Joined leading PathLiteral values.
 };
 
 ClassifiedSource classify_source_path(const PathExpr& path) {
@@ -44,21 +47,24 @@ ClassifiedSource classify_source_path(const PathExpr& path) {
     std::string literal;
     bool has_dynamic = false;
     for (const auto& seg : path.segments) {
-        if (has_dynamic) break;
         if (std::holds_alternative<PathLiteral>(seg)) {
+            if (!literal.empty()) {
+                literal.push_back('/');
+            }
             literal.append(std::get<PathLiteral>(seg).value);
         } else {
             has_dynamic = true;
+            break;
         }
     }
 
     if (!has_dynamic) {
         return {ClassifiedSource::Shape::Static, std::move(literal)};
     }
-    if (literal.empty() || literal.back() != '/') {
-        throw BundleError(
-            "dynamic segment must follow a '/'", path.line, path.column);
-    }
+    // Append the trailing `/` that separates the static prefix from the
+    // first dynamic segment. The split-on-`/` parser keeps separators out
+    // of segment values, so we synthesise the boundary here.
+    literal.push_back('/');
     return {ClassifiedSource::Shape::StaticPrefix, std::move(literal)};
 }
 

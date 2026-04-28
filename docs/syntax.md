@@ -103,35 +103,45 @@ Reassignment to an outer-scope `let` from inside a `repeat` body mutates the out
 
 ### Path expressions
 
-Paths in `mkdir`, `file`, and `copy` are written as **path expressions** - an unquoted sequence of identifiers, slashes, dots, hyphens, and `{expr}` interpolations.
+Paths in `mkdir`, `file`, and `copy` are written as a slash-separated sequence of segments. Each segment is one of:
+
+- A **bare identifier**, which is always a variable reference. It must resolve to a path alias (declared with `as`) or a `let`-bound string. Unresolved identifiers are rejected at validate time - quote the segment if you wanted a literal directory name.
+- A **quoted string**, which is a literal segment. Quoted strings may contain `/` (a single quoted token contributes one or more components, split on the slashes) and may contain `{var}` interpolation.
 
 ```
-mkdir static/notes
-file static/notes/README.md content ""
-mkdir week_{n}
-mkdir my-project/pre-commit-hooks
-file src/main.cpp from base/main.cpp
+mkdir "static/notes"
+file "static/notes/README.md" content ""
+mkdir "week_{n}"
+mkdir "my-project/pre-commit-hooks"
+file "src/main.cpp" from "base/main.cpp"
 ```
 
-Hyphens are allowed inside a path but cannot start one - `mkdir -foo` would be ambiguous with the subtraction operator and is rejected. Paths containing spaces must be quoted: `mkdir "my notes"`.
-
-`{expr}` interpolation works directly in unquoted paths: `mkdir week_{n}`, `file {prefix}/README.md`.
+`{var}` interpolation only works inside quoted segments. Bare `{var}` in a path is a parse error.
 
 `mkdir` creates intermediate directories automatically (`mkdir -p` semantics).
 
 #### Path aliases with as
 
-The `as <varname>` clause binds the path to a variable for reuse. Any identifier in a subsequent path expression is checked against bound aliases - if it matches, it is a variable reference; if not, it is a literal path component. This applies to every segment, not just the leading one:
+The `as <varname>` clause on `mkdir` or `file` binds the path to a name for reuse later. The bare-identifier path segment then resolves to that name:
 
 ```
-mkdir static as staticpath
-mkdir notes as notespath
-mkdir staticpath/notespath/week_{n}    # both staticpath and notespath are alias references
+mkdir "static" as staticpath
+mkdir "notes" as notespath
+mkdir staticpath/notespath/"week_{n}"  # both staticpath and notespath resolve as aliases
 ```
 
 On `file`, `as` binds the file path - primarily useful for conditional appends (see `file` below).
 
-If a path segment matches a bound alias but you want the literal directory name instead, quote that segment: `mkdir "staticpath"/notes`.
+#### let-bound strings as path roots
+
+A `let`-bound string can be used as a bare-identifier path segment too. The whole value is appended verbatim, so a let value containing slashes contributes multiple directory levels in a single segment:
+
+```
+let dir = "team/projects"
+mkdir dir/"alpha"   # creates team/projects/alpha
+```
+
+This differs from a quoted literal, which is split on `/` at parse time. Bundling treats let-bound roots as fully dynamic - only quoted literals contribute to the static prefix the bundler walks at install time.
 
 ##### Conditional alias scoping
 

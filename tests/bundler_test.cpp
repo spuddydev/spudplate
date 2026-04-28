@@ -52,7 +52,7 @@ const SpudpackAsset* find_asset(const BundleResult& r, const std::string& path) 
 TEST(Bundler, FileFromRegularFile) {
     TmpDir tmp;
     write_file(tmp.path() / "tpl/main.cpp", "int main() {}\n");
-    Program p = parse("file out/main.cpp from tpl/main.cpp\n");
+    Program p = parse("file \"out/main.cpp\" from \"tpl/main.cpp\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     ASSERT_EQ(r.assets.size(), 1u);
@@ -65,7 +65,7 @@ TEST(Bundler, MkdirFromDirectoryWalksTree) {
     TmpDir tmp;
     write_file(tmp.path() / "src/main.cpp", "x\n");
     write_file(tmp.path() / "src/util/util.cpp", "y\n");
-    Program p = parse("mkdir project from src\n");
+    Program p = parse("mkdir \"project\" from \"src\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     EXPECT_NE(find_asset(r, "src/main.cpp"), nullptr);
@@ -76,7 +76,7 @@ TEST(Bundler, CopySourceMustBeDirectory) {
     TmpDir tmp;
     write_file(tmp.path() / "regular.txt", "x\n");
     fs::create_directories(tmp.path() / "dst");
-    Program p = parse("copy regular.txt into dst\n");
+    Program p = parse("copy \"regular.txt\" into \"dst\"\n");
 
     EXPECT_THROW(bundle_assets(p, tmp.path()), BundleError);
 }
@@ -86,7 +86,7 @@ TEST(Bundler, CopyDirectoryWalks) {
     write_file(tmp.path() / "snippets/a.txt", "a\n");
     write_file(tmp.path() / "snippets/b.txt", "b\n");
     fs::create_directories(tmp.path() / "dst");
-    Program p = parse("copy snippets into dst\n");
+    Program p = parse("copy \"snippets\" into \"dst\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     EXPECT_NE(find_asset(r, "snippets/a.txt"), nullptr);
@@ -99,7 +99,7 @@ TEST(Bundler, RepeatBodyIsWalked) {
     Program p = parse(
         "ask weeks \"How many?\" int default 1\n"
         "repeat weeks as i\n"
-        "  file out_{i}/body.txt from wk/body.txt\n"
+        "  file \"out_{i}/body.txt\" from \"wk/body.txt\"\n"
         "end\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
@@ -113,7 +113,7 @@ TEST(Bundler, NonAssetStatementsAreSkipped) {
         "let upper_name = upper(name)\n"
         "include foo when name == \"x\"\n"
         "run \"echo hi\"\n"
-        "file inline.txt content \"hi\"\n");
+        "file \"inline.txt\" content \"hi\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     EXPECT_TRUE(r.assets.empty());
@@ -125,7 +125,7 @@ TEST(Bundler, RejectsLeadingDynamicSegment) {
     TmpDir tmp;
     Program p = parse(
         "ask name \"Name?\" string\n"
-        "file out.txt from {name}/foo\n");
+        "file \"out.txt\" from \"{name}/foo\"\n");
     try {
         bundle_assets(p, tmp.path());
         FAIL() << "expected throw";
@@ -135,24 +135,13 @@ TEST(Bundler, RejectsLeadingDynamicSegment) {
     }
 }
 
-TEST(Bundler, RejectsDynamicSegmentMidFilename) {
-    TmpDir tmp;
-    fs::create_directories(tmp.path() / "tpl");
-    Program p = parse(
-        "ask n \"n?\" int default 1\n"
-        "file out.txt from tpl/file_{n}\n");
-    // tpl/file_{n} - the literal prefix "tpl/file_" does not end with /,
-    // so this is the mid-filename-dynamic case.
-    EXPECT_THROW(bundle_assets(p, tmp.path()), BundleError);
-}
-
 TEST(Bundler, AcceptsDynamicSuffixAfterTrailingSlash) {
     TmpDir tmp;
     write_file(tmp.path() / "tpl/a.txt", "a\n");
     write_file(tmp.path() / "tpl/b.txt", "b\n");
     Program p = parse(
         "ask choice \"choice?\" string default \"a.txt\"\n"
-        "file out.txt from tpl/{choice}\n");
+        "file \"out.txt\" from \"tpl/{choice}\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     EXPECT_NE(find_asset(r, "tpl/a.txt"), nullptr);
@@ -164,7 +153,7 @@ TEST(Bundler, AcceptsDynamicSuffixAfterTrailingSlash) {
 TEST(Bundler, EmptyLeafDirRecorded) {
     TmpDir tmp;
     fs::create_directories(tmp.path() / "scaffold/logs");  // no files
-    Program p = parse("mkdir project from scaffold\n");
+    Program p = parse("mkdir \"project\" from \"scaffold\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     const SpudpackAsset* a = find_asset(r, "scaffold/logs/");
@@ -175,7 +164,7 @@ TEST(Bundler, EmptyLeafDirRecorded) {
 TEST(Bundler, NestedEmptyOnlyDeepestRecorded) {
     TmpDir tmp;
     fs::create_directories(tmp.path() / "scaffold/a/b/c");  // chain of empties
-    Program p = parse("mkdir project from scaffold\n");
+    Program p = parse("mkdir \"project\" from \"scaffold\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     EXPECT_NE(find_asset(r, "scaffold/a/b/c/"), nullptr);
@@ -187,8 +176,8 @@ TEST(Bundler, DuplicateAssetsCollapseWhenIdentical) {
     TmpDir tmp;
     write_file(tmp.path() / "shared/body.txt", "same\n");
     Program p = parse(
-        "file out_a/body.txt from shared/body.txt\n"
-        "file out_b/body.txt from shared/body.txt\n");
+        "file \"out_a/body.txt\" from \"shared/body.txt\"\n"
+        "file \"out_b/body.txt\" from \"shared/body.txt\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     EXPECT_EQ(r.assets.size(), 1u);
@@ -200,7 +189,7 @@ TEST(Bundler, RejectsSourceOutsideRoot) {
     TmpDir tmp;
     fs::create_directories(tmp.path() / "child");
     write_file(tmp.path() / "sibling.txt", "x\n");
-    Program p = parse("file out.txt from ../sibling.txt\n");
+    Program p = parse("file \"out.txt\" from \"../sibling.txt\"\n");
 
     EXPECT_THROW(bundle_assets(p, tmp.path() / "child"), BundleError);
 }
@@ -212,7 +201,7 @@ TEST(Bundler, RejectsFifo) {
     if (mkfifo(fifo.c_str(), 0644) != 0) {
         GTEST_SKIP() << "mkfifo failed; skipping fifo rejection test";
     }
-    Program p = parse("mkdir project from src\n");
+    Program p = parse("mkdir \"project\" from \"src\"\n");
     EXPECT_THROW(bundle_assets(p, tmp.path()), BundleError);
 }
 
@@ -225,7 +214,7 @@ TEST(Bundler, SymlinkToFileFollowed) {
     fs::create_symlink(tmp.path() / "real" / "file.txt",
                        tmp.path() / "tree" / "link.txt");
 
-    Program p = parse("mkdir project from tree\n");
+    Program p = parse("mkdir \"project\" from \"tree\"\n");
     BundleResult r = bundle_assets(p, tmp.path());
     const SpudpackAsset* a = find_asset(r, "tree/link.txt");
     ASSERT_NE(a, nullptr);
@@ -237,7 +226,7 @@ TEST(Bundler, SymlinkLoopBroken) {
     fs::create_directories(tmp.path() / "loop/a");
     fs::create_directory_symlink(tmp.path() / "loop", tmp.path() / "loop/a/back");
 
-    Program p = parse("mkdir project from loop\n");
+    Program p = parse("mkdir \"project\" from \"loop\"\n");
     // Should not infinite-recurse. The walker may produce zero assets (only
     // the dir loop) or report an error - either way it must terminate.
     try {

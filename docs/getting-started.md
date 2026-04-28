@@ -39,8 +39,8 @@ Create `hello.spud`:
 ```
 ask name "Your name?" string
 
-mkdir hello as dir
-file dir/greeting.txt content "Hello, " + name + "!\n"
+mkdir "hello" as dir
+file dir/"greeting.txt" content "Hello, " + name + "!\n"
 ```
 
 Three things are happening here:
