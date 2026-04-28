@@ -2309,20 +2309,22 @@ TEST(RunTest, NoTimeoutFlagOverridesPerStatementTimeout) {
 }
 
 TEST(RunTest, TimeoutKillsGrandchildViaProcessGroup) {
-    // The shell forks a `sleep 5` into the background and waits. If the
-    // interpreter only killed the shell, the grandchild would survive and
-    // the wait would never complete, hanging the test. Killing the whole
-    // process group ensures both die.
+    // The shell forks a `sleep 30` into the background and waits. Without
+    // process-group kill the grandchild would survive the parent's death
+    // and `wait` would block for the full 30s, so a sub-30s elapsed time
+    // proves the whole tree was killed. The exact duration depends on how
+    // quickly the platform's shell honours SIGTERM (Linux ~3s, macOS ~7s
+    // because `wait` ignores SIGTERM and we fall through to SIGKILL after
+    // the 5s grace) - so we only assert "well under the natural sleep".
     TmpDir td;
-    auto p = parse(R"(run "sleep 5 & wait" timeout 1
+    auto p = parse(R"(run "sleep 30 & wait" timeout 1
 )");
     ScriptedPrompter prompter({});
     auto start = std::chrono::steady_clock::now();
     EXPECT_THROW(run(p, prompter, /*skip_authorization=*/true), RuntimeError);
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
-    // Should die within the 1s timeout plus a small grace window.
-    EXPECT_LT(elapsed.count(), 4);
+    EXPECT_LT(elapsed.count(), 15);
 }
 
 // --- Dry run ---
