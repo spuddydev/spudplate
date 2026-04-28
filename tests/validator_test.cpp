@@ -171,6 +171,48 @@ TEST(ValidatorTest, RepeatBodyWithNonAskStatementsValidates) {
     EXPECT_NO_THROW(validate(program));
 }
 
+// --- when-gated ask requires default ---
+
+TEST(ValidatorTest, WhenGatedAskWithoutDefaultRejected) {
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "ask name \"Name?\" string when use_x\n");
+    try {
+        validate(program);
+        FAIL() << "expected SemanticError";
+    } catch (const SemanticError& e) {
+        EXPECT_STREQ(e.what(),
+                     "when-gated ask 'name' requires a default value "
+                     "(add: default <value>)");
+    }
+}
+
+TEST(ValidatorTest, WhenGatedAskWithDefaultPasses) {
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "ask name \"Name?\" string default \"\" when use_x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AskWithoutWhenOrDefaultStillPasses) {
+    auto program = parse("ask name \"Name?\" string\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, StaticallyTrueWhenStillRequiresDefault) {
+    auto program = parse(
+        "ask name \"Name?\" string when true\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, DefaultExprReferencingPriorBindingPasses) {
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "ask base \"Base?\" string\n"
+        "ask label \"Label?\" string default base when use_x\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
 // --- Scope stack tests ---
 
 TEST(ValidatorTest, LetInsideRepeatReferencedOutsideIsError) {
