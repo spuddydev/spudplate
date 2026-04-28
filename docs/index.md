@@ -1,7 +1,5 @@
 # spudplate
 
-**Templating made for spuds.**
-
 Cookiecutter and Yeoman copy a tree and swap variables; anything conditional gets pushed to Jinja-in-filenames and post-generation hooks. Spudplate makes the template a real program with conditionals, loops, and shell commands built in.
 
 Write a `.spud` file in spudlang, install it once, and run it whenever you want to scaffold a new project. The interpreter prompts the user and creates files and directories based on their answers.
