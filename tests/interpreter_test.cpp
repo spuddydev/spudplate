@@ -846,7 +846,11 @@ end
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "gamma"));
 }
 
-TEST(AskTest, AskInsideRepeatGetsNoCounter) {
+TEST(AskTest, AskInsideRepeatKeepsStaticCounter) {
+    // The static `(N/M)` counter is shown inside a repeat as a positional
+    // anchor; M is the static-statement count and does not grow with
+    // iterations. Iteration position is reported separately via
+    // `iterations` (see B5 tests).
     auto p = parse(R"(ask n "Count?" int
 repeat n as i
   ask name "Module?" string
@@ -855,8 +859,8 @@ end
     ScriptedPrompter prompter({"1", "x"});
     run_for_tests(p, prompter);
     ASSERT_TRUE(prompter.last_request().has_value());
-    EXPECT_EQ(prompter.last_request()->question_index, 0);
-    EXPECT_EQ(prompter.last_request()->question_total, 0);
+    EXPECT_EQ(prompter.last_request()->question_index, 1);
+    EXPECT_EQ(prompter.last_request()->question_total, 1);
     EXPECT_EQ(prompter.last_request()->indent_level, 1);
 }
 
