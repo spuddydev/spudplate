@@ -12,7 +12,7 @@ Write a `.spud` file in spudlang, install it once, and run it whenever you want 
 
 ## Why
 
-Cookiecutter and Yeoman copy a tree and swap variables; anything conditional gets pushed to Jinja-in-filenames and post-generation hooks. Spudplate makes the template a real program with conditionals, loops, and shell commands built in.
+Imagine you're spinning up a new project from your team's standard layout, where the test framework, license, and CI matrix all depend on this one. Cookiecutter would have you template the easy bits in Jinja and write a post-generation hook for the conditionals. Spudplate lets you put it all in one `.spud` file: every new project is `spudplate run team-default` and a few prompts.
 
 ## Install
 
