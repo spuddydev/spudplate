@@ -252,6 +252,39 @@ end
 
 ---
 
+### if - Conditional block
+
+```
+if <condition>
+    # nested statements
+end
+```
+
+Executes the nested block when `<condition>` evaluates to `true`. The condition uses the same expression grammar as `when`. Nested `if` and `repeat` blocks, `ask`, and all action statements are allowed inside the body.
+
+There is no `else` or `else if`; gating gating composes via nested `if` blocks. An `if` block does **not** itself accept a `when` clause - the `if` already is the gate. Inner statements may still carry their own `when`.
+
+#### If scoping
+
+An `if` block introduces a new scope. Any `let` or `as` names declared inside the block are local to it and not visible after `end`. Shadowing rules match `repeat`: a binding inside the block whose name collides with a currently-visible outer binding is rejected.
+
+#### ask inside if
+
+An `ask` lexically inside an `if` body that has no inner `when` clause does not need a `default` - the `if` itself is the gate. An `ask` with its own `when` clause **still** requires a `default` even inside an `if`, because the inner gate can be false while the outer `if` is true.
+
+**Example:**
+
+```
+ask use_tests "Include a test suite?" bool default false
+if use_tests
+    mkdir tests
+    file tests/README.md content "# Tests"
+    ask test_runner "Test runner?" string options "ctest" "gtest" default "ctest"
+end
+```
+
+---
+
 ### include - Run another installed template
 
 ```
