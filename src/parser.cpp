@@ -471,12 +471,28 @@ StmtPtr Parser::parseRun() {
     if (match(TokenType::IN)) {
         cwd = parse_path_expr();
     }
+    std::optional<ExprPtr> timeout_expr;
+    if (check(TokenType::TIMEOUT)) {
+        Token timeout_tok = advance();
+        auto value = parseExpression();
+        // Reject literal non-positive timeouts at parse time. Non-literal
+        // expressions are validated for type and re-checked for positivity at
+        // runtime.
+        if (const auto* lit =
+                std::get_if<IntegerLiteralExpr>(&value->data);
+            lit != nullptr && lit->value <= 0) {
+            throw ParseError("'timeout' must be a positive integer",
+                             timeout_tok.line, timeout_tok.column);
+        }
+        timeout_expr = std::move(value);
+    }
     auto when_clause = parse_when_clause();
     expect_newline("run statement");
 
     auto stmt = std::make_unique<Stmt>();
     stmt->data = RunStmt{.command = std::move(command),
                          .cwd = std::move(cwd),
+                         .timeout = std::move(timeout_expr),
                          .when_clause = std::move(when_clause),
                          .line = start.line,
                          .column = start.column};
