@@ -132,10 +132,6 @@ struct Scope {
 struct AliasCtx {
     std::unordered_map<std::string, std::optional<ExprPtr>> registry;
     TypeMap type_map;
-    // Flag flipped by an `if` body walker so the when-requires-default rule
-    // can grant a context-sensitive exemption. Save/restore around the body
-    // walk; default false at program scope.
-    bool inside_if_body{false};
 };
 
 void walk_expr(const Expr& expr, const Scope& scope);
@@ -232,10 +228,10 @@ void check_shadowing(const std::string& name, int line, int column,
     }
 }
 
-void check_when_requires_default(const AskStmt& s, const AliasCtx& ctx) {
-    if (ctx.inside_if_body) {
-        return;
-    }
+void check_when_requires_default(const AskStmt& s, const AliasCtx& /*ctx*/) {
+    // Purely syntactic: any ask carrying a `when_clause` needs a `default`.
+    // An enclosing `if` block does not exempt this; the inner gate can still
+    // be false while the outer `if` is true, recreating bug #59.
     if (s.when_clause.has_value() && !s.default_value.has_value()) {
         throw SemanticError("when-gated ask '" + s.name +
                                 "' requires a default value (add: default <value>)",
@@ -341,6 +337,18 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                 scope.declare(s.iterator_var);
                 for (const auto& inner : s.body) {
                     validate_stmt(*inner, scope, ctx);
+                }
+                scope.pop();
+            } else if constexpr (std::is_same_v<T, IfStmt>) {
+                walk_expr(*s.condition, scope);
+                scope.push();
+                try {
+                    for (const auto& inner : s.body) {
+                        validate_stmt(*inner, scope, ctx);
+                    }
+                } catch (...) {
+                    scope.pop();
+                    throw;
                 }
                 scope.pop();
             }
