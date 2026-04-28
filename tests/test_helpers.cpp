@@ -226,6 +226,7 @@ bool stmts_equal(const Stmt& a, const Stmt& b) {
             } else if constexpr (std::is_same_v<T, RunStmt>) {
                 if (!ptr_expr_equal(av.command, bv.command)) return false;
                 if (!optional_path_expr_equal(av.cwd, bv.cwd)) return false;
+                if (!optional_expr_equal(av.timeout, bv.timeout)) return false;
                 if (!optional_expr_equal(av.when_clause, bv.when_clause)) {
                     return false;
                 }

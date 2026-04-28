@@ -645,7 +645,8 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         try {
             pack = spudpack_read_file(file_path);
             program = deserialize_program(pack.program_bytes.data(),
-                                          pack.program_bytes.size());
+                                          pack.program_bytes.size(),
+                                          pack.version);
             have_pack = true;
         } catch (const SpudpackError& e) {
             err << file_path.string() << ": " << e.what() << "\n";
