@@ -686,13 +686,13 @@ TEST(AskTest, IntOptionsAcceptNumericMatch) {
     EXPECT_EQ(std::get<std::int64_t>(*env.lookup("v")), 15);
 }
 
-TEST(AskTest, WhenSkipsAsk) {
+TEST(AskTest, WhenSkipsAskAndBindsDefault) {
     auto p = parse(R"(ask use_x "Use X?" bool
-ask name "Name?" string when use_x
+ask name "Name?" string default "anon" when use_x
 )");
     ScriptedPrompter prompter({"false"});
     Environment env = run_for_tests(p, prompter);
-    EXPECT_FALSE(env.lookup("name").has_value());
+    EXPECT_EQ(std::get<std::string>(*env.lookup("name")), "anon");
 }
 
 TEST(AskTest, BadBoolRetries) {
