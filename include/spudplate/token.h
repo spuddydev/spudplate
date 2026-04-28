@@ -29,6 +29,7 @@ enum class TokenType {
     INCLUDE,   ///< `include` - run another installed template as a subprocess
     RUN,       ///< `run` - execute a shell command (gated by trust prompt)
     IN,        ///< `in` - working-directory marker on `run` statements
+    TIMEOUT,   ///< `timeout` - per-statement timeout override on `run` statements
 
     // Logical operators (keywords)
     AND,  ///< `and` - logical AND
@@ -138,6 +139,8 @@ inline std::string tokenTypeToString(TokenType type) {
             return "RUN";
         case TokenType::IN:
             return "IN";
+        case TokenType::TIMEOUT:
+            return "TIMEOUT";
         case TokenType::AND:
             return "AND";
         case TokenType::OR:

@@ -307,12 +307,13 @@ There is no source-level inlining; all template reuse goes through `include` and
 ### run - Execute a shell command
 
 ```
-run <expression> [in <path>] [when <condition>]
+run <expression> [in <path>] [timeout <int>] [when <condition>]
 ```
 
 Runs a shell command via `/bin/sh -c`. The expression evaluates to a string at runtime - supporting concatenation with `ask`/`let` values - and the resulting command is queued for execution at flush time, in source order alongside the file operations. Output streams live to the parent process's stdout/stderr.
 
 - `in <path>` - pin the command's working directory to `<path>`. Without it, the command inherits the cwd of the `spudplate` process, which is rarely what you want once the template has created a project subdirectory. The path is a regular path expression - alias references and `{expr}` interpolation work, and the directory must exist by the time the command runs (errors otherwise). The cwd is restored after the command, even on failure.
+- `timeout <int>` - per-statement timeout in seconds. Must be a positive integer. The default when no clause is present is **60 seconds**; the CLI flag `--no-timeout` disables timeouts entirely for the invocation and overrides any per-statement value. On expiry the interpreter sends `SIGTERM` to the command's process group, waits up to 5 seconds for it to exit cleanly, then sends `SIGKILL`. The command is reported as a runtime error and the deferred flush is aborted.
 - `when <condition>` - only run the command if the condition is true.
 
 ```
@@ -321,7 +322,10 @@ mkdir {project} as proj
 run "git init" in proj
 ask repo_url "Origin URL?" string default ""
 run "git remote add origin " + repo_url in proj when repo_url != ""
+run "npm install" in proj timeout 600
 ```
+
+A short status banner of the form `running '...' (timeout Ns)` (or `(no timeout)`) is printed to stderr before each command so a long-running command does not look frozen.
 
 #### Trust prompt
 

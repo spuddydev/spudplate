@@ -163,12 +163,27 @@ TEST(SpudpackCodec, UnsupportedVersionZero) {
     }
 }
 
-TEST(SpudpackCodec, UnsupportedVersionTwo) {
+TEST(SpudpackCodec, UnsupportedVersionThree) {
+    // v1 and v2 are accepted; v3 (and above) is not.
     Spudpack in = make_simple();
     auto bytes = spudpack_encode(in);
-    bytes[4] = 2;
+    bytes[4] = 3;
     rewrite_crc(bytes);
     EXPECT_THROW(spudpack_decode(bytes.data(), bytes.size()), SpudpackError);
+}
+
+TEST(SpudpackCodec, V1FixtureDecodes) {
+    // Encoder writes v2; flip the byte to 1 and rewrite the CRC. Decoding
+    // succeeds and the resulting Spudpack carries version=1 so downstream
+    // code (binary serialiser) can decode RunStmt without the trailing
+    // timeout field.
+    Spudpack in = make_simple();
+    auto bytes = spudpack_encode(in);
+    bytes[4] = 1;
+    rewrite_crc(bytes);
+    auto out = spudpack_decode(bytes.data(), bytes.size());
+    EXPECT_EQ(out.version, 1u);
+    EXPECT_EQ(out.source, in.source);
 }
 
 TEST(SpudpackCodec, CrcMismatchDetected) {

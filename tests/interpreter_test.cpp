@@ -2281,6 +2281,52 @@ TEST(RunTest, DryRunShowsCommandsButDoesNotExecute) {
     EXPECT_FALSE(std::filesystem::exists(td.path() / "should_not_exist"));
 }
 
+TEST(RunTest, ExplicitTimeoutFires) {
+    TmpDir td;
+    auto p = parse(R"(run "sleep 5" timeout 1
+)");
+    ScriptedPrompter prompter({});
+    try {
+        run(p, prompter, /*skip_authorization=*/true);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& e) {
+        EXPECT_NE(std::string(e.what()).find("timed out after 1s"),
+                  std::string::npos);
+    }
+}
+
+TEST(RunTest, NoTimeoutFlagOverridesPerStatementTimeout) {
+    // Explicit `timeout 1` would normally kill `sleep 1` after 1s, but
+    // --no-timeout disables timeouts for the whole invocation. A sleep of
+    // 0 finishes immediately so this stays fast.
+    TmpDir td;
+    auto p = parse(R"(run "sleep 0" timeout 1
+)");
+    ScriptedPrompter prompter({});
+    EXPECT_NO_THROW(run(p, prompter, /*skip_authorization=*/true,
+                        /*source=*/nullptr,
+                        /*timeouts_disabled=*/true));
+}
+
+TEST(RunTest, TimeoutKillsGrandchildViaProcessGroup) {
+    // The shell forks a `sleep 30` into the background and waits. Without
+    // process-group kill the grandchild would survive the parent's death
+    // and `wait` would block for the full 30s, so a sub-30s elapsed time
+    // proves the whole tree was killed. The exact duration depends on how
+    // quickly the platform's shell honours SIGTERM (Linux ~3s, macOS ~7s
+    // because `wait` ignores SIGTERM and we fall through to SIGKILL after
+    // the 5s grace) - so we only assert "well under the natural sleep".
+    TmpDir td;
+    auto p = parse(R"(run "sleep 30 & wait" timeout 1
+)");
+    ScriptedPrompter prompter({});
+    auto start = std::chrono::steady_clock::now();
+    EXPECT_THROW(run(p, prompter, /*skip_authorization=*/true), RuntimeError);
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start);
+    EXPECT_LT(elapsed.count(), 15);
+}
+
 // --- Dry run ---
 
 TEST(DryRunTest, EmptyProgramRendersNothing) {

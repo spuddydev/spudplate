@@ -37,6 +37,7 @@ struct Spudpack {
     std::string source;                       ///< Original `.spud` source text.
     std::vector<std::uint8_t> program_bytes;  ///< Opaque serialised AST; decoded by the binary serializer.
     std::vector<SpudpackAsset> assets;        ///< Every bundled asset referenced by the program.
+    std::uint8_t version{2};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
 };
 
 /**
@@ -59,7 +60,8 @@ class SpudpackError : public std::runtime_error {
 /**
  * @brief Encode a `Spudpack` into a tightly packed byte stream.
  *
- * Layout: magic `"SPUD"` (4 bytes), version `u8 = 1`, flags `u8 = 0`,
+ * Layout: magic `"SPUD"` (4 bytes), version `u8` (currently `2`; `1` is
+ * still accepted on decode for backward compatibility), flags `u8 = 0`,
  * `varint`+`bytes` source, `varint`+`bytes` program, `varint` asset_count,
  * per asset (`varint`+`bytes` path, `u16 LE` mode, `varint`+`bytes` data),
  * `varint` dep_count `= 0`, `u32 LE` CRC32 over `[0, size-4)`.

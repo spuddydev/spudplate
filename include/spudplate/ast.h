@@ -308,6 +308,7 @@ struct CopyStmt {
 struct RunStmt {
     ExprPtr command;                     ///< Expression whose string value is the command.
     std::optional<PathExpr> cwd;         ///< Optional `in <path>` working directory.
+    std::optional<ExprPtr> timeout;      ///< Optional `timeout <int>` override in seconds. Absent means use the run-time default unless `--no-timeout` is set.
     std::optional<ExprPtr> when_clause;  ///< Optional condition guarding execution.
     int line;    ///< 1-based source line where this node begins.
     int column;  ///< 1-based source column where this node begins.

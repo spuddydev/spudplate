@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -14,6 +15,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -21,6 +23,7 @@
 #include <vector>
 
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -101,9 +104,20 @@ struct PendingCheckDir {
 struct PendingRun {
     std::string command;
     std::optional<std::string> cwd;
+    // Resolved timeout in seconds. nullopt means "no timeout" - either the
+    // statement explicitly disabled it via the run-time default lookup, or
+    // the CLI passed --no-timeout. A positive value means kill the child
+    // (and its process group) after that many seconds.
+    std::optional<std::int64_t> timeout_seconds;
     int line;
     int column;
 };
+
+// Default per-statement timeout applied when the source has no explicit
+// `timeout` clause and `--no-timeout` was not passed. Sixty seconds is long
+// enough for trivial commands (formatters, tiny package operations) and
+// short enough that the user notices a hung command.
+constexpr std::int64_t kDefaultRunTimeoutSeconds = 60;
 
 using PendingOp =
     std::variant<PendingMkdir, PendingFile, PendingCheckDir, PendingRun>;
@@ -784,6 +798,7 @@ class Interpreter {
         : prompter_(prompter), source_(source) {}
 
     void set_ask_total(int total) { ask_total_ = total; }
+    void set_timeouts_disabled(bool b) { timeouts_disabled_ = b; }
 
     void execute(const Stmt& stmt) {
         std::visit(
@@ -982,8 +997,32 @@ class Interpreter {
         if (s.cwd.has_value()) {
             cwd = evaluate_path(*s.cwd, env_, alias_map_);
         }
+        // Resolve the timeout: explicit per-statement value, then the
+        // run-time default of 60 seconds, then the `--no-timeout` opt-out
+        // wins over both. The actual kill happens in run_op.
+        std::optional<std::int64_t> timeout_seconds;
+        if (s.timeout.has_value()) {
+            Value tv = evaluate_expr(**s.timeout, env_);
+            if (!std::holds_alternative<std::int64_t>(tv)) {
+                throw RuntimeError(
+                    "'run' timeout must evaluate to an int", s.line, s.column);
+            }
+            std::int64_t secs = std::get<std::int64_t>(tv);
+            if (secs <= 0) {
+                throw RuntimeError(
+                    "'run' timeout must be a positive integer", s.line,
+                    s.column);
+            }
+            timeout_seconds = secs;
+        } else {
+            timeout_seconds = kDefaultRunTimeoutSeconds;
+        }
+        if (timeouts_disabled_) {
+            timeout_seconds = std::nullopt;
+        }
         pending_.push_back(PendingRun{.command = std::get<std::string>(v),
                                       .cwd = std::move(cwd),
+                                      .timeout_seconds = timeout_seconds,
                                       .line = s.line,
                                       .column = s.column});
     }
@@ -1134,10 +1173,13 @@ class Interpreter {
     }
 
     void run_op(const PendingRun& op) const {
-        // /bin/sh -c is what std::system invokes on POSIX. Output streams
-        // through to stdout/stderr inherited from the parent. A non-zero
-        // exit aborts the rest of the flush. If `op.cwd` is set, the chdir
-        // is restored on every exit path via the destructor.
+        // Fork+execvp+waitpid replaces std::system so we can apply a per-run
+        // wall-clock timeout. The child sets its own process group via
+        // setpgid so a hanging grandchild (e.g. `sh -c 'sleep 60 & wait'`)
+        // gets killed alongside the shell, not orphaned. Parent polls
+        // waitpid(WNOHANG) on a 50ms tick - simpler than self-pipe + SIGCHLD
+        // and reentrant for tests. stdin/stdout/stderr are inherited from
+        // the parent, matching std::system behaviour.
         struct ChdirScope {
             std::filesystem::path saved;
             bool active{false};
@@ -1165,22 +1207,108 @@ class Interpreter {
             }
             scope.active = true;
         }
-        int rc = std::system(op.command.c_str());
-        if (rc == -1) {
-            throw RuntimeError("failed to invoke shell for command '" +
-                                   op.command + "': " +
-                                   std::strerror(errno),
-                               op.line, op.column);
+
+        // Status banner on stderr so a long-running command does not look
+        // frozen and the line does not interleave with the child's stdout
+        // (which a CI capturing pipe is likely watching).
+        if (op.timeout_seconds.has_value()) {
+            std::cerr << "running '" << op.command << "' (timeout "
+                      << *op.timeout_seconds << "s)\n";
+        } else {
+            std::cerr << "running '" << op.command << "' (no timeout)\n";
         }
-        if (WIFSIGNALED(rc)) {
+
+        pid_t child = ::fork();
+        if (child < 0) {
+            throw RuntimeError(
+                "failed to fork for command '" + op.command + "': " +
+                    std::strerror(errno),
+                op.line, op.column);
+        }
+        if (child == 0) {
+            // Child. Become the leader of a new process group so the parent
+            // can kill the whole tree by negating the pgid. Then exec sh -c.
+            ::setpgid(0, 0);
+            const char* argv[] = {"sh", "-c", op.command.c_str(), nullptr};
+            ::execvp("/bin/sh", const_cast<char* const*>(argv));
+            // Reachable only if execvp itself fails. Use _exit so atexit
+            // handlers and stdio buffers from the parent are not flushed
+            // twice in the forked address space.
+            std::_Exit(127);
+        }
+
+        // Parent. Mirror the child's setpgid call here too because either
+        // side can lose the race depending on scheduling.
+        ::setpgid(child, child);
+
+        const bool have_timeout = op.timeout_seconds.has_value();
+        const auto deadline =
+            std::chrono::steady_clock::now() +
+            std::chrono::seconds(have_timeout ? *op.timeout_seconds : 0);
+        bool killed_by_timeout = false;
+        int status = 0;
+        while (true) {
+            pid_t r = ::waitpid(child, &status, WNOHANG);
+            if (r == child) {
+                break;
+            }
+            if (r < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                throw RuntimeError(
+                    "waitpid failed for command '" + op.command + "': " +
+                        std::strerror(errno),
+                    op.line, op.column);
+            }
+            // Still running. Check the deadline if one is configured.
+            if (have_timeout &&
+                std::chrono::steady_clock::now() >= deadline) {
+                killed_by_timeout = true;
+                ::killpg(child, SIGTERM);
+                // Give the process group up to 5 seconds to exit cleanly.
+                const auto grace_end = std::chrono::steady_clock::now() +
+                                       std::chrono::seconds(5);
+                while (std::chrono::steady_clock::now() < grace_end) {
+                    pid_t g = ::waitpid(child, &status, WNOHANG);
+                    if (g == child) {
+                        break;
+                    }
+                    if (g < 0 && errno != EINTR) {
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
+                if (::waitpid(child, &status, WNOHANG) != child) {
+                    ::killpg(child, SIGKILL);
+                    int loops = 0;
+                    while (::waitpid(child, &status, WNOHANG) != child &&
+                           loops++ < 100) {
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(20));
+                    }
+                }
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        if (killed_by_timeout) {
+            throw RuntimeError(
+                "command timed out after " +
+                    std::to_string(*op.timeout_seconds) + "s: " + op.command +
+                    " (override with 'timeout N' or run with --no-timeout)",
+                op.line, op.column);
+        }
+        if (WIFSIGNALED(status)) {
             throw RuntimeError("command killed by signal " +
-                                   std::to_string(WTERMSIG(rc)) + ": " +
+                                   std::to_string(WTERMSIG(status)) + ": " +
                                    op.command,
                                op.line, op.column);
         }
-        if (WIFEXITED(rc) && WEXITSTATUS(rc) != 0) {
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
             throw RuntimeError("command exited with status " +
-                                   std::to_string(WEXITSTATUS(rc)) + ": " +
+                                   std::to_string(WEXITSTATUS(status)) + ": " +
                                    op.command,
                                op.line, op.column);
         }
@@ -1273,6 +1401,9 @@ class Interpreter {
     // body and pops on both normal-exit and exception paths so the stack is
     // never left dirty.
     std::vector<std::pair<std::int64_t, std::int64_t>> repeat_iters_;
+    // When true, every queued `run` ignores its statement-level and default
+    // timeout and runs without one. Set via `--no-timeout` on the CLI.
+    bool timeouts_disabled_{false};
 };
 
 int count_ask_statements(const Program& program) {
@@ -1518,7 +1649,7 @@ std::string value_to_string(const Value& value) {
 }
 
 void run(const Program& program, Prompter& prompter, bool skip_authorization,
-         const SourceProvider* source) {
+         const SourceProvider* source, bool timeouts_disabled) {
     if (!skip_authorization) {
         std::string summary = build_authorize_summary(program);
         if (!summary.empty() && !prompter.authorize(summary)) {
@@ -1527,6 +1658,7 @@ void run(const Program& program, Prompter& prompter, bool skip_authorization,
     }
     Interpreter interp(prompter,
                        source != nullptr ? *source : default_source_provider());
+    interp.set_timeouts_disabled(timeouts_disabled);
     run_program(program, interp);
 }
 

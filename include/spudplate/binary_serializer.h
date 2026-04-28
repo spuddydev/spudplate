@@ -107,12 +107,20 @@ std::vector<std::uint8_t> serialize_program(const Program& program);
 /**
  * @brief Decode a byte stream back into a `Program`.
  *
+ * `pack_version` is the spudpack format version that produced these bytes
+ * (1 or 2). The decoder uses it to skip trailing-optional fields that did
+ * not exist in older versions - notably `RunStmt.timeout`, which was added
+ * in pack version 2. Defaults to 2 because the encoder always emits v2;
+ * callers decoding bytes pulled from a `Spudpack` must thread the actual
+ * version (`Spudpack.version`) to remain backward compatible with v1 packs.
+ *
  * Throws `BinaryDeserializeError` with a byte offset on:
  *   - truncated input mid-tag, mid-varint, or mid-payload
  *   - varints longer than 10 bytes
  *   - tag values outside the legal range for their position
  */
-Program deserialize_program(const std::uint8_t* data, std::size_t size);
+Program deserialize_program(const std::uint8_t* data, std::size_t size,
+                            std::uint8_t pack_version = 2);
 
 }  // namespace spudplate
 

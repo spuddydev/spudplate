@@ -43,9 +43,10 @@ void print_usage(std::ostream& err) {
     err << "usage: spudplate <command> [args...]\n"
         << "  install [--yes] <file.spud>     validate and store a template;\n"
         << "                                  prompts before overwriting an existing one\n"
-        << "  run [--dry-run] [--yes] <name|file.spud>\n"
+        << "  run [--dry-run] [--yes] [--no-timeout] <name|file.spud>\n"
         << "                                  run an installed template by name,\n"
-        << "                                  or run a .spud file directly\n"
+        << "                                  or run a .spud file directly;\n"
+        << "                                  --no-timeout disables per-run timeouts\n"
         << "  validate <file.spud>            parse and validate without installing\n"
         << "  list                            list installed templates\n"
         << "  inspect <name>                  print the source of an installed template\n"
@@ -552,6 +553,7 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             Prompter& prompter) {
     bool dry_run_mode = false;
     bool skip_authorization = false;
+    bool timeouts_disabled = false;
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
@@ -560,6 +562,9 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             ++positional_start;
         } else if (arg == "--yes" || arg == "-y") {
             skip_authorization = true;
+            ++positional_start;
+        } else if (arg == "--no-timeout") {
+            timeouts_disabled = true;
             ++positional_start;
         } else {
             break;
@@ -645,7 +650,8 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         try {
             pack = spudpack_read_file(file_path);
             program = deserialize_program(pack.program_bytes.data(),
-                                          pack.program_bytes.size());
+                                          pack.program_bytes.size(),
+                                          pack.version);
             have_pack = true;
         } catch (const SpudpackError& e) {
             err << file_path.string() << ": " << e.what() << "\n";
@@ -676,7 +682,8 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8(),
                     source_ptr);
         } else {
-            run(program, prompter, skip_authorization, source_ptr);
+            run(program, prompter, skip_authorization, source_ptr,
+                timeouts_disabled);
         }
     } catch (const RuntimeError& e) {
         print_error(err, file_path.string(), "runtime error", e.line(),

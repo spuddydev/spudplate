@@ -234,6 +234,33 @@ TEST(CliTest, RunWithYesSkipsAuthorization) {
     EXPECT_FALSE(prompter.last_authorize_summary().has_value());
 }
 
+TEST(CliTest, RunWithNoTimeoutDisablesTimeouts) {
+    // Without the flag, this would parse and execute identically. The
+    // distinguishing behaviour - that the per-statement timeout is
+    // ignored - is exercised by RunTest.NoTimeoutFlagOverridesPerStatementTimeout
+    // at the interpreter layer; here we only assert that the CLI accepts
+    // the flag without an error and exits zero.
+    TmpDir td;
+    auto file = td.path() / "ok.spud";
+    write_file(file, "run \"sleep 0\" timeout 1\n");
+    Argv args(
+        {"spudplate", "run", "--yes", "--no-timeout", file.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+}
+
+TEST(CliTest, HelpListsNoTimeoutFlag) {
+    Argv args({"spudplate"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_NE(err.str().find("--no-timeout"), std::string::npos);
+}
+
 TEST(CliTest, RunWithoutYesAsksAuthorization) {
     TmpDir td;
     auto file = td.path() / "ok.spud";

@@ -64,11 +64,13 @@ class Writer {
 
 class Reader {
   public:
-    Reader(const std::uint8_t* data, std::size_t size)
-        : data_(data), size_(size) {}
+    Reader(const std::uint8_t* data, std::size_t size,
+           std::uint8_t pack_version = 2)
+        : data_(data), size_(size), pack_version_(pack_version) {}
 
     std::size_t pos() const noexcept { return pos_; }
     std::size_t remaining() const noexcept { return size_ - pos_; }
+    std::uint8_t pack_version() const noexcept { return pack_version_; }
 
     std::uint8_t read_u8() {
         require(1, "unexpected end of input");
@@ -174,6 +176,7 @@ class Reader {
     std::size_t size_;
     std::size_t pos_ = 0;
     std::size_t depth_ = 0;
+    std::uint8_t pack_version_ = 2;
 };
 
 // ----- Token / VarType wire encoding --------------------------------------
@@ -633,6 +636,8 @@ void encode_stmt(Writer& w, const Stmt& s) {
                 encode_expr(w, *node.command);
                 encode_opt_path_expr(w, node.cwd);
                 encode_opt_expr(w, node.when_clause);
+                // Trailing field added in pack v2; encoder always emits v2.
+                encode_opt_expr(w, node.timeout);
             } else {
                 static_assert(std::is_same_v<T, IfStmt>);
                 encode_expr(w, *node.condition);
@@ -780,10 +785,18 @@ StmtPtr decode_stmt(Reader& r) {
             ExprPtr command = decode_expr(r);
             auto cwd = decode_opt_path_expr(r);
             auto when_clause = decode_opt_expr(r);
+            // `timeout` was added in pack v2 as a trailing optional. v1
+            // packs do not carry it, so leave it nullopt and read straight
+            // through to line/column.
+            std::optional<ExprPtr> timeout;
+            if (r.pack_version() >= 2) {
+                timeout = decode_opt_expr(r);
+            }
             const int line = static_cast<int>(r.read_zigzag());
             const int column = static_cast<int>(r.read_zigzag());
             return wrap(RunStmt{.command = std::move(command),
                                 .cwd = std::move(cwd),
+                                .timeout = std::move(timeout),
                                 .when_clause = std::move(when_clause),
                                 .line = line,
                                 .column = column});
@@ -818,8 +831,9 @@ std::vector<std::uint8_t> serialize_program(const Program& program) {
     return std::move(w).take();
 }
 
-Program deserialize_program(const std::uint8_t* data, std::size_t size) {
-    Reader r(data, size);
+Program deserialize_program(const std::uint8_t* data, std::size_t size,
+                            std::uint8_t pack_version) {
+    Reader r(data, size, pack_version);
     Program p;
     const std::size_t n = r.read_count();
     p.statements.reserve(n);
