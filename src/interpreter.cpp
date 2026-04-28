@@ -622,6 +622,13 @@ std::string build_authorize_summary(const Program& program) {
 void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
                  int question_index, int question_total, int indent_level) {
     if (!when_passes(stmt.when_clause, env)) {
+        if (!stmt.default_value.has_value()) {
+            throw RuntimeError(
+                "internal: when-gated ask '" + stmt.name +
+                    "' missing default; validator should have rejected this",
+                stmt.line, stmt.column);
+        }
+        env.declare(stmt.name, evaluate_expr(**stmt.default_value, env));
         return;
     }
 
