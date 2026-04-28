@@ -17,7 +17,12 @@ namespace {
 // version byte (must be 1), a flags byte (must be 0), and the rest of the
 // fields described in the header doc comment.
 constexpr std::array<std::uint8_t, 4> kMagic = {'S', 'P', 'U', 'D'};
-constexpr std::uint8_t kVersion = 1;
+// v1: original format.
+// v2: RunStmt encoding gains a trailing optional `timeout` field; old packs
+// without it deserialise as nullopt. Encoder always writes v2; decoder
+// accepts both 1 and 2 for backward compatibility with shipped packs.
+constexpr std::uint8_t kVersion = 2;
+constexpr std::uint8_t kMinVersion = 1;
 constexpr std::uint8_t kFlags = 0;
 
 // Per-asset and per-file caps. Both apply to declared lengths inside the
@@ -296,7 +301,7 @@ Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size) {
     r.read_u8(); r.read_u8(); r.read_u8(); r.read_u8();  // skip magic
 
     std::uint8_t version = r.read_u8();
-    if (version != kVersion) {
+    if (version < kMinVersion || version > kVersion) {
         throw SpudpackError(
             "unsupported spudpack version " + std::to_string(version), 4);
     }
@@ -307,6 +312,7 @@ Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size) {
     }
 
     Spudpack pack;
+    pack.version = version;
 
     std::size_t source_len = r.read_checked_length();
     r.read_bytes_into(pack.source, source_len);

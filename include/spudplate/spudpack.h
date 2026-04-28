@@ -37,6 +37,7 @@ struct Spudpack {
     std::string source;                       ///< Original `.spud` source text.
     std::vector<std::uint8_t> program_bytes;  ///< Opaque serialised AST; decoded by the binary serializer.
     std::vector<SpudpackAsset> assets;        ///< Every bundled asset referenced by the program.
+    std::uint8_t version{2};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
 };
 
 /**
