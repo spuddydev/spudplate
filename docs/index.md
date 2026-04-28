@@ -45,4 +45,6 @@ file project/tests/test_main.cpp from templates/test_main.cpp when use_tests
 
 Read the [syntax reference](syntax.md) for the rest.
 
-> **Pre-1.0.** Spudplate works end to end but breaking changes are expected before `v1.0`. Pin to a specific release if you need stability.
+---
+
+**Pre-1.0.** Spudplate works end to end but breaking changes are expected before `v1.0`. Pin to a specific release if you need stability.
