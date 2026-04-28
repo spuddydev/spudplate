@@ -2,7 +2,7 @@
 
 **Templating made for spuds.**
 
-Spinning up a new project always devolves into the same routine: copy an old folder, sed-replace the names, rewrite the README, wire up CI from memory. Cookiecutter and Yeoman handle the mechanical parts well, but the conditional bits - the parts that actually vary between projects - get punted to Jinja-in-filenames and post-generation hook scripts. Spudplate makes the template a real program. `if`, `when`, `repeat`, derived variables, and shell commands all live inside it, and the whole thing ships as a single `.spp` file with no Python or Node runtime to install on the recipient's machine.
+Cookiecutter and Yeoman handle the easy parts of project scaffolding; anything conditional gets pushed to Jinja-in-filenames and post-generation hooks. Spudplate makes the template a real program (`if`, `when`, `repeat`, expressions, shell commands all built in) that ships as a single `.spp` file with no Python or Node runtime needed.
 
 Write a `.spud` file in spudlang, install it once, and run it whenever you want to scaffold a new project. The interpreter prompts the user and creates files and directories based on their answers.
 
