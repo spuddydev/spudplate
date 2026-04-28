@@ -535,7 +535,7 @@ TEST(EvalPathTest, PathVarFromAliasMap) {
     AliasMap aliases{{"project", "my-project"}};
     std::vector<PathSegment> segs;
     segs.push_back(pvar("project"));
-    segs.push_back(plit("/src"));
+    segs.push_back(plit("src"));
     auto pe = path(std::move(segs));
     EXPECT_EQ(evaluate_path(pe, env, aliases), "my-project/src");
 }
@@ -546,7 +546,7 @@ TEST(EvalPathTest, PathInterpAgainstEnvString) {
     AliasMap aliases;
     std::vector<PathSegment> segs;
     segs.push_back(pinterp(ident("prefix")));
-    segs.push_back(plit("/sub"));
+    segs.push_back(plit("sub"));
     auto pe = path(std::move(segs));
     EXPECT_EQ(evaluate_path(pe, env, aliases), "x/sub");
 }
@@ -556,10 +556,10 @@ TEST(EvalPathTest, PathInterpWithArithmetic) {
     env.declare("n", Value{std::int64_t{3}});
     AliasMap aliases;
     std::vector<PathSegment> segs;
-    segs.push_back(plit("week_"));
+    segs.push_back(plit("base"));
     segs.push_back(pinterp(binop(TokenType::PLUS, ident("n"), int_lit(1))));
     auto pe = path(std::move(segs));
-    EXPECT_EQ(evaluate_path(pe, env, aliases), "week_4");
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "base/4");
 }
 
 TEST(EvalPathTest, PathInterpStringifiesBool) {
@@ -567,10 +567,10 @@ TEST(EvalPathTest, PathInterpStringifiesBool) {
     env.declare("use_x", Value{true});
     AliasMap aliases;
     std::vector<PathSegment> segs;
-    segs.push_back(plit("flag_"));
+    segs.push_back(plit("base"));
     segs.push_back(pinterp(ident("use_x")));
     auto pe = path(std::move(segs));
-    EXPECT_EQ(evaluate_path(pe, env, aliases), "flag_true");
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "base/true");
 }
 
 TEST(EvalPathTest, UnboundAliasThrows) {
@@ -586,6 +586,45 @@ TEST(EvalPathTest, UnboundAliasThrows) {
         EXPECT_NE(std::string(ex.what()).find("ghost"), std::string::npos);
         EXPECT_EQ(ex.line(), 5);
         EXPECT_EQ(ex.column(), 9);
+    }
+}
+
+TEST(EvalPathTest, PathVarFallsBackToEnvString) {
+    Environment env;
+    env.declare("dir", Value{std::string{"notes"}});
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(pvar("dir"));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "notes");
+}
+
+TEST(EvalPathTest, LetStringWithSlashesAppendsVerbatim) {
+    Environment env;
+    env.declare("root", Value{std::string{"foo/bar"}});
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(pvar("root"));
+    segs.push_back(plit("baz"));
+    auto pe = path(std::move(segs));
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "foo/bar/baz");
+}
+
+TEST(EvalPathTest, NonStringLetInPathThrows) {
+    Environment env;
+    env.declare("count", Value{std::int64_t{3}});
+    AliasMap aliases;
+    std::vector<PathSegment> segs;
+    segs.push_back(PathVar{.name = "count", .line = 4, .column = 7});
+    auto pe = path(std::move(segs));
+    try {
+        evaluate_path(pe, env, aliases);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& ex) {
+        EXPECT_NE(std::string(ex.what()).find("must be a string"),
+                  std::string::npos);
+        EXPECT_EQ(ex.line(), 4);
+        EXPECT_EQ(ex.column(), 7);
     }
 }
 
@@ -836,7 +875,7 @@ TEST(AskTest, AskInsideRepeatRunsPerIteration) {
     auto p = parse(R"(ask n "Count?" int
 repeat n as i
   ask name "Module name?" string
-  mkdir {name}
+  mkdir "{name}"
 end
 )");
     ScriptedPrompter prompter({"3", "alpha", "beta", "gamma"});
@@ -1377,9 +1416,9 @@ TEST(AssignTest, MkdirCapturesValueAtStatementTime) {
     // between two mkdirs creates two distinct directories.
     TmpDir td;
     auto p = parse(R"(let n = 1
-mkdir dir_{n}
+mkdir "dir_{n}"
 n = n + 1
-mkdir dir_{n}
+mkdir "dir_{n}"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1390,9 +1429,9 @@ mkdir dir_{n}
 TEST(AssignTest, FileContentCapturesValueAtStatementTime) {
     TmpDir td;
     auto p = parse(R"(let label = "first"
-file a.txt content "label=" + label
+file "a.txt" content "label=" + label
 label = "second"
-file b.txt content "label=" + label
+file "b.txt" content "label=" + label
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1404,7 +1443,7 @@ file b.txt content "label=" + label
 
 TEST(MkdirTest, CreatesDirectory) {
     TmpDir td;
-    auto p = parse(R"(mkdir my_project
+    auto p = parse(R"(mkdir "my_project"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1413,8 +1452,8 @@ TEST(MkdirTest, CreatesDirectory) {
 
 TEST(MkdirTest, HyphenatedDirectoryName) {
     TmpDir td;
-    auto p = parse(R"(mkdir my-project
-mkdir my-project/pre-commit-hooks
+    auto p = parse(R"(mkdir "my-project"
+mkdir "my-project/pre-commit-hooks"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1425,7 +1464,7 @@ mkdir my-project/pre-commit-hooks
 
 TEST(MkdirTest, MkdirP) {
     TmpDir td;
-    auto p = parse(R"(mkdir a/b/c
+    auto p = parse(R"(mkdir "a/b/c"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1435,7 +1474,7 @@ TEST(MkdirTest, MkdirP) {
 TEST(MkdirTest, WhenFalseSkips) {
     TmpDir td;
     auto p = parse(R"(ask use_foo "Use foo?" bool
-mkdir foo when use_foo
+mkdir "foo" when use_foo
 )");
     ScriptedPrompter prompter({"false"});
     run(p, prompter);
@@ -1445,7 +1484,7 @@ mkdir foo when use_foo
 TEST(MkdirTest, WhenTrueCreates) {
     TmpDir td;
     auto p = parse(R"(ask use_foo "Use foo?" bool
-mkdir foo when use_foo
+mkdir "foo" when use_foo
 )");
     ScriptedPrompter prompter({"true"});
     run(p, prompter);
@@ -1454,7 +1493,7 @@ mkdir foo when use_foo
 
 TEST(MkdirTest, ModeApplied) {
     TmpDir td;
-    auto p = parse(R"(mkdir bar mode 0700
+    auto p = parse(R"(mkdir "bar" mode 0700
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1464,18 +1503,38 @@ TEST(MkdirTest, ModeApplied) {
 
 TEST(MkdirTest, AliasResolvesInLaterPath) {
     TmpDir td;
-    auto p = parse(R"(mkdir foo as project
-mkdir project/sub
+    auto p = parse(R"(mkdir "foo" as project
+mkdir project/"sub"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "foo" / "sub"));
 }
 
+TEST(MkdirTest, LetStringResolvesAsPathRoot) {
+    TmpDir td;
+    auto p = parse(R"(let dir = "notes"
+mkdir dir
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "notes"));
+}
+
+TEST(MkdirTest, LetStringWithSlashAppendedVerbatim) {
+    TmpDir td;
+    auto p = parse(R"(let root = "outer/inner"
+mkdir root/"leaf"
+)");
+    ScriptedPrompter prompter({});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "outer" / "inner" / "leaf"));
+}
+
 TEST(MkdirTest, RejectsPreExistingPath) {
     TmpDir td;
     std::filesystem::create_directory(td.path() / "exists");
-    auto p = parse(R"(mkdir exists
+    auto p = parse(R"(mkdir "exists"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1483,7 +1542,7 @@ TEST(MkdirTest, RejectsPreExistingPath) {
 
 TEST(MkdirTest, FromMissingSourceThrows) {
     TmpDir td;
-    auto p = parse(R"(mkdir foo from base
+    auto p = parse(R"(mkdir "foo" from "base"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1501,7 +1560,7 @@ TEST(MkdirTest, FromCopiesSourceTree) {
     {
         std::ofstream(td.path() / "src" / "sub" / "nested.txt") << "nested";
     }
-    auto p = parse(R"(mkdir dst from src
+    auto p = parse(R"(mkdir "dst" from "src"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1518,7 +1577,7 @@ TEST(MkdirTest, FromInterpolatesFileContents) {
         std::ofstream(td.path() / "src" / "readme.md") << "# {name}";
     }
     auto p = parse(R"(let name = "spudplate"
-mkdir dst from src
+mkdir "dst" from "src"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1532,7 +1591,7 @@ TEST(MkdirTest, FromVerbatimSuppressesInterpolation) {
         std::ofstream(td.path() / "src" / "raw.txt") << "{name} stays";
     }
     auto p = parse(R"(let name = "ignored"
-mkdir dst from src verbatim
+mkdir "dst" from "src" verbatim
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1545,8 +1604,8 @@ TEST(MkdirTest, FromBindsAlias) {
     {
         std::ofstream(td.path() / "src" / "a.txt") << "x";
     }
-    auto p = parse(R"(mkdir dst from src as out
-file out/extra.txt content "extra"
+    auto p = parse(R"(mkdir "dst" from "src" as out
+file out/"extra.txt" content "extra"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1558,8 +1617,8 @@ TEST(MkdirTest, DeferredWriteAtomicityOnPreFlushFailure) {
     TmpDir td;
     // First mkdir queues; second's `from` walk throws on missing source
     // before any flush runs, so neither directory ends up on disk.
-    auto p = parse(R"(mkdir a
-mkdir b from base
+    auto p = parse(R"(mkdir "a"
+mkdir "b" from "base"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1574,8 +1633,8 @@ TEST(MkdirTest, SkippedConditionalAliasNotBound) {
     // looked up. This proves the runtime does not bind aliases on skipped
     // statements.
     auto p = parse(R"(ask use_x "Use x?" bool
-mkdir foo when use_x as project
-mkdir project/sub when use_x
+mkdir "foo" when use_x as project
+mkdir project/"sub" when use_x
 )");
     ScriptedPrompter prompter({"false"});
     run(p, prompter);
@@ -1589,18 +1648,18 @@ TEST(EvalPathTest, MixedSegments) {
     AliasMap aliases{{"project", "my-app"}};
     std::vector<PathSegment> segs;
     segs.push_back(pvar("project"));
-    segs.push_back(plit("/week_"));
+    segs.push_back(plit("week"));
     segs.push_back(pinterp(ident("i")));
-    segs.push_back(plit("/notes.md"));
+    segs.push_back(plit("notes.md"));
     auto pe = path(std::move(segs));
-    EXPECT_EQ(evaluate_path(pe, env, aliases), "my-app/week_2/notes.md");
+    EXPECT_EQ(evaluate_path(pe, env, aliases), "my-app/week/2/notes.md");
 }
 
 // --- File content + flush (Part 6) ---
 
 TEST(FileTest, ContentLiteral) {
     TmpDir td;
-    auto p = parse(R"(file foo.txt content "hello"
+    auto p = parse(R"(file "foo.txt" content "hello"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1610,7 +1669,7 @@ TEST(FileTest, ContentLiteral) {
 TEST(FileTest, ContentInterpolatedFromLet) {
     TmpDir td;
     auto p = parse(R"(let name = "world"
-file foo.txt content "hello, " + name
+file "foo.txt" content "hello, " + name
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1620,7 +1679,7 @@ file foo.txt content "hello, " + name
 TEST(FileTest, ContentBraceInterpolatesString) {
     TmpDir td;
     auto p = parse(R"(let name = "world"
-file foo.txt content "hello, {name}!"
+file "foo.txt" content "hello, {name}!"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1630,7 +1689,7 @@ file foo.txt content "hello, {name}!"
 TEST(FileTest, ContentBraceInterpolatesInt) {
     TmpDir td;
     auto p = parse(R"(let n = 7
-file foo.txt content "n={n}"
+file "foo.txt" content "n={n}"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1641,7 +1700,7 @@ TEST(FileTest, ContentBraceInterpolatesMultipleVars) {
     TmpDir td;
     auto p = parse(R"(let a = "x"
 let b = "y"
-file foo.txt content "{a} and {b}"
+file "foo.txt" content "{a} and {b}"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1650,22 +1709,22 @@ file foo.txt content "{a} and {b}"
 
 TEST(FileTest, ContentBraceMissingVarErrors) {
     TmpDir td;
-    auto p = parse(R"(file foo.txt content "{nope}"
+    auto p = parse(R"(file "foo.txt" content "{nope}"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), spudplate::RuntimeError);
 }
 
 TEST(FileTest, ContentBraceUnclosedErrorsAtParse) {
-    EXPECT_THROW(parse(R"(file foo.txt content "{name"
+    EXPECT_THROW(parse(R"(file "foo.txt" content "{name"
 )"),
                  spudplate::ParseError);
 }
 
 TEST(FileTest, FileInsideQueuedDirectory) {
     TmpDir td;
-    auto p = parse(R"(mkdir x
-file x/foo.txt content "hi"
+    auto p = parse(R"(mkdir "x"
+file "x/foo.txt" content "hi"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1674,8 +1733,8 @@ file x/foo.txt content "hi"
 
 TEST(FileTest, AppendAfterContent) {
     TmpDir td;
-    auto p = parse(R"(file foo.txt content "first"
-file foo.txt append content "second"
+    auto p = parse(R"(file "foo.txt" content "first"
+file "foo.txt" append content "second"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1684,8 +1743,8 @@ file foo.txt append content "second"
 
 TEST(FileTest, SamePathTwiceWithoutAppendOverwrites) {
     TmpDir td;
-    auto p = parse(R"(file foo.txt content "A"
-file foo.txt content "B"
+    auto p = parse(R"(file "foo.txt" content "A"
+file "foo.txt" content "B"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1694,7 +1753,7 @@ file foo.txt content "B"
 
 TEST(FileTest, EmptyContent) {
     TmpDir td;
-    auto p = parse(R"(file foo.txt content ""
+    auto p = parse(R"(file "foo.txt" content ""
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1705,7 +1764,7 @@ TEST(FileTest, EmptyContent) {
 TEST(FileTest, IntContentCoercedToString) {
     TmpDir td;
     auto p = parse(R"(let n = 42
-file count.txt content n
+file "count.txt" content n
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1714,7 +1773,7 @@ file count.txt content n
 
 TEST(FileTest, BoolContentCoercedToString) {
     TmpDir td;
-    auto p = parse(R"(file flag.txt content true
+    auto p = parse(R"(file "flag.txt" content true
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1723,7 +1782,7 @@ TEST(FileTest, BoolContentCoercedToString) {
 
 TEST(FileTest, AppendViaAlias) {
     TmpDir td;
-    auto p = parse(R"(file foo content "A" as f
+    auto p = parse(R"(file "foo" content "A" as f
 file f append content "B"
 )");
     ScriptedPrompter prompter({});
@@ -1748,7 +1807,7 @@ TEST(FileTest, RejectsPreExistingFile) {
         std::ofstream out(td.path() / "exists.txt");
         out << "old";
     }
-    auto p = parse(R"(file exists.txt content "new"
+    auto p = parse(R"(file "exists.txt" content "new"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1760,7 +1819,7 @@ TEST(FileTest, FromCopiesSourceContents) {
         std::ofstream out(td.path() / "src.txt");
         out << "from-source content";
     }
-    auto p = parse(R"(file foo.txt from src.txt
+    auto p = parse(R"(file "foo.txt" from "src.txt"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1774,7 +1833,7 @@ TEST(FileTest, FromInterpolatesIdentifiers) {
         out << "hello, {who}!";
     }
     auto p = parse(R"(let who = "world"
-file foo.txt from src.txt
+file "foo.txt" from "src.txt"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1787,7 +1846,7 @@ TEST(FileTest, FromVerbatimSkipsInterpolation) {
         std::ofstream out(td.path() / "src.txt");
         out << "literal {braces}";
     }
-    auto p = parse(R"(file foo.txt from src.txt verbatim
+    auto p = parse(R"(file "foo.txt" from "src.txt" verbatim
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1800,7 +1859,7 @@ TEST(FileTest, FromUnknownIdentInterpolationThrows) {
         std::ofstream out(td.path() / "src.txt");
         out << "{missing}";
     }
-    auto p = parse(R"(file foo.txt from src.txt
+    auto p = parse(R"(file "foo.txt" from "src.txt"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1809,7 +1868,7 @@ TEST(FileTest, FromUnknownIdentInterpolationThrows) {
 
 TEST(FileTest, FromMissingSourceThrows) {
     TmpDir td;
-    auto p = parse(R"(file foo.txt from nope.txt
+    auto p = parse(R"(file "foo.txt" from "nope.txt"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1822,8 +1881,8 @@ TEST(FileTest, FromAppendsToFile) {
         std::ofstream out(td.path() / "src.txt");
         out << "B";
     }
-    auto p = parse(R"(file foo.txt content "A"
-file foo.txt append from src.txt
+    auto p = parse(R"(file "foo.txt" content "A"
+file "foo.txt" append from "src.txt"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1836,7 +1895,7 @@ TEST(FileTest, FromUnclosedBraceThrows) {
         std::ofstream out(td.path() / "src.txt");
         out << "oops {name";
     }
-    auto p = parse(R"(file foo.txt from src.txt
+    auto p = parse(R"(file "foo.txt" from "src.txt"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1845,7 +1904,7 @@ TEST(FileTest, FromUnclosedBraceThrows) {
 TEST(FileTest, WhenFalseSkips) {
     TmpDir td;
     auto p = parse(R"(ask use_f "Use file?" bool
-file foo.txt content "hi" when use_f
+file "foo.txt" content "hi" when use_f
 )");
     ScriptedPrompter prompter({"false"});
     run(p, prompter);
@@ -1860,8 +1919,8 @@ TEST(CopyTest, MergesIntoExistingDir) {
     {
         std::ofstream(td.path() / "src" / "a.txt") << "a";
     }
-    auto p = parse(R"(mkdir dst
-copy src into dst
+    auto p = parse(R"(mkdir "dst"
+copy "src" into "dst"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1874,7 +1933,7 @@ TEST(CopyTest, MissingDestinationFailsAtFlush) {
     {
         std::ofstream(td.path() / "src" / "a.txt") << "a";
     }
-    auto p = parse(R"(copy src into dst
+    auto p = parse(R"(copy "src" into "dst"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1883,8 +1942,8 @@ TEST(CopyTest, MissingDestinationFailsAtFlush) {
 
 TEST(CopyTest, MissingSourceThrows) {
     TmpDir td;
-    auto p = parse(R"(mkdir dst
-copy nope into dst
+    auto p = parse(R"(mkdir "dst"
+copy "nope" into "dst"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -1901,9 +1960,9 @@ TEST(CopyTest, MergesMultipleSources) {
     {
         std::ofstream(td.path() / "src2" / "b.txt") << "b";
     }
-    auto p = parse(R"(mkdir dst
-copy src1 into dst
-copy src2 into dst
+    auto p = parse(R"(mkdir "dst"
+copy "src1" into "dst"
+copy "src2" into "dst"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1917,8 +1976,8 @@ TEST(CopyTest, RecursesIntoSubdirectories) {
     {
         std::ofstream(td.path() / "src" / "deep" / "x.txt") << "x";
     }
-    auto p = parse(R"(mkdir dst
-copy src into dst
+    auto p = parse(R"(mkdir "dst"
+copy "src" into "dst"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1933,8 +1992,8 @@ TEST(CopyTest, InterpolatesByDefault) {
         std::ofstream(td.path() / "src" / "f.txt") << "hello {who}";
     }
     auto p = parse(R"(let who = "you"
-mkdir dst
-copy src into dst
+mkdir "dst"
+copy "src" into "dst"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1948,8 +2007,8 @@ TEST(CopyTest, VerbatimSuppressesInterpolation) {
         std::ofstream(td.path() / "src" / "f.txt") << "{who}";
     }
     auto p = parse(R"(let who = "ignored"
-mkdir dst
-copy src into dst verbatim
+mkdir "dst"
+copy "src" into "dst" verbatim
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -1963,8 +2022,8 @@ TEST(CopyTest, WhenFalseSkips) {
         std::ofstream(td.path() / "src" / "f.txt") << "x";
     }
     auto p = parse(R"(ask flag "Copy?" bool
-mkdir dst
-copy src into dst when flag
+mkdir "dst"
+copy "src" into "dst" when flag
 )");
     ScriptedPrompter prompter({"false"});
     run(p, prompter);
@@ -1978,7 +2037,7 @@ TEST(RepeatTest, ZeroCountBodyNeverRuns) {
     TmpDir td;
     auto p = parse(R"(let n = 0
 repeat n as i
-    mkdir x_{i}
+    mkdir "x_{i}"
 end
 )");
     ScriptedPrompter prompter({});
@@ -1990,7 +2049,7 @@ TEST(RepeatTest, ThreeIterationsCreateThreeDirs) {
     TmpDir td;
     auto p = parse(R"(let n = 3
 repeat n as i
-    mkdir week_{i}
+    mkdir "week_{i}"
 end
 )");
     ScriptedPrompter prompter({});
@@ -2005,7 +2064,7 @@ TEST(RepeatTest, WhenFalseSkipsLoop) {
     auto p = parse(R"(ask use_loop "Use loop?" bool
 let n = 3
 repeat n as i when use_loop
-    mkdir week_{i}
+    mkdir "week_{i}"
 end
 )");
     ScriptedPrompter prompter({"false"});
@@ -2017,7 +2076,7 @@ TEST(RepeatTest, NegativeCountIsZeroIterations) {
     TmpDir td;
     auto p = parse(R"(let n = 0 - 5
 repeat n as i
-    mkdir x_{i}
+    mkdir "x_{i}"
 end
 )");
     ScriptedPrompter prompter({});
@@ -2032,7 +2091,7 @@ TEST(RepeatTest, InnerLetReferencesIterator) {
     auto p = parse(R"(let n = 3
 repeat n as i
     let doubled = i + i
-    mkdir d_{doubled}
+    mkdir "d_{doubled}"
 end
 )");
     ScriptedPrompter prompter({});
@@ -2048,7 +2107,7 @@ TEST(RepeatTest, NestedRepeatsCreateGrid) {
 let m = 2
 repeat n as i
     repeat m as j
-        mkdir x_{i}_{j}
+        mkdir "x_{i}_{j}"
     end
 end
 )");
@@ -2068,8 +2127,8 @@ TEST(RepeatTest, InnerAliasDoesNotLeak) {
     // iterations and no escape after the loop.
     auto p = parse(R"(let n = 2
 repeat n as i
-    mkdir week_{i} as wk
-    mkdir wk/sub_{i}
+    mkdir "week_{i}" as wk
+    mkdir wk/"sub_{i}"
 end
 )");
     ScriptedPrompter prompter({});
@@ -2095,7 +2154,7 @@ TEST(RunTest, AuthorizedCommandExecutes) {
 
 TEST(RunTest, DeclinedAbortsCleanly) {
     TmpDir td;
-    auto p = parse(R"(mkdir foo
+    auto p = parse(R"(mkdir "foo"
 run "touch foo/marker"
 )");
     ScriptedPrompter prompter({});
@@ -2106,9 +2165,9 @@ run "touch foo/marker"
 
 TEST(RunTest, NonZeroExitAbortsRun) {
     TmpDir td;
-    auto p = parse(R"(mkdir before
+    auto p = parse(R"(mkdir "before"
 run "false"
-mkdir after
+mkdir "after"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -2148,7 +2207,7 @@ TEST(RunTest, NonStringCommandIsRuntimeError) {
 
 TEST(RunTest, ProgramWithoutRunDoesNotInvokeAuthorize) {
     TmpDir td;
-    auto p = parse(R"(mkdir foo
+    auto p = parse(R"(mkdir "foo"
 )");
     ScriptedPrompter prompter({});
     prompter.set_authorize_response(false);  // would abort if called
@@ -2197,8 +2256,8 @@ TEST(RunTest, SkipAuthorizationBypassesPrompt) {
 
 TEST(RunTest, InClausePinsCwd) {
     TmpDir td;
-    auto p = parse(R"(mkdir myapp
-run "touch marker" in myapp
+    auto p = parse(R"(mkdir "myapp"
+run "touch marker" in "myapp"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -2209,8 +2268,8 @@ run "touch marker" in myapp
 TEST(RunTest, InClauseRestoresCwdAfterRun) {
     TmpDir td;
     auto saved = std::filesystem::current_path();
-    auto p = parse(R"(mkdir myapp
-run "touch marker" in myapp
+    auto p = parse(R"(mkdir "myapp"
+run "touch marker" in "myapp"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -2219,7 +2278,7 @@ run "touch marker" in myapp
 
 TEST(RunTest, InClauseAcceptsAlias) {
     TmpDir td;
-    auto p = parse(R"(mkdir myapp as proj
+    auto p = parse(R"(mkdir "myapp" as proj
 run "touch marker" in proj
 )");
     ScriptedPrompter prompter({});
@@ -2230,8 +2289,8 @@ run "touch marker" in proj
 TEST(RunTest, InClauseAcceptsInterpolation) {
     TmpDir td;
     auto p = parse(R"(let dir = "myapp"
-mkdir {dir}
-run "touch marker" in {dir}
+mkdir "{dir}"
+run "touch marker" in "{dir}"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -2240,7 +2299,7 @@ run "touch marker" in {dir}
 
 TEST(RunTest, InClauseMissingDirIsRuntimeError) {
     TmpDir td;
-    auto p = parse(R"(run "echo hi" in nope
+    auto p = parse(R"(run "echo hi" in "nope"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -2249,8 +2308,8 @@ TEST(RunTest, InClauseMissingDirIsRuntimeError) {
 TEST(RunTest, InClauseRestoresCwdOnCommandFailure) {
     TmpDir td;
     auto saved = std::filesystem::current_path();
-    auto p = parse(R"(mkdir myapp
-run "false" in myapp
+    auto p = parse(R"(mkdir "myapp"
+run "false" in "myapp"
 )");
     ScriptedPrompter prompter({});
     EXPECT_THROW(run(p, prompter), RuntimeError);
@@ -2259,8 +2318,8 @@ run "false" in myapp
 
 TEST(RunTest, AuthorizeSummaryIncludesInClause) {
     TmpDir td;
-    auto p = parse(R"(mkdir myapp
-run "git init" in myapp
+    auto p = parse(R"(mkdir "myapp"
+run "git init" in "myapp"
 )");
     ScriptedPrompter prompter({});
     run(p, prompter);
@@ -2340,8 +2399,8 @@ TEST(DryRunTest, EmptyProgramRendersNothing) {
 
 TEST(DryRunTest, MkdirAndFileRender) {
     TmpDir td;
-    auto p = parse(R"(mkdir foo
-file foo/bar.txt content "hi"
+    auto p = parse(R"(mkdir "foo"
+file "foo/bar.txt" content "hi"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2354,8 +2413,8 @@ file foo/bar.txt content "hi"
 
 TEST(DryRunTest, AppendGetsAnnotation) {
     TmpDir td;
-    auto p = parse(R"(file log.txt content "first"
-file log.txt append content "second"
+    auto p = parse(R"(file "log.txt" content "first"
+file "log.txt" append content "second"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2368,9 +2427,9 @@ file log.txt append content "second"
 
 TEST(DryRunTest, SiblingsAreSortedAlphabetically) {
     TmpDir td;
-    auto p = parse(R"(mkdir zeta
-mkdir alpha
-mkdir mu
+    auto p = parse(R"(mkdir "zeta"
+mkdir "alpha"
+mkdir "mu"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2394,7 +2453,7 @@ TEST(DryRunTest, MkdirFromExpandsTree) {
     {
         std::ofstream(td.path() / "src" / "sub" / "deep.txt") << "y";
     }
-    auto p = parse(R"(mkdir dst from src
+    auto p = parse(R"(mkdir "dst" from "src"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2407,8 +2466,8 @@ TEST(DryRunTest, MkdirFromExpandsTree) {
 
 TEST(DryRunTest, NoFilesystemSideEffects) {
     TmpDir td;
-    auto p = parse(R"(mkdir foo
-file foo/bar.txt content "hi"
+    auto p = parse(R"(mkdir "foo"
+file "foo/bar.txt" content "hi"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2426,7 +2485,7 @@ TEST(DryRunTest, CopyToMissingDestStillRendersTree) {
     // `copy` into a non-existent `dst` would be a runtime error during a
     // real run; dry-run skips the existence check so the user still gets
     // a useful preview.
-    auto p = parse(R"(copy src into dst
+    auto p = parse(R"(copy "src" into "dst"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2438,7 +2497,7 @@ TEST(DryRunTest, CopyToMissingDestStillRendersTree) {
 
 TEST(DryRunTest, MissingFromSourceStillThrows) {
     TmpDir td;
-    auto p = parse(R"(mkdir dst from nope
+    auto p = parse(R"(mkdir "dst" from "nope"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2449,10 +2508,10 @@ TEST(DryRunTest, AsciiGlyphsWhenRequested) {
     TmpDir td;
     // Two top-level siblings ensure the `|   ` continuation glyph shows
     // up under the non-last sibling.
-    auto p = parse(R"(mkdir foo
-file foo/bar.txt content "hi"
-file foo/baz.txt content "hi"
-mkdir last
+    auto p = parse(R"(mkdir "foo"
+file "foo/bar.txt" content "hi"
+file "foo/baz.txt" content "hi"
+mkdir "last"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2467,7 +2526,7 @@ mkdir last
 
 TEST(DryRunTest, Utf8GlyphsByDefault) {
     TmpDir td;
-    auto p = parse(R"(mkdir foo
+    auto p = parse(R"(mkdir "foo"
 )");
     ScriptedPrompter prompter({});
     std::stringstream out;
@@ -2508,7 +2567,7 @@ TEST(LocaleIsUtf8Test, FirstSetWinsOverLaterUtf8) {
 TEST(DryRunTest, PromptsRunBeforeRendering) {
     TmpDir td;
     auto p = parse(R"(ask name "Project?" string default "demo"
-mkdir {name}
+mkdir "{name}"
 )");
     ScriptedPrompter prompter({"hello"});
     std::stringstream out;
@@ -2536,8 +2595,8 @@ TEST(SourceProvider, AssetMapMaterialisesFileAndMode) {
         {"tpl/main.cpp", 0644, {'h', 'i', '\n'}});
     spudplate::AssetMapSourceProvider provider(assets);
     auto p = parse(
-        "mkdir out\n"
-        "file out/main.cpp from tpl/main.cpp\n");
+        "mkdir \"out\"\n"
+        "file \"out/main.cpp\" from \"tpl/main.cpp\"\n");
     ScriptedPrompter prompter({});
     spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
     EXPECT_EQ(read_text(td.path() / "out/main.cpp"), "hi\n");
@@ -2549,8 +2608,8 @@ TEST(SourceProvider, MkdirFromAssetMapNestedTree) {
     assets.push_back({"src/a/b/c.txt", 0644, {'x'}});
     spudplate::AssetMapSourceProvider provider(assets);
     auto p = parse(
-        "mkdir tree from src\n"
-        "file tree/a/extra.txt content \"more\"\n");
+        "mkdir \"tree\" from \"src\"\n"
+        "file \"tree/a/extra.txt\" content \"more\"\n");
     ScriptedPrompter prompter({});
     spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
     EXPECT_TRUE(std::filesystem::exists(td.path() / "tree/a/b/c.txt"));
@@ -2562,7 +2621,7 @@ TEST(SourceProvider, MkdirFromEmptyLeafDir) {
     std::vector<spudplate::SpudpackAsset> assets;
     assets.push_back({"scaffold/logs/", 0755, {}});
     spudplate::AssetMapSourceProvider provider(assets);
-    auto p = parse("mkdir project from scaffold\n");
+    auto p = parse("mkdir \"project\" from \"scaffold\"\n");
     ScriptedPrompter prompter({});
     spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "project/logs"));
@@ -2572,7 +2631,7 @@ TEST(SourceProvider, AssetMissSurfacesRuntimeError) {
     TmpDir td;
     std::vector<spudplate::SpudpackAsset> assets;
     spudplate::AssetMapSourceProvider provider(assets);
-    auto p = parse("file out.txt from missing.txt\n");
+    auto p = parse("file \"out.txt\" from \"missing.txt\"\n");
     ScriptedPrompter prompter({});
     try {
         spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
@@ -2592,8 +2651,8 @@ TEST(SourceProvider, BinaryContentSkipsInterpolation) {
     assets.push_back({"logo.png", 0644, png});
     spudplate::AssetMapSourceProvider provider(assets);
     auto p = parse(
-        "mkdir out\n"
-        "file out/logo.png from logo.png\n");
+        "mkdir \"out\"\n"
+        "file \"out/logo.png\" from \"logo.png\"\n");
     ScriptedPrompter prompter({});
     spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
     auto materialised = read_text(td.path() / "out/logo.png");
@@ -2607,8 +2666,8 @@ TEST(SourceProvider, AppendOverReadonlyRestoresPriorMode) {
     assets.push_back({"readonly.txt", 0444, {'b', 'a', 's', 'e', '\n'}});
     spudplate::AssetMapSourceProvider provider(assets);
     auto p = parse(
-        "file out.txt from readonly.txt\n"
-        "file out.txt append content \"more\"\n");
+        "file \"out.txt\" from \"readonly.txt\"\n"
+        "file \"out.txt\" append content \"more\"\n");
     ScriptedPrompter prompter({});
     spudplate::run(p, prompter, /*skip_authorization=*/true, &provider);
     EXPECT_EQ(read_text(td.path() / "out.txt"), "base\nmore");
@@ -2625,7 +2684,7 @@ TEST(SourceProvider, DiskBackedSkipsBrokenSymlinks) {
     // preserves that.
     std::filesystem::create_symlink(td.path() / "no/such/target",
                                     td.path() / "tree/dangling");
-    auto p = parse("mkdir out from tree\n");
+    auto p = parse("mkdir \"out\" from \"tree\"\n");
     ScriptedPrompter prompter({});
     spudplate::run(p, prompter, /*skip_authorization=*/true);
     EXPECT_TRUE(std::filesystem::exists(td.path() / "out/regular.txt"));
@@ -2640,7 +2699,7 @@ TEST(SourceProvider, UnclosedBraceStillSurfacedOnTextWithHighBytes) {
     std::vector<spudplate::SpudpackAsset> assets;
     assets.push_back({"latin.txt", 0644, body});
     spudplate::AssetMapSourceProvider provider(assets);
-    auto p = parse("file out.txt from latin.txt\n");
+    auto p = parse("file \"out.txt\" from \"latin.txt\"\n");
     ScriptedPrompter prompter({});
     EXPECT_THROW(
         spudplate::run(p, prompter, /*skip_authorization=*/true, &provider),
@@ -2695,7 +2754,7 @@ TEST(IfTest, NestedIfInsideRepeat) {
 ask use_extra "Extra?" bool
 repeat n as i
   if use_extra
-    mkdir m_{i}
+    mkdir "m_{i}"
   end
 end
 )");

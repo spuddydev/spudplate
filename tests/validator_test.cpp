@@ -159,7 +159,7 @@ TEST(ValidatorTest, AskInRepeatShadowingIteratorIsError) {
 TEST(ValidatorTest, RepeatBodyWithNonAskStatementsValidates) {
     auto program = parse(
         "ask n \"Count?\" int\n"
-        "mkdir base\n"
+        "mkdir \"base\"\n"
         "repeat n as i\n"
         "  mkdir \"m_{i}\"\n"
         "  file \"m_{i}/README.md\" content \"hi\"\n"
@@ -294,7 +294,7 @@ TEST(ValidatorTest, AliasBoundInsideRepeatReferencedOutsideIsError) {
         "repeat n as i\n"
         "  mkdir \"foo\" as bar\n"
         "end\n"
-        "mkdir bar/sub\n");
+        "mkdir bar/\"sub\"\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
@@ -349,17 +349,17 @@ TEST(ValidatorTest, WhenClauseReferencingPoppedBindingIsError) {
         "repeat n as i\n"
         "  let x = 1\n"
         "end\n"
-        "mkdir stuff when x\n");
+        "mkdir \"stuff\" when x\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
 TEST(ValidatorTest, PathInterpReferencingPoppedIteratorIsError) {
-    // Unquoted path so `{i}` is parsed as a PathInterp segment.
+    // Quoted path with `{i}` interpolation referencing a popped iterator.
     auto program = parse(
         "ask n \"Count?\" int\n"
         "repeat n as i\n"
         "end\n"
-        "mkdir week_{i}\n");
+        "mkdir \"week_{i}\"\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
@@ -476,40 +476,40 @@ TEST(NormalizeTest, IntComparisonDiffersFromBoolComparison) {
 TEST(ValidatorTest, AliasBoundWhenXReferencedWhenXValid) {
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir bar/sub when x\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir bar/\"sub\" when x\n");
     EXPECT_NO_THROW(validate(program));
 }
 
 TEST(ValidatorTest, AliasBoundWhenXReferencedWhenXEqualsTrueValid) {
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir bar/sub when x == true\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir bar/\"sub\" when x == true\n");
     EXPECT_NO_THROW(validate(program));
 }
 
 TEST(ValidatorTest, AliasBoundWhenXEqualsTrueReferencedWhenXValid) {
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x == true as bar\n"
-        "mkdir bar/sub when x\n");
+        "mkdir \"foo\" when x == true as bar\n"
+        "mkdir bar/\"sub\" when x\n");
     EXPECT_NO_THROW(validate(program));
 }
 
 TEST(ValidatorTest, AliasBoundWhenXReferencedWhenXEqualsFalseIsError) {
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir bar/sub when x == false\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir bar/\"sub\" when x == false\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
 TEST(ValidatorTest, AliasBoundWhenXReferencedWhenNotXIsError) {
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir bar/sub when not x\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir bar/\"sub\" when not x\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
@@ -518,31 +518,31 @@ TEST(ValidatorTest, AliasBoundWhenAAndBReferencedWhenBAndAIsError) {
     auto program = parse(
         "ask a \"a?\" bool\n"
         "ask b \"b?\" bool\n"
-        "mkdir foo when a and b as bar\n"
-        "mkdir bar/sub when b and a\n");
+        "mkdir \"foo\" when a and b as bar\n"
+        "mkdir bar/\"sub\" when b and a\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
 TEST(ValidatorTest, AliasBoundWhenXReferencedWithNoWhenIsError) {
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir bar/sub\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir bar/\"sub\"\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
 TEST(ValidatorTest, UnconditionalAliasReferencedWhenXValid) {
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo as bar\n"
-        "mkdir bar/sub when x\n");
+        "mkdir \"foo\" as bar\n"
+        "mkdir bar/\"sub\" when x\n");
     EXPECT_NO_THROW(validate(program));
 }
 
 TEST(ValidatorTest, UnconditionalAliasReferencedUnconditionallyValid) {
     auto program = parse(
-        "mkdir foo as bar\n"
-        "mkdir bar/sub\n");
+        "mkdir \"foo\" as bar\n"
+        "mkdir bar/\"sub\"\n");
     EXPECT_NO_THROW(validate(program));
 }
 
@@ -550,8 +550,8 @@ TEST(ValidatorTest, ConditionalAliasReferenceInFilePath) {
     // Exercises the file.path reference site.
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "file bar/readme content \"hi\" when x\n");
+        "mkdir \"foo\" when x as bar\n"
+        "file bar/\"readme\" content \"hi\" when x\n");
     EXPECT_NO_THROW(validate(program));
 }
 
@@ -559,9 +559,9 @@ TEST(ValidatorTest, ConditionalAliasReferenceInCopySource) {
     // Exercises the copy.source reference site.
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir dest\n"
-        "copy bar into dest when x\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir \"dest\"\n"
+        "copy bar into \"dest\" when x\n");
     EXPECT_NO_THROW(validate(program));
 }
 
@@ -569,9 +569,9 @@ TEST(ValidatorTest, ConditionalAliasReferenceInCopyDestinationMismatch) {
     // Exercises copy.destination + mismatched condition.
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir src\n"
-        "copy src into bar when not x\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir \"src\"\n"
+        "copy \"src\" into bar when not x\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
 
@@ -579,8 +579,8 @@ TEST(ValidatorTest, ConditionalAliasReferenceInMkdirFromSource) {
     // Exercises mkdir.from_source reference site.
     auto program = parse(
         "ask x \"x?\" bool\n"
-        "mkdir foo when x as bar\n"
-        "mkdir new from bar when x\n");
+        "mkdir \"foo\" when x as bar\n"
+        "mkdir \"new\" from bar when x\n");
     EXPECT_NO_THROW(validate(program));
 }
 
@@ -592,9 +592,9 @@ TEST(ValidatorTest, RepeatWhenNotFoldedIntoAliasCondition) {
     auto program = parse(
         "ask x \"x?\" bool\n"
         "ask n \"n?\" int\n"
-        "mkdir foo when x as bar\n"
+        "mkdir \"foo\" when x as bar\n"
         "repeat n as i when x\n"
-        "  mkdir bar/dup_{i}\n"
+        "  mkdir bar/\"dup_{i}\"\n"
         "end\n");
     EXPECT_THROW(validate(program), SemanticError);
 }
@@ -628,7 +628,7 @@ TEST(ValidatorTest, RunReferencesIteratorOutsideRepeatIsError) {
 
 TEST(ValidatorTest, RunInClauseReferencesAlias) {
     auto program = parse(
-        "mkdir myapp as proj\n"
+        "mkdir \"myapp\" as proj\n"
         "run \"git init\" in proj\n");
     EXPECT_NO_THROW(validate(program));
 }
@@ -637,7 +637,7 @@ TEST(ValidatorTest, RunInClauseReferencesPoppedAliasIsError) {
     auto program = parse(
         "let n = 1\n"
         "repeat n as i\n"
-        "  mkdir foo as bar\n"
+        "  mkdir \"foo\" as bar\n"
         "end\n"
         "run \"echo hi\" in bar\n");
     EXPECT_THROW(validate(program), spudplate::SemanticError);
@@ -675,7 +675,7 @@ TEST(ValidatorTest, ReassignAskAnswerIsError) {
 
 TEST(ValidatorTest, ReassignPathAliasIsError) {
     auto program = parse(
-        "mkdir foo as bar\n"
+        "mkdir \"foo\" as bar\n"
         "bar = \"baz\"\n");
     EXPECT_THROW(validate(program), spudplate::SemanticError);
 }
@@ -737,16 +737,65 @@ TEST(ValidatorTest, TemplateInWhenInRunIsWalked) {
     EXPECT_THROW(validate(program), spudplate::SemanticError);
 }
 
+// --- Path identifier resolution ---
+
+TEST(ValidatorTest, UnresolvedPathIdentifierRejected) {
+    auto program = parse("mkdir notes\n");
+    try {
+        validate(program);
+        FAIL() << "expected SemanticError";
+    } catch (const SemanticError& e) {
+        EXPECT_NE(std::string(e.what()).find("unresolved path identifier"),
+                  std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("'notes'"), std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("use quotes"), std::string::npos);
+    }
+}
+
+TEST(ValidatorTest, LetStringInPathPasses) {
+    auto program = parse(
+        "let dir = \"notes\"\n"
+        "mkdir dir\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, LetIntInPathRejected) {
+    auto program = parse(
+        "let n = 1\n"
+        "mkdir n\n");
+    try {
+        validate(program);
+        FAIL() << "expected SemanticError";
+    } catch (const SemanticError& e) {
+        EXPECT_NE(std::string(e.what()).find("must be a string"),
+                  std::string::npos);
+    }
+}
+
+TEST(ValidatorTest, LetBoolInPathRejected) {
+    auto program = parse(
+        "let flag = true\n"
+        "mkdir flag\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AskStringAnswerInPathPasses) {
+    auto program = parse(
+        "ask name \"Name?\" string\n"
+        "mkdir name\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
 TEST(ValidatorTest, ComposedRulesEndToEnd) {
     // Exercises Part A (repeat when), Part B (no ask-in-repeat - valid case),
     // Part C (nested let scoping), and Part E (bool-equivalent alias when).
     auto program = parse(
         "ask use_ci \"use ci?\" bool\n"
         "ask n \"n?\" int\n"
-        "mkdir ci_dir when use_ci as ci_path\n"
+        "mkdir \"ci_dir\" when use_ci as ci_path\n"
         "repeat n as i when use_ci\n"
         "  let j = i + 1\n"
         "end\n"
-        "mkdir ci_path/out when use_ci == true\n");
+        "mkdir ci_path/\"out\" when use_ci == true\n");
     EXPECT_NO_THROW(validate(program));
 }

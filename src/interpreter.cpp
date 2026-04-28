@@ -571,7 +571,12 @@ std::string preview_expr(const Expr& expr) {
 // by the trust prompt to surface the `in <path>` clause on `run` statements.
 std::string preview_path(const PathExpr& path) {
     std::string out;
+    bool first = true;
     for (const auto& seg : path.segments) {
+        if (!first) {
+            out += '/';
+        }
+        first = false;
         std::visit(
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
@@ -1610,20 +1615,38 @@ Value evaluate_expr(const Expr& expr, const Environment& env) {
 std::string evaluate_path(const PathExpr& path, const Environment& env,
                           const AliasMap& aliases) {
     std::string out;
+    bool first = true;
     for (const auto& seg : path.segments) {
+        if (!first) {
+            out += '/';
+        }
+        first = false;
         std::visit(
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, PathLiteral>) {
                     out += s.value;
                 } else if constexpr (std::is_same_v<T, PathVar>) {
-                    auto it = aliases.find(s.name);
-                    if (it == aliases.end()) {
-                        throw RuntimeError(
-                            "internal error: unbound path alias '" + s.name + "'",
-                            s.line, s.column);
+                    auto alias_it = aliases.find(s.name);
+                    if (alias_it != aliases.end()) {
+                        out += alias_it->second;
+                        return;
                     }
-                    out += it->second;
+                    auto bound = env.lookup(s.name);
+                    if (bound.has_value()) {
+                        if (!std::holds_alternative<std::string>(*bound)) {
+                            throw RuntimeError(
+                                "path identifier '" + s.name +
+                                    "' must be a string",
+                                s.line, s.column);
+                        }
+                        out += std::get<std::string>(*bound);
+                        return;
+                    }
+                    throw RuntimeError(
+                        "internal: unresolved path identifier '" + s.name +
+                            "'; validator should have caught this",
+                        s.line, s.column);
                 } else if constexpr (std::is_same_v<T, PathInterp>) {
                     out += value_to_string(evaluate_expr(*s.expression, env));
                 }

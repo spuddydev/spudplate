@@ -118,7 +118,7 @@ class Argv {
 TEST(CliTest, RunSuccessExitsZero) {
     TmpDir td;
     auto file = td.path() / "ok.spud";
-    write_file(file, "ask name \"Project name?\" string\nmkdir {name}\n");
+    write_file(file, "ask name \"Project name?\" string\nmkdir \"{name}\"\n");
     Argv args({"spudplate", "run", file.string()});
     std::stringstream out;
     std::stringstream err;
@@ -161,7 +161,7 @@ TEST(CliTest, RuntimeErrorExitsFour) {
     auto file = td.path() / "runtime.spud";
     // `mkdir from` looks up `base` in the cwd; with no such directory the
     // walker raises a runtime error.
-    write_file(file, "mkdir foo from base\n");
+    write_file(file, "mkdir \"foo\" from \"base\"\n");
     Argv args({"spudplate", "run", file.string()});
     std::stringstream out;
     std::stringstream err;
@@ -195,7 +195,7 @@ TEST(CliTest, NoArgumentsExitsOne) {
 TEST(CliTest, DryRunPrintsTreeAndDoesNotWrite) {
     TmpDir td;
     auto file = td.path() / "ok.spud";
-    write_file(file, "mkdir my_project\nfile my_project/README.md content \"hi\"\n");
+    write_file(file, "mkdir \"my_project\"\nfile \"my_project/README.md\" content \"hi\"\n");
     Argv args({"spudplate", "run", "--dry-run", file.string()});
     std::stringstream out;
     std::stringstream err;
@@ -295,7 +295,7 @@ TEST(CliTest, InstallSuccessStoresTemplate) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    write_file(src, "ask name \"Project name?\" string\nmkdir {name}\n");
+    write_file(src, "ask name \"Project name?\" string\nmkdir \"{name}\"\n");
     Argv args({"spudplate", "install", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -311,7 +311,7 @@ TEST(CliTest, InstallWithYesOverwritesExisting) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir foo\n");
+    write_file(src, "mkdir \"foo\"\n");
     {
         Argv args({"spudplate", "install", src.string()});
         std::stringstream o;
@@ -320,7 +320,7 @@ TEST(CliTest, InstallWithYesOverwritesExisting) {
         ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
     }
     // Rewrite the source so we can detect that the new content landed.
-    write_file(src, "mkdir bar\n");
+    write_file(src, "mkdir \"bar\"\n");
     Argv args({"spudplate", "install", "--yes", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -329,7 +329,7 @@ TEST(CliTest, InstallWithYesOverwritesExisting) {
     EXPECT_EQ(code, 0) << err.str();
     EXPECT_NE(out.str().find("reinstalled demo"), std::string::npos);
     spudplate::Spudpack pack = spudplate::spudpack_read_file(home / "demo.spp");
-    EXPECT_EQ(pack.source, "mkdir bar\n");
+    EXPECT_EQ(pack.source, "mkdir \"bar\"\n");
 }
 
 TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
@@ -337,7 +337,7 @@ TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir foo\n");
+    write_file(src, "mkdir \"foo\"\n");
     {
         Argv args({"spudplate", "install", src.string()});
         std::stringstream o;
@@ -347,7 +347,7 @@ TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
     }
     // No `--yes` and no stdin available - confirm() returns false and the
     // command aborts cleanly with exit 0.
-    write_file(src, "mkdir bar\n");
+    write_file(src, "mkdir \"bar\"\n");
     Argv args({"spudplate", "install", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -356,7 +356,7 @@ TEST(CliTest, InstallDeclinedPromptLeavesExistingUnchanged) {
     EXPECT_EQ(code, 0);
     EXPECT_NE(out.str().find("aborted"), std::string::npos);
     spudplate::Spudpack pack = spudplate::spudpack_read_file(home / "demo.spp");
-    EXPECT_EQ(pack.source, "mkdir foo\n");
+    EXPECT_EQ(pack.source, "mkdir \"foo\"\n");
 }
 
 TEST(CliTest, InstallRejectsBrokenTemplateAndLeavesNoTrace) {
@@ -382,7 +382,7 @@ TEST(CliTest, InstallUsesXdgDataHomeWhenNoSpudplateHome) {
     auto xdg_root = td.path() / "xdg";
     xdg.set(xdg_root.string());
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir foo\n");
+    write_file(src, "mkdir \"foo\"\n");
     Argv args({"spudplate", "install", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -413,7 +413,7 @@ TEST(CliTest, RunByNameLooksUpInstalledTemplate) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    write_file(src, "ask name \"Project name?\" string\nmkdir {name}\n");
+    write_file(src, "ask name \"Project name?\" string\nmkdir \"{name}\"\n");
     {
         Argv install_args({"spudplate", "install", src.string()});
         std::stringstream o;
@@ -473,8 +473,8 @@ TEST(CliTest, ListShowsInstalledNamesSorted) {
     TmpDir td;
     auto home = td.path() / "home";
     ScopedHome scoped(home);
-    install_template(td.path() / "zebra.spud", "mkdir z\n");
-    install_template(td.path() / "alpha.spud", "mkdir a\n");
+    install_template(td.path() / "zebra.spud", "mkdir \"z\"\n");
+    install_template(td.path() / "alpha.spud", "mkdir \"a\"\n");
     Argv args({"spudplate", "list"});
     std::stringstream out;
     std::stringstream err;
@@ -488,7 +488,7 @@ TEST(CliTest, InspectPrintsSource) {
     TmpDir td;
     auto home = td.path() / "home";
     ScopedHome scoped(home);
-    const std::string body = "mkdir hello\n";
+    const std::string body = "mkdir \"hello\"\n";
     install_template(td.path() / "demo.spud", body);
     Argv args({"spudplate", "inspect", "demo"});
     std::stringstream out;
@@ -515,7 +515,7 @@ TEST(CliTest, UninstallRemovesTemplate) {
     TmpDir td;
     auto home = td.path() / "home";
     ScopedHome scoped(home);
-    install_template(td.path() / "demo.spud", "mkdir x\n");
+    install_template(td.path() / "demo.spud", "mkdir \"x\"\n");
     ASSERT_TRUE(std::filesystem::is_regular_file(home / "demo.spp"));
     Argv args({"spudplate", "uninstall", "demo"});
     std::stringstream out;
@@ -531,7 +531,7 @@ TEST(CliTest, UninstallRemovesTemplate) {
 TEST(CliTest, ValidateOkExitsZero) {
     TmpDir td;
     auto src = td.path() / "ok.spud";
-    write_file(src, "ask name \"Project name?\" string\nmkdir {name}\n");
+    write_file(src, "ask name \"Project name?\" string\nmkdir \"{name}\"\n");
     Argv args({"spudplate", "validate", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -544,7 +544,7 @@ TEST(CliTest, ValidateOkExitsZero) {
 TEST(CliTest, CheckIsAliasForValidate) {
     TmpDir td;
     auto src = td.path() / "ok.spud";
-    write_file(src, "mkdir foo\n");
+    write_file(src, "mkdir \"foo\"\n");
     Argv args({"spudplate", "check", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -574,7 +574,7 @@ TEST(CliTest, ValidateSemanticErrorExitsThree) {
                "repeat n as i\n"
                "  let local = 0\n"
                "end\n"
-               "mkdir {local}\n");
+               "mkdir \"{local}\"\n");
     Argv args({"spudplate", "validate", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -673,7 +673,7 @@ TEST(CliTest, InstallProducesValidSpudpack) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir foo\n");
+    write_file(src, "mkdir \"foo\"\n");
     Argv args({"spudplate", "install", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -682,7 +682,7 @@ TEST(CliTest, InstallProducesValidSpudpack) {
         << err.str();
     spudplate::Spudpack pack =
         spudplate::spudpack_read_file(home / "demo.spp");
-    EXPECT_EQ(pack.source, "mkdir foo\n");
+    EXPECT_EQ(pack.source, "mkdir \"foo\"\n");
     EXPECT_FALSE(pack.program_bytes.empty());
 }
 
@@ -720,7 +720,7 @@ TEST(CliTest, RunByNameOnLegacyOnlyAsksForReinstall) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     std::filesystem::create_directories(home / "legacy");
-    write_file(home / "legacy" / "template.spud", "mkdir x\n");
+    write_file(home / "legacy" / "template.spud", "mkdir \"x\"\n");
 
     Argv args({"spudplate", "run", "legacy"});
     std::stringstream out;
@@ -737,7 +737,7 @@ TEST(CliTest, UninstallRemovesLegacyDirectory) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     std::filesystem::create_directories(home / "legacy");
-    write_file(home / "legacy" / "template.spud", "mkdir x\n");
+    write_file(home / "legacy" / "template.spud", "mkdir \"x\"\n");
 
     Argv args({"spudplate", "uninstall", "legacy"});
     std::stringstream out;
@@ -780,10 +780,10 @@ TEST(CliTest, InstallYesRemovesLegacyDirectory) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     std::filesystem::create_directories(home / "demo");
-    write_file(home / "demo" / "template.spud", "mkdir old\n");
+    write_file(home / "demo" / "template.spud", "mkdir \"old\"\n");
 
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir new\n");
+    write_file(src, "mkdir \"new\"\n");
     Argv args({"spudplate", "install", "--yes", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -801,7 +801,7 @@ TEST(CliTest, InstallRejectsStrayDirectoryAtTarget) {
     std::filesystem::create_directories(home / "demo.spp");  // stray dir
 
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir x\n");
+    write_file(src, "mkdir \"x\"\n");
     Argv args({"spudplate", "install", "--yes", src.string()});
     std::stringstream out;
     std::stringstream err;
@@ -819,7 +819,7 @@ TEST(CliTest, InstallRenameFailureCleansUpTempFile) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir x\n");
+    write_file(src, "mkdir \"x\"\n");
 
     struct RenameGuard {
         spudplate::cli_internal::RenameFn prev;
@@ -853,7 +853,7 @@ TEST(CliTest, InspectPrintsSourceFromSpudpack) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    std::string body = "ask name \"Name?\" string\nmkdir {name}\n";
+    std::string body = "ask name \"Name?\" string\nmkdir \"{name}\"\n";
     write_file(src, body);
     {
         Argv args({"spudplate", "install", src.string()});
@@ -885,10 +885,10 @@ TEST(CliTest, InstallRunDeleteSourceMaterialisesAssets) {
                static_cast<std::streamsize>(bytes.size()));
     write_file(source_root / "tpl" / "main.txt", "hello\n");
     write_file(source_root / "demo.spud",
-               "mkdir out\n"
-               "mkdir out/assets\n"
-               "file out/main.txt from tpl/main.txt\n"
-               "file out/assets/logo.bin from assets/logo.bin\n");
+               "mkdir \"out\"\n"
+               "mkdir \"out/assets\"\n"
+               "file \"out/main.txt\" from \"tpl/main.txt\"\n"
+               "file \"out/assets/logo.bin\" from \"assets/logo.bin\"\n");
 
     auto home = source_td.path() / "home";
     ScopedHome scoped(home);
@@ -923,7 +923,7 @@ TEST(CliTest, ListWarnsAboutShadowedLegacy) {
     auto home = td.path() / "home";
     ScopedHome scoped(home);
     auto src = td.path() / "demo.spud";
-    write_file(src, "mkdir x\n");
+    write_file(src, "mkdir \"x\"\n");
     {
         Argv args({"spudplate", "install", src.string()});
         std::stringstream o, e;
@@ -932,7 +932,7 @@ TEST(CliTest, ListWarnsAboutShadowedLegacy) {
     }
     // Hand-craft a parallel legacy directory.
     std::filesystem::create_directories(home / "demo");
-    write_file(home / "demo" / "template.spud", "mkdir y\n");
+    write_file(home / "demo" / "template.spud", "mkdir \"y\"\n");
 
     Argv args({"spudplate", "list"});
     std::stringstream out;

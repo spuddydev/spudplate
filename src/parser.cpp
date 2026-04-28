@@ -163,88 +163,87 @@ ExprPtr Parser::parse_literal() {
     throw ParseError("expected literal value", current_.line, current_.column);
 }
 
+// Splits the raw value of a quoted path string into one or more PathSegments.
+// Splits on `/` (top level only - `/` inside `{...}` is part of the
+// expression), drops empty pieces, and within each non-empty piece emits a
+// PathLiteral or, if `{var}` interpolations are present, a PathInterp wrapping
+// a TemplateStringExpr built from that piece.
+void Parser::push_quoted_path_segments(const std::string& raw, int line,
+                                       int column,
+                                       std::vector<PathSegment>& out) {
+    std::vector<std::string> pieces;
+    std::string current;
+    int depth = 0;
+    for (char c : raw) {
+        if (c == '{') {
+            ++depth;
+            current.push_back(c);
+        } else if (c == '}') {
+            if (depth > 0) {
+                --depth;
+            }
+            current.push_back(c);
+        } else if (c == '/' && depth == 0) {
+            pieces.push_back(std::move(current));
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    pieces.push_back(std::move(current));
+
+    for (auto& piece : pieces) {
+        if (piece.empty()) {
+            continue;
+        }
+        if (piece.find('{') == std::string::npos) {
+            out.push_back(PathLiteral{
+                .value = std::move(piece), .line = line, .column = column});
+            continue;
+        }
+        ExprPtr expr = make_string_expression(piece, line, column);
+        out.push_back(PathInterp{
+            .expression = std::move(expr), .line = line, .column = column});
+    }
+}
+
 PathExpr Parser::parse_path_expr() {
     PathExpr path;
     path.line = current_.line;
     path.column = current_.column;
 
-    // Quoted-string fallback for paths with spaces: `mkdir "my notes"`
-    if (check(TokenType::STRING_LITERAL)) {
-        Token tok = advance();
-        path.segments.push_back(
-            PathLiteral{.value = tok.value, .line = tok.line, .column = tok.column});
-        return path;
-    }
-
-    // Unquoted path: greedily consume IDENTIFIER / SLASH / DOT / INTEGER_LITERAL
-    // and `{expr}` interpolation blocks. Adjacent non-alias, non-interpolation
-    // tokens coalesce into a single PathLiteral via a text buffer.
-    std::string buffer;
-    int buf_line = 0;
-    int buf_col = 0;
-
-    auto flush_buffer = [&]() {
-        if (!buffer.empty()) {
-            path.segments.push_back(PathLiteral{
-                .value = std::move(buffer), .line = buf_line, .column = buf_col});
-            buffer.clear();
+    auto consume_segment = [&]() -> bool {
+        if (check(TokenType::STRING_LITERAL)) {
+            Token tok = advance();
+            push_quoted_path_segments(tok.value, tok.line, tok.column, path.segments);
+            return true;
         }
-    };
-
-    auto start_buffer = [&](int line, int col) {
-        if (buffer.empty()) {
-            buf_line = line;
-            buf_col = col;
-        }
-    };
-
-    while (true) {
         if (check(TokenType::IDENTIFIER)) {
             Token tok = advance();
-            if (aliases_.contains(tok.value)) {
-                flush_buffer();
-                path.segments.push_back(
-                    PathVar{.name = tok.value, .line = tok.line, .column = tok.column});
-            } else {
-                start_buffer(tok.line, tok.column);
-                buffer += tok.value;
-            }
-        } else if (check(TokenType::SLASH)) {
-            start_buffer(current_.line, current_.column);
-            buffer += '/';
-            advance();
-        } else if (check(TokenType::DOT)) {
-            start_buffer(current_.line, current_.column);
-            buffer += '.';
-            advance();
-        } else if (check(TokenType::INTEGER_LITERAL)) {
-            Token tok = advance();
-            start_buffer(tok.line, tok.column);
-            buffer += tok.value;
-        } else if (check(TokenType::MINUS)) {
-            // Interior `-` is part of the path (e.g. `my-project`). Reject a
-            // leading `-` so `mkdir -foo` is not confused with subtraction.
-            if (buffer.empty() && path.segments.empty()) {
-                break;
-            }
-            start_buffer(current_.line, current_.column);
-            buffer += '-';
-            advance();
-        } else if (check(TokenType::LBRACE)) {
-            int line = current_.line;
-            int col = current_.column;
-            advance();
-            flush_buffer();
-            auto expr = parseExpression();
-            expect(TokenType::RBRACE, "expected '}' to close path interpolation");
-            path.segments.push_back(PathInterp{
-                .expression = std::move(expr), .line = line, .column = col});
-        } else {
-            break;
+            path.segments.push_back(
+                PathVar{.name = tok.value, .line = tok.line, .column = tok.column});
+            return true;
         }
+        return false;
+    };
+
+    if (check(TokenType::LBRACE)) {
+        throw ParseError(
+            "'{...}' interpolation is only allowed inside quoted path strings",
+            current_.line, current_.column);
     }
 
-    flush_buffer();
+    if (!consume_segment()) {
+        throw ParseError("expected path expression", current_.line, current_.column);
+    }
+
+    while (check(TokenType::SLASH)) {
+        advance();
+        if (!consume_segment()) {
+            throw ParseError("expected path segment after '/'", current_.line,
+                             current_.column);
+        }
+    }
 
     if (path.segments.empty()) {
         throw ParseError("expected path expression", current_.line, current_.column);
@@ -379,7 +378,6 @@ StmtPtr Parser::parseMkdir() {
     if (match(TokenType::AS)) {
         Token alias_tok = expect(TokenType::IDENTIFIER, "expected alias name after 'as'");
         alias = alias_tok.value;
-        aliases_.insert(*alias);
     }
 
     expect_newline("mkdir statement");
@@ -424,7 +422,6 @@ StmtPtr Parser::parseFile() {
     if (match(TokenType::AS)) {
         Token alias_tok = expect(TokenType::IDENTIFIER, "expected alias name after 'as'");
         alias = alias_tok.value;
-        aliases_.insert(*alias);
     }
 
     expect_newline("file statement");

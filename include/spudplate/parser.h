@@ -3,7 +3,7 @@
 
 #include <stdexcept>
 #include <string>
-#include <unordered_set>
+#include <vector>
 
 #include "spudplate/ast.h"
 #include "spudplate/lexer.h"
@@ -79,7 +79,6 @@ class Parser {
   private:
     Lexer lexer_;
     Token current_;
-    std::unordered_set<std::string> aliases_;  ///< Names bound by `as <name>` in prior statements.
 
     // Token consumption
     Token advance();
@@ -93,6 +92,8 @@ class Parser {
     std::optional<ExprPtr> parse_when_clause();
     std::optional<int> parse_mode_clause();
     PathExpr parse_path_expr();
+    void push_quoted_path_segments(const std::string& raw, int line, int column,
+                                   std::vector<PathSegment>& out);
     ExprPtr parse_literal();
     /**
      * Build the AST node for a string literal token. If the raw value
