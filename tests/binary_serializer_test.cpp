@@ -491,6 +491,64 @@ TEST(BinarySerializer, RejectsDeeplyNestedExpressions) {
                  BinaryDeserializeError);
 }
 
+TEST(BinarySerializer, RoundTripIfBlock) {
+    std::vector<StmtPtr> body;
+    PathExpr path;
+    path.segments.emplace_back(
+        PathLiteral{.value = "x", .line = 2, .column = 9});
+    path.line = 2;
+    path.column = 9;
+    body.push_back(make_stmt(MkdirStmt{.path = std::move(path),
+                                       .alias = std::nullopt,
+                                       .mkdir_p = true,
+                                       .from_source = std::nullopt,
+                                       .verbatim = false,
+                                       .mode = std::nullopt,
+                                       .when_clause = std::nullopt,
+                                       .line = 2,
+                                       .column = 1}));
+
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(IfStmt{.condition = ident("use_x"),
+                                     .body = std::move(body),
+                                     .line = 1,
+                                     .column = 1}));
+    expect_round_trip(program_with(std::move(stmts)));
+}
+
+TEST(BinarySerializer, RoundTripIfNestedInsideRepeat) {
+    std::vector<StmtPtr> if_body;
+    PathExpr path;
+    path.segments.emplace_back(
+        PathLiteral{.value = "leaf", .line = 3, .column = 11});
+    path.line = 3;
+    path.column = 11;
+    if_body.push_back(make_stmt(MkdirStmt{.path = std::move(path),
+                                          .alias = std::nullopt,
+                                          .mkdir_p = true,
+                                          .from_source = std::nullopt,
+                                          .verbatim = false,
+                                          .mode = std::nullopt,
+                                          .when_clause = std::nullopt,
+                                          .line = 3,
+                                          .column = 1}));
+
+    std::vector<StmtPtr> repeat_body;
+    repeat_body.push_back(make_stmt(IfStmt{.condition = ident("use_x"),
+                                           .body = std::move(if_body),
+                                           .line = 2,
+                                           .column = 3}));
+
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(RepeatStmt{.collection_var = "n",
+                                         .iterator_var = "i",
+                                         .body = std::move(repeat_body),
+                                         .when_clause = std::nullopt,
+                                         .line = 1,
+                                         .column = 1}));
+    expect_round_trip(program_with(std::move(stmts)));
+}
+
 TEST(BinarySerializer, DeserializeErrorCarriesOffset) {
     // Single byte 0xFF: invalid as a varint (would need continuation), but
     // legal as a single 7-bit value of 127 - actually 0xFF has the high bit

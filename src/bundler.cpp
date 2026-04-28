@@ -133,6 +133,10 @@ class Bundler {
                     for (const auto& body : s.body) {
                         if (body) visit_stmt(*body);
                     }
+                } else if constexpr (std::is_same_v<T, IfStmt>) {
+                    for (const auto& body : s.body) {
+                        if (body) visit_stmt(*body);
+                    }
                 }
                 // AskStmt, LetStmt, AssignStmt, IncludeStmt, RunStmt carry
                 // no asset references and are intentionally skipped.

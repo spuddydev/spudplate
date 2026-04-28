@@ -532,6 +532,34 @@ StmtPtr Parser::parseRepeat() {
     return stmt;
 }
 
+StmtPtr Parser::parseIf() {
+    Token start = expect(TokenType::IF, "expected 'if'");
+    ExprPtr condition = parseExpression();
+    if (check(TokenType::WHEN)) {
+        throw ParseError(
+            "'if' does not take a 'when' clause; nest inside another 'if' if needed",
+            current_.line, current_.column);
+    }
+    expect_newline("if header");
+
+    std::vector<StmtPtr> body;
+    skip_newlines();
+    while (!check(TokenType::END) && !check(TokenType::EOF_TOKEN)) {
+        body.push_back(parseStatement());
+        skip_newlines();
+    }
+
+    expect(TokenType::END, "expected 'end' to close if block");
+    expect_newline("if block");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->data = IfStmt{.condition = std::move(condition),
+                        .body = std::move(body),
+                        .line = start.line,
+                        .column = start.column};
+    return stmt;
+}
+
 // Statement dispatch
 
 StmtPtr Parser::parseStatement() {
@@ -549,6 +577,9 @@ StmtPtr Parser::parseStatement() {
     }
     if (check(TokenType::REPEAT)) {
         return parseRepeat();
+    }
+    if (check(TokenType::IF)) {
+        return parseIf();
     }
     if (check(TokenType::COPY)) {
         return parseCopy();

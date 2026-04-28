@@ -594,6 +594,8 @@ void collect_run_previews(const std::vector<StmtPtr>& body,
                     out.push_back(std::move(line));
                 } else if constexpr (std::is_same_v<T, RepeatStmt>) {
                     collect_run_previews(s.body, out, /*inside_repeat=*/true);
+                } else if constexpr (std::is_same_v<T, IfStmt>) {
+                    collect_run_previews(s.body, out, inside_repeat);
                 }
             },
             stmt->data);
@@ -821,6 +823,8 @@ class Interpreter {
                         s.line, s.column);
                 } else if constexpr (std::is_same_v<T, RunStmt>) {
                     execute_run(s);
+                } else if constexpr (std::is_same_v<T, IfStmt>) {
+                    execute_if(s);
                 }
             },
             stmt.data);
@@ -899,6 +903,52 @@ class Interpreter {
             --repeat_depth_;
             env_.pop();
         }
+    }
+
+    void execute_if(const IfStmt& s) {
+        Value cond = evaluate_expr(*s.condition, env_);
+        if (!std::holds_alternative<bool>(cond)) {
+            throw RuntimeError("'if' condition must be bool", s.line, s.column);
+        }
+        if (!std::get<bool>(cond)) {
+            return;
+        }
+
+        // Snapshot aliases before the body so anything declared inside the
+        // block stays local. Mirrors `execute_repeat`'s alias handling without
+        // the iteration loop or `repeat_depth_` bump - prompt indent and the
+        // iteration counter stay unchanged for nested asks.
+        std::unordered_set<std::string> outer_aliases;
+        outer_aliases.reserve(alias_map_.size());
+        for (const auto& kv : alias_map_) {
+            outer_aliases.insert(kv.first);
+        }
+
+        env_.push();
+        try {
+            for (const auto& stmt : s.body) {
+                execute(*stmt);
+            }
+        } catch (...) {
+            for (auto it = alias_map_.begin(); it != alias_map_.end();) {
+                if (outer_aliases.find(it->first) == outer_aliases.end()) {
+                    it = alias_map_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            env_.pop();
+            throw;
+        }
+
+        for (auto it = alias_map_.begin(); it != alias_map_.end();) {
+            if (outer_aliases.find(it->first) == outer_aliases.end()) {
+                it = alias_map_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        env_.pop();
     }
 
     void execute_mkdir(const MkdirStmt& s) {

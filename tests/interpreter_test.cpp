@@ -2600,3 +2600,83 @@ TEST(SourceProvider, UnclosedBraceStillSurfacedOnTextWithHighBytes) {
         spudplate::run(p, prompter, /*skip_authorization=*/true, &provider),
         RuntimeError);
 }
+
+// --- if blocks ---
+
+TEST(IfTest, BodyExecutesWhenConditionTrue) {
+    TmpDir td;
+    auto p = parse(R"(ask use_x "Use X?" bool
+if use_x
+  mkdir "x"
+end
+)");
+    ScriptedPrompter prompter({"true"});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "x"));
+}
+
+TEST(IfTest, BodySkippedWhenConditionFalse) {
+    TmpDir td;
+    auto p = parse(R"(ask use_x "Use X?" bool
+if use_x
+  mkdir "x"
+end
+)");
+    ScriptedPrompter prompter({"false"});
+    run(p, prompter);
+    EXPECT_FALSE(std::filesystem::exists(td.path() / "x"));
+}
+
+TEST(IfTest, NonBoolConditionThrowsAtRuntime) {
+    auto p = parse(R"(ask n "Count?" int
+if n
+  mkdir "x"
+end
+)");
+    ScriptedPrompter prompter({"5"});
+    try {
+        run_for_tests(p, prompter);
+        FAIL() << "expected RuntimeError";
+    } catch (const RuntimeError& e) {
+        EXPECT_NE(std::string(e.what()).find("'if' condition must be bool"),
+                  std::string::npos);
+    }
+}
+
+TEST(IfTest, NestedIfInsideRepeat) {
+    TmpDir td;
+    auto p = parse(R"(ask n "Count?" int
+ask use_extra "Extra?" bool
+repeat n as i
+  if use_extra
+    mkdir m_{i}
+  end
+end
+)");
+    ScriptedPrompter prompter({"2", "true"});
+    run(p, prompter);
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "m_0"));
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "m_1"));
+}
+
+TEST(IfTest, FalseIfDoesNotPromptInnerAsk) {
+    auto p = parse(R"(ask use_x "Use X?" bool
+if use_x
+  ask name "Name?" string
+end
+)");
+    ScriptedPrompter prompter({"false"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_FALSE(env.lookup("name").has_value());
+}
+
+TEST(IfTest, LetInsideIfNotVisibleAfterEnd) {
+    auto p = parse(R"(ask use_x "Use X?" bool
+if use_x
+  let x = 1
+end
+)");
+    ScriptedPrompter prompter({"true"});
+    Environment env = run_for_tests(p, prompter);
+    EXPECT_FALSE(env.lookup("x").has_value());
+}

@@ -328,9 +328,34 @@ struct IncludeStmt {
     int column;  ///< 1-based source column where this node begins.
 };
 
+/**
+ * @brief An `if` statement - executes its body when the condition is true.
+ *
+ * Example:
+ * @code
+ * if use_tests
+ *     mkdir "tests"
+ *     file "tests/README.md" content "# Tests"
+ * end
+ * @endcode
+ *
+ * Mirrors `repeat` structurally: a condition expression, a body, and an `end`
+ * terminator. There is no `else` or `else if`; gating gating composes via
+ * nested `if` blocks. `let` and `as` declared inside the body are local; the
+ * usual no-shadowing rule applies. Inner statements may carry their own `when`
+ * clause; an `if` block does NOT itself accept a `when` clause.
+ */
+struct IfStmt {
+    ExprPtr condition;            ///< Expression that must evaluate to bool true to enter the body.
+    std::vector<StmtPtr> body;    ///< Statements inside the conditional block.
+    int line;    ///< 1-based source line where this node begins.
+    int column;  ///< 1-based source column where this node begins.
+};
+
 /** @brief Discriminated union of all statement node types. */
 using StmtData = std::variant<AskStmt, LetStmt, AssignStmt, MkdirStmt, FileStmt,
-                              RepeatStmt, CopyStmt, IncludeStmt, RunStmt>;
+                              RepeatStmt, CopyStmt, IncludeStmt, RunStmt,
+                              IfStmt>;
 
 /** @brief A statement node wrapping a StmtData variant. */
 struct Stmt {

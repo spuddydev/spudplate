@@ -213,6 +213,60 @@ TEST(ValidatorTest, DefaultExprReferencingPriorBindingPasses) {
     EXPECT_NO_THROW(validate(program));
 }
 
+// --- if block ---
+
+TEST(ValidatorTest, IfBlockBodyValidates) {
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "if use_x\n"
+        "  mkdir \"x\"\n"
+        "end\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, IfShadowingOuterIsError) {
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "let x = 1\n"
+        "if use_x\n"
+        "  let x = 2\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, LetInsideIfNotVisibleOutside) {
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "if use_x\n"
+        "  let x = 1\n"
+        "end\n"
+        "let y = x\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AskInsideIfWithoutDefaultPasses) {
+    // The if block gates the ask structurally; without an inner when_clause
+    // the rule from #59 does not fire.
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "if use_x\n"
+        "  ask name \"Name?\" string\n"
+        "end\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AskInsideIfWithInnerWhenStillRequiresDefault) {
+    // The inner when can be false while the outer if is true, so the bug
+    // shape from #59 still applies. Section A's rule must still fire.
+    auto program = parse(
+        "ask use_x \"Use X?\" bool\n"
+        "ask use_y \"Use Y?\" bool\n"
+        "if use_x\n"
+        "  ask name \"Name?\" string when use_y\n"
+        "end\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
 // --- Scope stack tests ---
 
 TEST(ValidatorTest, LetInsideRepeatReferencedOutsideIsError) {

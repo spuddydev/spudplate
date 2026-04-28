@@ -21,7 +21,7 @@ constexpr std::size_t kVarintMaxBytes = 10;
 // existing arms is not caught by arity alone; the round-trip tests are
 // the second line of defence there.
 static_assert(std::variant_size_v<ExprData> == 8);
-static_assert(std::variant_size_v<StmtData> == 9);
+static_assert(std::variant_size_v<StmtData> == 10);
 static_assert(std::variant_size_v<PathSegment> == 3);
 static_assert(std::variant_size_v<FileSource> == 2);
 
@@ -629,11 +629,17 @@ void encode_stmt(Writer& w, const Stmt& s) {
             } else if constexpr (std::is_same_v<T, IncludeStmt>) {
                 w.write_string(node.name);
                 encode_opt_expr(w, node.when_clause);
-            } else {
-                static_assert(std::is_same_v<T, RunStmt>);
+            } else if constexpr (std::is_same_v<T, RunStmt>) {
                 encode_expr(w, *node.command);
                 encode_opt_path_expr(w, node.cwd);
                 encode_opt_expr(w, node.when_clause);
+            } else {
+                static_assert(std::is_same_v<T, IfStmt>);
+                encode_expr(w, *node.condition);
+                w.write_varint(node.body.size());
+                for (const auto& sp : node.body) {
+                    encode_stmt(w, *sp);
+                }
             }
             w.write_zigzag(node.line);
             w.write_zigzag(node.column);
@@ -781,6 +787,21 @@ StmtPtr decode_stmt(Reader& r) {
                                 .when_clause = std::move(when_clause),
                                 .line = line,
                                 .column = column});
+        }
+        case StmtTag::If: {
+            ExprPtr condition = decode_expr(r);
+            const std::size_t body_size = r.read_varint();
+            std::vector<StmtPtr> body;
+            body.reserve(body_size);
+            for (std::size_t i = 0; i < body_size; ++i) {
+                body.push_back(decode_stmt(r));
+            }
+            const int line = static_cast<int>(r.read_zigzag());
+            const int column = static_cast<int>(r.read_zigzag());
+            return wrap(IfStmt{.condition = std::move(condition),
+                               .body = std::move(body),
+                               .line = line,
+                               .column = column});
         }
     }
     throw BinaryDeserializeError("invalid Stmt tag", at);
