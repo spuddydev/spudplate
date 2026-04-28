@@ -9,6 +9,7 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"mkdir", TokenType::MKDIR},       {"file", TokenType::FILE},
     {"from", TokenType::FROM},         {"content", TokenType::CONTENT},
     {"when", TokenType::WHEN},         {"repeat", TokenType::REPEAT},
+    {"if", TokenType::IF},
     {"end", TokenType::END},           {"verbatim", TokenType::VERBATIM},
     {"append", TokenType::APPEND},
     {"mode", TokenType::MODE},         {"as", TokenType::AS},
