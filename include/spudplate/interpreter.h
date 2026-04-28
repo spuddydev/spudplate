@@ -289,7 +289,8 @@ class AssetMapSourceProvider final : public SourceProvider {
  */
 void run(const Program& program, Prompter& prompter,
          bool skip_authorization = false,
-         const SourceProvider* source = nullptr);
+         const SourceProvider* source = nullptr,
+         bool timeouts_disabled = false);
 
 /**
  * @brief Test-only entry point: like `run`, but returns the final environment.

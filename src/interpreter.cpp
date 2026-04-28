@@ -798,6 +798,7 @@ class Interpreter {
         : prompter_(prompter), source_(source) {}
 
     void set_ask_total(int total) { ask_total_ = total; }
+    void set_timeouts_disabled(bool b) { timeouts_disabled_ = b; }
 
     void execute(const Stmt& stmt) {
         std::visit(
@@ -1205,6 +1206,16 @@ class Interpreter {
                                    op.line, op.column);
             }
             scope.active = true;
+        }
+
+        // Status banner on stderr so a long-running command does not look
+        // frozen and the line does not interleave with the child's stdout
+        // (which a CI capturing pipe is likely watching).
+        if (op.timeout_seconds.has_value()) {
+            std::cerr << "running '" << op.command << "' (timeout "
+                      << *op.timeout_seconds << "s)\n";
+        } else {
+            std::cerr << "running '" << op.command << "' (no timeout)\n";
         }
 
         pid_t child = ::fork();
@@ -1638,7 +1649,7 @@ std::string value_to_string(const Value& value) {
 }
 
 void run(const Program& program, Prompter& prompter, bool skip_authorization,
-         const SourceProvider* source) {
+         const SourceProvider* source, bool timeouts_disabled) {
     if (!skip_authorization) {
         std::string summary = build_authorize_summary(program);
         if (!summary.empty() && !prompter.authorize(summary)) {
@@ -1647,6 +1658,7 @@ void run(const Program& program, Prompter& prompter, bool skip_authorization,
     }
     Interpreter interp(prompter,
                        source != nullptr ? *source : default_source_provider());
+    interp.set_timeouts_disabled(timeouts_disabled);
     run_program(program, interp);
 }
 
