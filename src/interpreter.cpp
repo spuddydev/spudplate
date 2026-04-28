@@ -620,7 +620,9 @@ std::string build_authorize_summary(const Program& program) {
 }
 
 void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
-                 int question_index, int question_total, int indent_level) {
+                 int question_index, int question_total, int indent_level,
+                 const std::vector<std::pair<std::int64_t, std::int64_t>>&
+                     iterations) {
     if (!when_passes(stmt.when_clause, env)) {
         if (!stmt.default_value.has_value()) {
             throw RuntimeError(
@@ -655,6 +657,7 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
         .question_index = question_index,
         .question_total = question_total,
         .indent_level = indent_level,
+        .iterations = iterations,
     };
 
     while (true) {
@@ -785,11 +788,19 @@ class Interpreter {
             [&](const auto& s) {
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (std::is_same_v<T, AskStmt>) {
-                    bool show_counter = ask_total_ > 0 && repeat_depth_ == 0;
-                    int index = show_counter ? ++ask_index_ : 0;
-                    int total = show_counter ? ask_total_ : 0;
+                    // ask_index_ counts top-level (static) prompts only - the
+                    // same static `ask` repeated in a `repeat` body should not
+                    // bump the counter past `ask_total_`. Inside a repeat the
+                    // already-incremented index is reused so the renderer can
+                    // still show "(N/M)" as a positional anchor alongside any
+                    // iteration counter the prompter assembles.
+                    if (ask_total_ > 0 && repeat_depth_ == 0) {
+                        ++ask_index_;
+                    }
+                    int index = ask_total_ > 0 ? ask_index_ : 0;
+                    int total = ask_total_;
                     execute_ask(s, env_, prompter_, index, total,
-                                repeat_depth_);
+                                repeat_depth_, repeat_iters_);
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
