@@ -328,6 +328,9 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                 if (s.cwd.has_value()) {
                     walk_path(*s.cwd, scope, ctx, s.when_clause);
                 }
+                if (s.timeout.has_value()) {
+                    walk_expr(**s.timeout, scope);
+                }
                 walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, RepeatStmt>) {
                 check_reference(s.collection_var, s.line, s.column, scope);
