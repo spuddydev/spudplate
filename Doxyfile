@@ -5,8 +5,8 @@ PROJECT_NUMBER         =
 OUTPUT_DIRECTORY       = docs
 CREATE_SUBDIRS         = NO
 
-INPUT                  = include src docs/syntax.md
-USE_MDFILE_AS_MAINPAGE = docs/syntax.md
+INPUT                  = include src docs/index.md docs/getting-started.md docs/syntax.md docs/cli.md docs/spudpack-format.md
+USE_MDFILE_AS_MAINPAGE = docs/index.md
 FILE_PATTERNS          = *.h *.cpp
 RECURSIVE              = YES
 
@@ -25,6 +25,7 @@ DISABLE_INDEX          = NO
 FULL_SIDEBAR           = NO
 HTML_COLORSTYLE        = LIGHT
 HTML_EXTRA_STYLESHEET  = $(DOXYGEN_AWESOME_CSS_DIR)/doxygen-awesome.css
+HTML_FOOTER            = docs/footer.html
 
 GENERATE_LATEX         = NO
 
