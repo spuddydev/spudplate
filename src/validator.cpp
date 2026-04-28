@@ -345,6 +345,43 @@ void check_when_requires_default(const AskStmt& s, const AliasCtx& /*ctx*/) {
     }
 }
 
+// If the default expression has a statically inferable type, it must match
+// the declared ask type. Catches accidents like `ask use_x bool default "yes"`
+// at validate time so the runtime never sees the mismatch.
+void check_default_type(const AskStmt& s, const AliasCtx& ctx) {
+    if (!s.default_value.has_value()) {
+        return;
+    }
+    auto inferred = infer_expr_type(**s.default_value, ctx.type_map);
+    if (!inferred.has_value() || *inferred == s.var_type) {
+        return;
+    }
+    throw SemanticError(std::string("ask '") + s.name +
+                            "' default value must be " +
+                            var_type_name(s.var_type) + ", got " +
+                            var_type_name(*inferred),
+                        s.line, s.column);
+}
+
+// When `options` is set, the default must match one of the option values.
+// Compared structurally via `exprs_equal`, which folds line/column. Skips
+// the check when either side is an arbitrary expression rather than a
+// literal we can compare; runtime still relies on the value matching.
+void check_default_in_options(const AskStmt& s) {
+    if (!s.default_value.has_value() || s.options.empty()) {
+        return;
+    }
+    const Expr& def = **s.default_value;
+    for (const auto& opt : s.options) {
+        if (exprs_equal(def, *opt)) {
+            return;
+        }
+    }
+    throw SemanticError(std::string("ask '") + s.name +
+                            "' default value must be one of the listed options",
+                        s.line, s.column);
+}
+
 // Called by mkdir/file to record an alias binding in the registry if the
 // binding is outside any repeat body.
 void register_alias_binding(const std::string& name,
@@ -372,6 +409,8 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                 for (const auto& opt : s.options) {
                     walk_expr(*opt, scope);
                 }
+                check_default_type(s, ctx);
+                check_default_in_options(s);
                 walk_optional_expr(s.when_clause, scope);
                 check_shadowing(s.name, s.line, s.column, scope);
                 scope.declare(s.name);

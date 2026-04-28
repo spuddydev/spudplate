@@ -737,6 +737,90 @@ TEST(ValidatorTest, TemplateInWhenInRunIsWalked) {
     EXPECT_THROW(validate(program), spudplate::SemanticError);
 }
 
+// --- Ask default safety ---
+
+TEST(ValidatorTest, AskDefaultStringIdentForBoolRejected) {
+    // The parser already rejects mismatched literals; the validator catches
+    // mismatches expressible only through identifier references and other
+    // non-literal expressions whose type can be inferred.
+    auto program = parse(
+        "ask base \"Base?\" string\n"
+        "ask use_x \"Use X?\" bool default base\n");
+    try {
+        validate(program);
+        FAIL() << "expected SemanticError";
+    } catch (const SemanticError& e) {
+        EXPECT_NE(std::string(e.what()).find("must be bool"), std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("got string"), std::string::npos);
+    }
+}
+
+TEST(ValidatorTest, AskDefaultIntIdentForStringRejected) {
+    auto program = parse(
+        "let n = 42\n"
+        "ask name \"Name?\" string default n\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AskDefaultBoolIdentForIntRejected) {
+    auto program = parse(
+        "ask flag \"Flag?\" bool\n"
+        "ask n \"Count?\" int default flag\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, AskDefaultMatchingTypePasses) {
+    auto program = parse(
+        "ask use_x \"Use X?\" bool default true\n"
+        "ask name \"Name?\" string default \"\"\n"
+        "ask n \"Count?\" int default 0\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AskDefaultLiteralMismatchCaughtAtParse) {
+    // The parser owns the literal-type check; the validator should not need
+    // to re-raise it. Just confirm parse rejects.
+    EXPECT_THROW(parse("ask use_x \"Use X?\" bool default \"yes\"\n"),
+                 spudplate::ParseError);
+}
+
+TEST(ValidatorTest, AskDefaultIdentReferenceMatchesTypePasses) {
+    // String ask referencing a string-typed prior ask passes.
+    auto program = parse(
+        "ask base \"Base?\" string\n"
+        "ask label \"Label?\" string default base\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AskDefaultNotInOptionsRejected) {
+    auto program = parse(
+        "ask format \"Format?\" string options \"pdf\" \"html\" default \"latex\"\n");
+    try {
+        validate(program);
+        FAIL() << "expected SemanticError";
+    } catch (const SemanticError& e) {
+        EXPECT_NE(std::string(e.what()).find("must be one of the listed options"),
+                  std::string::npos);
+    }
+}
+
+TEST(ValidatorTest, AskDefaultMatchingOptionPasses) {
+    auto program = parse(
+        "ask format \"Format?\" string options \"pdf\" \"html\" default \"pdf\"\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AskDefaultMatchingIntOptionPasses) {
+    auto program = parse(
+        "ask year \"Year?\" int options 2024 2025 2026 default 2025\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, AskDefaultWithoutOptionsPasses) {
+    auto program = parse("ask name \"Name?\" string default \"anon\"\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
 // --- Path identifier resolution ---
 
 TEST(ValidatorTest, UnresolvedPathIdentifierRejected) {
