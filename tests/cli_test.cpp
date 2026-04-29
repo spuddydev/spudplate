@@ -76,9 +76,7 @@ class ScopedEnv {
     void set(const std::string& value) {
         ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
     }
-    void unset() {
-        ::unsetenv(name_.c_str());
-    }
+    void unset() { ::unsetenv(name_.c_str()); }
 
   private:
     std::string name_;
@@ -195,7 +193,8 @@ TEST(CliTest, NoArgumentsExitsOne) {
 TEST(CliTest, DryRunPrintsTreeAndDoesNotWrite) {
     TmpDir td;
     auto file = td.path() / "ok.spud";
-    write_file(file, "mkdir \"my_project\"\nfile \"my_project/README.md\" content \"hi\"\n");
+    write_file(file,
+               "mkdir \"my_project\"\nfile \"my_project/README.md\" content \"hi\"\n");
     Argv args({"spudplate", "run", "--dry-run", file.string()});
     std::stringstream out;
     std::stringstream err;
@@ -243,8 +242,7 @@ TEST(CliTest, RunWithNoTimeoutDisablesTimeouts) {
     TmpDir td;
     auto file = td.path() / "ok.spud";
     write_file(file, "run \"sleep 0\" timeout 1\n");
-    Argv args(
-        {"spudplate", "run", "--yes", "--no-timeout", file.string()});
+    Argv args({"spudplate", "run", "--yes", "--no-timeout", file.string()});
     std::stringstream out;
     std::stringstream err;
     ScriptedPrompter prompter({});
@@ -389,8 +387,7 @@ TEST(CliTest, InstallUsesXdgDataHomeWhenNoSpudplateHome) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0) << err.str();
-    EXPECT_TRUE(std::filesystem::is_regular_file(
-        xdg_root / "spudplate" / "demo.spp"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(xdg_root / "spudplate" / "demo.spp"));
 }
 
 TEST(CliTest, InstallMissingFileExitsFive) {
@@ -678,10 +675,8 @@ TEST(CliTest, InstallProducesValidSpudpack) {
     std::stringstream out;
     std::stringstream err;
     ScriptedPrompter prompter({});
-    ASSERT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
-        << err.str();
-    spudplate::Spudpack pack =
-        spudplate::spudpack_read_file(home / "demo.spp");
+    ASSERT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0) << err.str();
+    spudplate::Spudpack pack = spudplate::spudpack_read_file(home / "demo.spp");
     EXPECT_EQ(pack.source, "mkdir \"foo\"\n");
     EXPECT_FALSE(pack.program_bytes.empty());
 }
@@ -699,8 +694,7 @@ TEST(CliTest, InstallRejectsSpudpackInputBeforeFileRead) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_NE(code, 0);
-    EXPECT_NE(err.str().find("installing pre-built spudpacks"),
-              std::string::npos);
+    EXPECT_NE(err.str().find("installing pre-built spudpacks"), std::string::npos);
 }
 
 TEST(CliTest, ValidateRejectsSpudpackInput) {
@@ -711,8 +705,7 @@ TEST(CliTest, ValidateRejectsSpudpackInput) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_NE(code, 0);
-    EXPECT_NE(err.str().find("installing pre-built spudpacks"),
-              std::string::npos);
+    EXPECT_NE(err.str().find("installing pre-built spudpacks"), std::string::npos);
 }
 
 TEST(CliTest, RunByNameOnLegacyOnlyAsksForReinstall) {
@@ -788,8 +781,7 @@ TEST(CliTest, InstallYesRemovesLegacyDirectory) {
     std::stringstream out;
     std::stringstream err;
     ScriptedPrompter prompter({});
-    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
-        << err.str();
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0) << err.str();
     EXPECT_FALSE(std::filesystem::exists(home / "demo"));
     EXPECT_TRUE(std::filesystem::is_regular_file(home / "demo.spp"));
 }
@@ -826,15 +818,12 @@ TEST(CliTest, InstallRenameFailureCleansUpTempFile) {
         RenameGuard() {
             prev = spudplate::cli_internal::install_rename_fn();
             spudplate::cli_internal::install_rename_fn() =
-                [](const std::filesystem::path&,
-                   const std::filesystem::path&) {
-                    throw std::filesystem::filesystem_error(
-                        "stub failure", std::error_code{});
+                [](const std::filesystem::path&, const std::filesystem::path&) {
+                    throw std::filesystem::filesystem_error("stub failure",
+                                                            std::error_code{});
                 };
         }
-        ~RenameGuard() {
-            spudplate::cli_internal::install_rename_fn() = prev;
-        }
+        ~RenameGuard() { spudplate::cli_internal::install_rename_fn() = prev; }
     } guard;
 
     Argv args({"spudplate", "install", "--yes", src.string()});
@@ -866,8 +855,7 @@ TEST(CliTest, InspectPrintsSourceFromSpudpack) {
     std::stringstream out;
     std::stringstream err;
     ScriptedPrompter prompter({});
-    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
-        << err.str();
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0) << err.str();
     EXPECT_EQ(out.str(), body);
 }
 
@@ -907,8 +895,7 @@ TEST(CliTest, InstallRunDeleteSourceMaterialisesAssets) {
     std::stringstream out;
     std::stringstream err;
     ScriptedPrompter prompter({});
-    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
-        << err.str();
+    EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0) << err.str();
 
     auto materialised = run_td.path() / "out" / "assets" / "logo.bin";
     ASSERT_TRUE(std::filesystem::is_regular_file(materialised));
@@ -941,4 +928,135 @@ TEST(CliTest, ListWarnsAboutShadowedLegacy) {
     EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0);
     EXPECT_EQ(out.str(), "demo\n");
     EXPECT_NE(err.str().find("shadowed"), std::string::npos);
+}
+
+TEST(CliTest, TopLevelLongHelpPrintsUsageToStdout) {
+    Argv args({"spudplate", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("usage: spudplate"), std::string::npos);
+    EXPECT_NE(out.str().find("--help"), std::string::npos);
+}
+
+TEST(CliTest, TopLevelShortHelpPrintsUsageToStdout) {
+    Argv args({"spudplate", "-h"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("usage: spudplate"), std::string::npos);
+}
+
+TEST(CliTest, TopLevelHelpWordPrintsUsageToStdout) {
+    Argv args({"spudplate", "help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("usage: spudplate"), std::string::npos);
+}
+
+TEST(CliTest, RunHelpDescribesRunFlags) {
+    Argv args({"spudplate", "run", "-h"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("usage: spudplate run"), std::string::npos);
+    EXPECT_NE(out.str().find("--dry-run"), std::string::npos);
+    EXPECT_NE(out.str().find("--no-timeout"), std::string::npos);
+}
+
+TEST(CliTest, RunLongHelpDescribesRunFlags) {
+    Argv args({"spudplate", "run", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate run"), std::string::npos);
+}
+
+TEST(CliTest, InstallHelpDescribesYesFlag) {
+    Argv args({"spudplate", "install", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate install"), std::string::npos);
+    EXPECT_NE(out.str().find("--yes"), std::string::npos);
+}
+
+TEST(CliTest, ValidateHelpPrintsToStdout) {
+    Argv args({"spudplate", "validate", "-h"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate validate"), std::string::npos);
+}
+
+TEST(CliTest, ListHelpPrintsToStdout) {
+    Argv args({"spudplate", "list", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate list"), std::string::npos);
+}
+
+TEST(CliTest, InspectHelpPrintsToStdout) {
+    Argv args({"spudplate", "inspect", "-h"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate inspect"), std::string::npos);
+}
+
+TEST(CliTest, UninstallHelpPrintsToStdout) {
+    Argv args({"spudplate", "uninstall", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate uninstall"), std::string::npos);
+}
+
+TEST(CliTest, VersionHelpPrintsToStdoutWithoutVersion) {
+    Argv args({"spudplate", "version", "-h"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate version"), std::string::npos);
+    EXPECT_NE(out.str().find("Print the spudplate version"), std::string::npos);
+}
+
+TEST(CliTest, UpdateHelpDoesNotRunUpdate) {
+    Argv args({"spudplate", "update", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate update"), std::string::npos);
+    // The "current version" line is only printed by the real update path.
+    EXPECT_EQ(out.str().find("current version"), std::string::npos);
 }
