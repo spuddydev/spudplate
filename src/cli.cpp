@@ -39,10 +39,11 @@ RenameFn& install_rename_fn() {
 
 namespace {
 
-void print_usage(std::ostream& err) {
-    err << "usage: spudplate <command> [args...]\n"
+void print_usage(std::ostream& out) {
+    out << "usage: spudplate <command> [args...]\n"
         << "  install [--yes] <file.spud>     validate and store a template;\n"
-        << "                                  prompts before overwriting an existing one\n"
+        << "                                  prompts before overwriting an existing "
+           "one\n"
         << "  run [--dry-run] [--yes] [--no-timeout] <name|file.spud>\n"
         << "                                  run an installed template by name,\n"
         << "                                  or run a .spud file directly;\n"
@@ -52,7 +53,81 @@ void print_usage(std::ostream& err) {
         << "  inspect <name>                  print the source of an installed template\n"
         << "  uninstall <name>                remove an installed template\n"
         << "  version                         print the spudplate version\n"
-        << "  update [--yes]                  fetch and install the latest spudplate release\n";
+        << "  update [--yes]                  fetch and install the latest spudplate "
+           "release\n"
+        << "\n"
+        << "Run 'spudplate <command> --help' for help on a specific command.\n"
+        << "Use --help or -h at any level to see this guidance.\n";
+}
+
+bool is_help_flag(std::string_view arg) {
+    return arg == "--help" || arg == "-h";
+}
+
+void print_help_install(std::ostream& out) {
+    out << "usage: spudplate install [--yes] <file.spud>\n"
+        << "\n"
+        << "Validate a .spud template and store it under the install root\n"
+        << "as <name>.spp. Prompts before overwriting an existing template.\n"
+        << "\n"
+        << "Options:\n"
+        << "  --yes, -y       skip the overwrite confirmation\n";
+}
+
+void print_help_run(std::ostream& out) {
+    out << "usage: spudplate run [--dry-run] [--yes] [--no-timeout] "
+           "<name|file.spud|file.spp>\n"
+        << "\n"
+        << "Run an installed template by name, or run a .spud or .spp file\n"
+        << "directly. The argument is treated as a path when it contains a\n"
+        << "slash or ends with .spud or .spp; otherwise it is looked up under\n"
+        << "the install root.\n"
+        << "\n"
+        << "Options:\n"
+        << "  --dry-run       print the file tree the run would create,\n"
+        << "                  without touching the filesystem\n"
+        << "  --yes, -y       skip the authorisation prompt for run statements\n"
+        << "  --no-timeout    disable per-statement timeouts\n";
+}
+
+void print_help_validate(std::ostream& out) {
+    out << "usage: spudplate validate <file.spud>\n"
+        << "\n"
+        << "Parse and validate a .spud template without bundling or\n"
+        << "installing. Prints 'ok' on success.\n";
+}
+
+void print_help_list(std::ostream& out) {
+    out << "usage: spudplate list\n"
+        << "\n"
+        << "List installed templates by name, one per line.\n";
+}
+
+void print_help_inspect(std::ostream& out) {
+    out << "usage: spudplate inspect <name>\n"
+        << "\n"
+        << "Print the original .spud source of an installed template.\n";
+}
+
+void print_help_uninstall(std::ostream& out) {
+    out << "usage: spudplate uninstall <name>\n"
+        << "\n"
+        << "Remove an installed template from the install root.\n";
+}
+
+void print_help_version(std::ostream& out) {
+    out << "usage: spudplate version\n"
+        << "\n"
+        << "Print the spudplate version and exit.\n";
+}
+
+void print_help_update(std::ostream& out) {
+    out << "usage: spudplate update [--yes]\n"
+        << "\n"
+        << "Fetch and install the latest spudplate release.\n"
+        << "\n"
+        << "Options:\n"
+        << "  --yes, -y       skip the confirmation prompt\n";
 }
 
 // Resolve the directory templates are installed into. Honours, in order:
@@ -95,10 +170,10 @@ bool ends_with_spud(const std::filesystem::path& p) {
     return p.extension() == ".spud";
 }
 
-void print_error(std::ostream& err, const std::string& file, const char* kind,
-                 int line, int column, const char* message) {
-    err << file << ":" << line << ":" << column << ": " << kind << ": "
-        << message << "\n";
+void print_error(std::ostream& err, const std::string& file, const char* kind, int line,
+                 int column, const char* message) {
+    err << file << ":" << line << ":" << column << ": " << kind << ": " << message
+        << "\n";
 }
 
 // Resolve a `run` argument to an on-disk file path. If the argument
@@ -106,15 +181,14 @@ void print_error(std::ostream& err, const std::string& file, const char* kind,
 // installed template name and resolves to `<install_dir>/<name>.spp`.
 // Returns the empty path and writes a diagnostic to `err` if the install
 // dir cannot be located.
-std::filesystem::path resolve_template_arg(const std::string& arg,
-                                           std::ostream& err) {
+std::filesystem::path resolve_template_arg(const std::string& arg, std::ostream& err) {
     if (looks_like_path(arg)) {
         return arg;
     }
     auto dir = install_dir();
     if (dir.empty()) {
         err << "cannot determine install directory: set SPUDPLATE_HOME, "
-           "XDG_DATA_HOME, or HOME\n";
+               "XDG_DATA_HOME, or HOME\n";
         return {};
     }
     return dir / (arg + ".spp");
@@ -123,16 +197,14 @@ std::filesystem::path resolve_template_arg(const std::string& arg,
 // Diagnose the legacy directory-shaped install (pre-`.spp` layout) and
 // emit a stderr warning. Returns true iff a legacy directory was found
 // at `<install_dir>/<name>/template.spud`.
-bool legacy_install_exists(const std::filesystem::path& home,
-                           const std::string& name) {
+bool legacy_install_exists(const std::filesystem::path& home, const std::string& name) {
     return std::filesystem::is_regular_file(home / name / "template.spud");
 }
 
 // Parse and validate `source` so install rejects broken templates before
 // they are copied. Returns true on success; on failure writes a `<file>:`
 // diagnostic to `err` and sets `exit_code` to the appropriate error.
-bool validate_template_source(const std::string& source,
-                              const std::string& file_label,
+bool validate_template_source(const std::string& source, const std::string& file_label,
                               std::ostream& err, int& exit_code) {
     try {
         Lexer lexer(source);
@@ -140,13 +212,11 @@ bool validate_template_source(const std::string& source,
         Program program = parser.parse();
         validate(program);
     } catch (const ParseError& e) {
-        print_error(err, file_label, "parse error", e.line(), e.column(),
-                    e.what());
+        print_error(err, file_label, "parse error", e.line(), e.column(), e.what());
         exit_code = 2;
         return false;
     } catch (const SemanticError& e) {
-        print_error(err, file_label, "semantic error", e.line(), e.column(),
-                    e.what());
+        print_error(err, file_label, "semantic error", e.line(), e.column(), e.what());
         exit_code = 3;
         return false;
     }
@@ -175,6 +245,10 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
+        if (is_help_flag(arg)) {
+            print_help_install(out);
+            return 0;
+        }
         if (arg == "--yes" || arg == "-y") {
             skip_confirm = true;
             ++positional_start;
@@ -197,8 +271,7 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 
     std::ifstream in(source_path, std::ios::binary);
     if (!in) {
-        err << source_path.string() << ": cannot open: " << std::strerror(errno)
-            << "\n";
+        err << source_path.string() << ": cannot open: " << std::strerror(errno) << "\n";
         return 5;
     }
     std::stringstream buffer;
@@ -212,23 +285,22 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         program = parser.parse();
         validate(program);
     } catch (const ParseError& e) {
-        print_error(err, source_path.string(), "parse error", e.line(),
-                    e.column(), e.what());
+        print_error(err, source_path.string(), "parse error", e.line(), e.column(),
+                    e.what());
         return 2;
     } catch (const SemanticError& e) {
-        print_error(err, source_path.string(), "semantic error", e.line(),
-                    e.column(), e.what());
+        print_error(err, source_path.string(), "semantic error", e.line(), e.column(),
+                    e.what());
         return 3;
     }
 
     std::vector<SpudpackAsset> assets;
     try {
-        BundleResult bundled =
-            bundle_assets(program, source_path.parent_path());
+        BundleResult bundled = bundle_assets(program, source_path.parent_path());
         assets = std::move(bundled.assets);
     } catch (const BundleError& e) {
-        print_error(err, source_path.string(), "bundle error", e.line(),
-                    e.column(), e.what());
+        print_error(err, source_path.string(), "bundle error", e.line(), e.column(),
+                    e.what());
         return 3;
     }
 
@@ -243,7 +315,7 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::filesystem::path home = install_dir();
     if (home.empty()) {
         err << "cannot determine install directory: set SPUDPLATE_HOME, "
-           "XDG_DATA_HOME, or HOME\n";
+               "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
 
@@ -256,8 +328,8 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::error_code ec;
     std::filesystem::create_directories(home, ec);
     if (ec) {
-        err << home.string()
-            << ": cannot create install directory: " << ec.message() << "\n";
+        err << home.string() << ": cannot create install directory: " << ec.message()
+            << "\n";
         return 1;
     }
 
@@ -280,9 +352,8 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     bool spp_existed = std::filesystem::exists(final_path);
     bool legacy_existed = legacy_install_exists(home, name);
     if ((spp_existed || legacy_existed) && !skip_confirm) {
-        if (!confirm_yes_no(
-                out, "this will overwrite the existing '" + name +
-                         "' template. continue? [y/N] ")) {
+        if (!confirm_yes_no(out, "this will overwrite the existing '" + name +
+                                     "' template. continue? [y/N] ")) {
             out << "aborted\n";
             return 0;
         }
@@ -305,8 +376,7 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         cli_internal::install_rename_fn()(tmp_path, final_path);
     } catch (const std::exception& e) {
         std::filesystem::remove(tmp_path, ec);
-        err << final_path.string() << ": cannot finalise install: " << e.what()
-            << "\n";
+        err << final_path.string() << ": cannot finalise install: " << e.what() << "\n";
         return 1;
     }
 
@@ -315,8 +385,8 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         std::error_code rm_ec;
         std::filesystem::remove_all(home / name, rm_ec);
         if (rm_ec) {
-            err << "warning: install succeeded but could not remove legacy '"
-                << name << "': " << rm_ec.message() << "\n";
+            err << "warning: install succeeded but could not remove legacy '" << name
+                << "': " << rm_ec.message() << "\n";
         }
     }
 
@@ -335,6 +405,10 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
+        if (is_help_flag(arg)) {
+            print_help_update(out);
+            return 0;
+        }
         if (arg == "--yes" || arg == "-y") {
             skip_confirm = true;
             ++positional_start;
@@ -349,9 +423,9 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 
     out << "current version: v" << SPUDPLATE_VERSION_STRING << "\n";
     if (!skip_confirm) {
-        if (!confirm_yes_no(
-                out, "this will download and install the latest spudplate "
-                     "from github. continue? [y/N] ")) {
+        if (!confirm_yes_no(out,
+                            "this will download and install the latest spudplate "
+                            "from github. continue? [y/N] ")) {
             out << "aborted\n";
             return 0;
         }
@@ -360,13 +434,12 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     // The default command is the same one the README documents. Tests and
     // anyone with their own mirror can override it via the environment.
     const char* override_cmd = std::getenv("SPUDPLATE_UPDATE_COMMAND");
-    std::string cmd =
-        override_cmd != nullptr && *override_cmd != '\0'
-            ? std::string{override_cmd}
-            : std::string{
-                  "curl -fsSL "
-                  "https://raw.githubusercontent.com/spuddydev/spudplate/"
-                  "main/install.sh | sh"};
+    std::string cmd = override_cmd != nullptr && *override_cmd != '\0'
+                          ? std::string{override_cmd}
+                          : std::string{
+                                "curl -fsSL "
+                                "https://raw.githubusercontent.com/spuddydev/spudplate/"
+                                "main/install.sh | sh"};
     out << "running: " << cmd << "\n";
     int status = std::system(cmd.c_str());
     if (status != 0) {
@@ -378,6 +451,10 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 }
 
 int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc >= 3 && is_help_flag(argv[2])) {
+        print_help_validate(out);
+        return 0;
+    }
     if (argc - 2 != 1) {
         print_usage(err);
         return 1;
@@ -391,8 +468,7 @@ int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
     std::ifstream in(source_path);
     if (!in) {
-        err << source_path.string() << ": cannot open: " << std::strerror(errno)
-            << "\n";
+        err << source_path.string() << ": cannot open: " << std::strerror(errno) << "\n";
         return 5;
     }
     std::stringstream buffer;
@@ -400,8 +476,7 @@ int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::string source = buffer.str();
 
     int exit_code = 0;
-    if (!validate_template_source(source, source_path.string(), err,
-                                  exit_code)) {
+    if (!validate_template_source(source, source_path.string(), err, exit_code)) {
         return exit_code;
     }
     out << "ok\n";
@@ -409,6 +484,10 @@ int cmd_validate(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 }
 
 int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc >= 3 && is_help_flag(argv[2])) {
+        print_help_list(out);
+        return 0;
+    }
     if (argc != 2) {
         print_usage(err);
         return 1;
@@ -416,7 +495,7 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::filesystem::path home = install_dir();
     if (home.empty()) {
         err << "cannot determine install directory: set SPUDPLATE_HOME, "
-           "XDG_DATA_HOME, or HOME\n";
+               "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
     if (!std::filesystem::is_directory(home)) {
@@ -432,7 +511,8 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         }
     }
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
-        if (!entry.is_directory()) continue;
+        if (!entry.is_directory())
+            continue;
         std::string n = entry.path().filename().string();
         if (!std::filesystem::is_regular_file(entry.path() / "template.spud")) {
             continue;
@@ -450,17 +530,19 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         out << n << "\n";
     }
     for (const auto& n : shadowed_legacy) {
-        err << "warning: legacy install '" << n
-            << "' is shadowed by '" << n << ".spp'\n";
+        err << "warning: legacy install '" << n << "' is shadowed by '" << n << ".spp'\n";
     }
     for (const auto& n : only_legacy) {
-        err << "warning: legacy install '" << n
-            << "'; reinstall to upgrade\n";
+        err << "warning: legacy install '" << n << "'; reinstall to upgrade\n";
     }
     return 0;
 }
 
 int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc >= 3 && is_help_flag(argv[2])) {
+        print_help_inspect(out);
+        return 0;
+    }
     if (argc - 2 != 1) {
         print_usage(err);
         return 1;
@@ -473,7 +555,7 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::filesystem::path home = install_dir();
     if (home.empty()) {
         err << "cannot determine install directory: set SPUDPLATE_HOME, "
-           "XDG_DATA_HOME, or HOME\n";
+               "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
     std::filesystem::path spp_path = home / (name + ".spp");
@@ -493,8 +575,7 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
     try {
         Spudpack pack = spudpack_read_file(spp_path);
-        out.write(pack.source.data(),
-                  static_cast<std::streamsize>(pack.source.size()));
+        out.write(pack.source.data(), static_cast<std::streamsize>(pack.source.size()));
     } catch (const SpudpackError& e) {
         err << name << ": " << e.what() << "\n";
         return 1;
@@ -503,6 +584,10 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 }
 
 int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc >= 3 && is_help_flag(argv[2])) {
+        print_help_uninstall(out);
+        return 0;
+    }
     if (argc - 2 != 1) {
         print_usage(err);
         return 1;
@@ -515,7 +600,7 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
     std::filesystem::path home = install_dir();
     if (home.empty()) {
         err << "cannot determine install directory: set SPUDPLATE_HOME, "
-           "XDG_DATA_HOME, or HOME\n";
+               "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
     std::filesystem::path spp_path = home / (name + ".spp");
@@ -535,8 +620,7 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
         std::error_code rm_ec;
         std::filesystem::remove_all(legacy_dir, rm_ec);
         if (rm_ec) {
-            err << name << ": cannot remove legacy: " << rm_ec.message()
-                << "\n";
+            err << name << ": cannot remove legacy: " << rm_ec.message() << "\n";
             return 1;
         }
         removed_anything = true;
@@ -557,6 +641,10 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
+        if (is_help_flag(arg)) {
+            print_help_run(out);
+            return 0;
+        }
         if (arg == "--dry-run") {
             dry_run_mode = true;
             ++positional_start;
@@ -603,10 +691,8 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         }
         file_path = home / (raw_arg + ".spp");
 
-        if (!std::filesystem::exists(file_path) &&
-            legacy_install_exists(home, raw_arg)) {
-            err << "legacy install '" << raw_arg
-                << "'; reinstall to upgrade\n";
+        if (!std::filesystem::exists(file_path) && legacy_install_exists(home, raw_arg)) {
+            err << "legacy install '" << raw_arg << "'; reinstall to upgrade\n";
             return 1;
         }
         if (std::filesystem::exists(file_path) &&
@@ -637,21 +723,20 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             Parser parser(std::move(lexer));
             program = parser.parse();
         } catch (const ParseError& e) {
-            print_error(err, file_path.string(), "parse error", e.line(),
-                        e.column(), e.what());
+            print_error(err, file_path.string(), "parse error", e.line(), e.column(),
+                        e.what());
             return 2;
         }
     } else {
         if (!std::filesystem::exists(file_path)) {
-            err << file_path.string() << ": cannot open: "
-                << std::strerror(ENOENT) << "\n";
+            err << file_path.string() << ": cannot open: " << std::strerror(ENOENT)
+                << "\n";
             return 5;
         }
         try {
             pack = spudpack_read_file(file_path);
             program = deserialize_program(pack.program_bytes.data(),
-                                          pack.program_bytes.size(),
-                                          pack.version);
+                                          pack.program_bytes.size(), pack.version);
             have_pack = true;
         } catch (const SpudpackError& e) {
             err << file_path.string() << ": " << e.what() << "\n";
@@ -665,8 +750,8 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
     try {
         validate(program);
     } catch (const SemanticError& e) {
-        print_error(err, file_path.string(), "semantic error", e.line(),
-                    e.column(), e.what());
+        print_error(err, file_path.string(), "semantic error", e.line(), e.column(),
+                    e.what());
         return 3;
     }
 
@@ -679,15 +764,13 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
 
     try {
         if (dry_run_mode) {
-            dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8(),
-                    source_ptr);
+            dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8(), source_ptr);
         } else {
-            run(program, prompter, skip_authorization, source_ptr,
-                timeouts_disabled);
+            run(program, prompter, skip_authorization, source_ptr, timeouts_disabled);
         }
     } catch (const RuntimeError& e) {
-        print_error(err, file_path.string(), "runtime error", e.line(),
-                    e.column(), e.what());
+        print_error(err, file_path.string(), "runtime error", e.line(), e.column(),
+                    e.what());
         return 4;
     }
 
@@ -703,7 +786,15 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
         return 1;
     }
     std::string subcommand{argv[1]};
+    if (subcommand == "--help" || subcommand == "-h" || subcommand == "help") {
+        print_usage(out);
+        return 0;
+    }
     if (subcommand == "version" || subcommand == "--version") {
+        if (argc >= 3 && is_help_flag(argv[2])) {
+            print_help_version(out);
+            return 0;
+        }
         return cmd_version(out);
     }
     if (subcommand == "update") {
