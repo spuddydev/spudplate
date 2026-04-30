@@ -403,6 +403,17 @@ TEST(CliTest, InstallMissingFileExitsFive) {
     EXPECT_EQ(code, 5);
 }
 
+namespace {
+void install_template(const std::filesystem::path& src, const std::string& body) {
+    write_file(src, body);
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream o;
+    std::stringstream e;
+    ScriptedPrompter p({});
+    ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+}
+}  // namespace
+
 // --- run by installed name ---
 
 TEST(CliTest, RunByNameLooksUpInstalledTemplate) {
@@ -440,18 +451,68 @@ TEST(CliTest, RunByUnknownNameExitsFive) {
     EXPECT_EQ(code, 5);
 }
 
-// --- list / inspect / uninstall ---
-
-namespace {
-void install_template(const std::filesystem::path& src, const std::string& body) {
-    write_file(src, body);
-    Argv args({"spudplate", "install", src.string()});
-    std::stringstream o;
-    std::stringstream e;
-    ScriptedPrompter p({});
-    ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+TEST(CliTest, RunByUnknownNameMessageNamesArgAndPointsAtList) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "run", "ghost"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_NE(err.str().find("'ghost' is not installed"), std::string::npos)
+        << err.str();
+    EXPECT_NE(err.str().find("spudplate list"), std::string::npos) << err.str();
+    EXPECT_EQ(err.str().find("cannot open"), std::string::npos) << err.str();
 }
-}  // namespace
+
+TEST(CliTest, RunByUnknownNameSuggestsClosestInstalled) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "template.spud", "mkdir \"x\"\n");
+    Argv args({"spudplate", "run", "templat"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_NE(err.str().find("did you mean 'template'?"), std::string::npos)
+        << err.str();
+}
+
+TEST(CliTest, RunByUnknownNameOmitsSuggestionForUnrelatedArg) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "template.spud", "mkdir \"x\"\n");
+    Argv args({"spudplate", "run", "wxyz123"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_EQ(err.str().find("did you mean"), std::string::npos) << err.str();
+    EXPECT_NE(err.str().find("spudplate list"), std::string::npos) << err.str();
+}
+
+TEST(CliTest, RunByUnknownNameOmitsSuggestionWhenAmbiguous) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "cat.spud", "mkdir \"x\"\n");
+    install_template(td.path() / "bat.spud", "mkdir \"y\"\n");
+    Argv args({"spudplate", "run", "rat"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_EQ(err.str().find("did you mean"), std::string::npos) << err.str();
+}
+
+// --- list / inspect / uninstall ---
 
 TEST(CliTest, ListEmptyProducesNoOutput) {
     TmpDir td;
