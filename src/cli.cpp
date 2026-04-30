@@ -55,7 +55,7 @@ void print_usage(std::ostream& out) {
         << "  inspect <name>                  print the source of an installed template\n"
         << "  uninstall <name>                remove an installed template\n"
         << "  version                         print the spudplate version\n"
-        << "  update [--yes]                  fetch and install the latest spudplate "
+        << "  update [--yes] [--force]        fetch and install the latest spudplate "
            "release\n"
         << "\n"
         << "Run 'spudplate <command> --help' for help on a specific command.\n"
@@ -124,12 +124,14 @@ void print_help_version(std::ostream& out) {
 }
 
 void print_help_update(std::ostream& out) {
-    out << "usage: spudplate update [--yes]\n"
+    out << "usage: spudplate update [--yes] [--force]\n"
         << "\n"
-        << "Fetch and install the latest spudplate release.\n"
+        << "Fetch and install the latest spudplate release. Skips the\n"
+        << "download when already up to date.\n"
         << "\n"
         << "Options:\n"
-        << "  --yes, -y       skip the confirmation prompt\n";
+        << "  --yes, -y       skip the confirmation prompt\n"
+        << "  --force         download and install even if already up to date\n";
 }
 
 // Resolve the directory templates are installed into. Honours, in order:
@@ -523,6 +525,7 @@ int cmd_version(std::ostream& out) {
 
 int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     bool skip_confirm = false;
+    bool force = false;
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
@@ -532,6 +535,9 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         }
         if (arg == "--yes" || arg == "-y") {
             skip_confirm = true;
+            ++positional_start;
+        } else if (arg == "--force") {
+            force = true;
             ++positional_start;
         } else {
             break;
@@ -543,6 +549,19 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
 
     out << "current version: v" << SPUDPLATE_VERSION_STRING << "\n";
+
+    if (!force) {
+        std::string latest = resolve_latest_version();
+        if (latest.empty()) {
+            err << "warning: could not resolve latest version, continuing anyway\n";
+        } else if (latest == SPUDPLATE_VERSION_STRING) {
+            out << "already up to date (v" << SPUDPLATE_VERSION_STRING << ")\n";
+            return 0;
+        } else {
+            out << "latest version:  v" << latest << "\n";
+        }
+    }
+
     if (!skip_confirm) {
         if (!confirm_yes_no(out,
                             "this will download and install the latest spudplate "
