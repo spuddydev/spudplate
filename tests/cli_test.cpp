@@ -1174,3 +1174,71 @@ TEST(CliTest, UpdateHelpDoesNotRunUpdate) {
     // The "current version" line is only printed by the real update path.
     EXPECT_EQ(out.str().find("current version"), std::string::npos);
 }
+
+// --- completion ---
+
+TEST(CliTest, CompletionBashEmitsBashScript) {
+    Argv args({"spudplate", "completion", "bash"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("_spudplate"), std::string::npos);
+    EXPECT_NE(out.str().find("complete -F _spudplate spudplate"), std::string::npos);
+    EXPECT_NE(out.str().find("compgen"), std::string::npos);
+    EXPECT_NE(out.str().find("install run validate list"), std::string::npos);
+}
+
+TEST(CliTest, CompletionZshEmitsZshScript) {
+    Argv args({"spudplate", "completion", "zsh"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("#compdef spudplate"), std::string::npos);
+    EXPECT_NE(out.str().find("_describe"), std::string::npos);
+    EXPECT_NE(out.str().find("_files"), std::string::npos);
+}
+
+TEST(CliTest, CompletionMissingShellPrintsUsage) {
+    Argv args({"spudplate", "completion"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("usage: spudplate completion"), std::string::npos);
+}
+
+TEST(CliTest, CompletionUnknownShellRejected) {
+    Argv args({"spudplate", "completion", "fish"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("unknown shell 'fish'"), std::string::npos);
+}
+
+TEST(CliTest, CompletionHelpPrintsToStdout) {
+    Argv args({"spudplate", "completion", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate completion"), std::string::npos);
+    EXPECT_EQ(out.str().find("compgen"), std::string::npos);  // not the script
+}
+
+TEST(CliTest, TopLevelUsageMentionsCompletion) {
+    Argv args({"spudplate", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("completion"), std::string::npos);
+}
