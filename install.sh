@@ -85,6 +85,8 @@ main() {
     info ""
     info "installed to $install_path"
 
+    install_completions "$install_path"
+
     case ":$PATH:" in
         *":$PREFIX/bin:"*) ;;
         *)
@@ -94,6 +96,31 @@ main() {
             info "  export PATH=\"$PREFIX/bin:\$PATH\""
             ;;
     esac
+}
+
+install_completions() {
+    bin="$1"
+    bash_dir="$HOME/.local/share/bash-completion/completions"
+    zsh_dir="$HOME/.zsh/completions"
+    if ! mkdir -p "$bash_dir" "$zsh_dir" 2>/dev/null; then
+        info "note: could not create completion directories; skipping completion install"
+        return 0
+    fi
+    if ! "$bin" completion bash >"$bash_dir/spudplate" 2>/dev/null; then
+        info "note: could not install bash completion"
+        return 0
+    fi
+    if ! "$bin" completion zsh >"$zsh_dir/_spudplate" 2>/dev/null; then
+        info "note: could not install zsh completion"
+        return 0
+    fi
+    info ""
+    info "shell completion installed:"
+    info "  bash: $bash_dir/spudplate"
+    info "  zsh:  $zsh_dir/_spudplate"
+    info ""
+    info "zsh users: ensure $zsh_dir is on your fpath, e.g. in ~/.zshrc:"
+    info "  fpath=($zsh_dir \$fpath); autoload -U compinit && compinit"
 }
 
 main "$@"
