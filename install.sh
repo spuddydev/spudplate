@@ -26,72 +26,39 @@ info() {
     printf '%s\n' "$*"
 }
 
-detect_target() {
+if command -v curl >/dev/null 2>&1; then
+    fetch() { curl -fsSL -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then
+    fetch() { wget -qO "$1" "$2"; }
+else
+    err "neither curl nor wget is installed"
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256() { sha256sum "$1" | awk '{ print $1 }'; }
+elif command -v shasum >/dev/null 2>&1; then
+    sha256() { shasum -a 256 "$1" | awk '{ print $1 }'; }
+else
+    err "no shasum or sha256sum available to verify the download"
+fi
+
+main() {
     os=$(uname -s)
     arch=$(uname -m)
-    case "$os" in
-        Linux)  os_tag=linux ;;
-        Darwin) os_tag=darwin ;;
-        *)      err "unsupported OS: $os" ;;
+    case "$os $arch" in
+        "Linux x86_64"|"Linux amd64")    target=spudplate-linux-x86_64 ;;
+        "Darwin arm64"|"Darwin aarch64") target=spudplate-darwin-arm64 ;;
+        "Linux "*)  err "no Linux $arch build yet — build from source: https://github.com/$REPO" ;;
+        "Darwin "*) err "no macOS $arch build yet — build from source: https://github.com/$REPO" ;;
+        *)          err "unsupported OS: $os" ;;
     esac
-    case "$arch" in
-        x86_64|amd64)  arch_tag=x86_64 ;;
-        arm64|aarch64) arch_tag=arm64 ;;
-        *)             err "unsupported architecture: $arch" ;;
-    esac
-    if [ "$os_tag" = linux ] && [ "$arch_tag" != x86_64 ]; then
-        err "no Linux $arch_tag build yet — build from source: https://github.com/$REPO"
-    fi
-    if [ "$os_tag" = darwin ] && [ "$arch_tag" != arm64 ]; then
-        err "no macOS $arch_tag build yet — build from source: https://github.com/$REPO"
-    fi
-    target="spudplate-${os_tag}-${arch_tag}"
-}
 
-resolve_urls() {
     if [ "$VERSION" = latest ]; then
         base="https://github.com/$REPO/releases/latest/download"
     else
         base="https://github.com/$REPO/releases/download/$VERSION"
     fi
-    binary_url="$base/$target"
-    sums_url="$base/SHA256SUMS"
-}
 
-download() {
-    url="$1"
-    out="$2"
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$out" "$url"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$out" "$url"
-    else
-        err "neither curl nor wget is installed"
-    fi
-}
-
-verify_checksum() {
-    file="$1"
-    sums="$2"
-    expected=$(awk -v t="$target" '$2 == t || $2 == "*"t { print $1; exit }' "$sums")
-    if [ -z "$expected" ]; then
-        err "no checksum entry for $target in SHA256SUMS"
-    fi
-    if command -v shasum >/dev/null 2>&1; then
-        actual=$(shasum -a 256 "$file" | awk '{ print $1 }')
-    elif command -v sha256sum >/dev/null 2>&1; then
-        actual=$(sha256sum "$file" | awk '{ print $1 }')
-    else
-        err "no shasum or sha256sum available to verify the download"
-    fi
-    if [ "$expected" != "$actual" ]; then
-        err "checksum mismatch: expected $expected, got $actual"
-    fi
-}
-
-main() {
-    detect_target
-    resolve_urls
     info "spudplate installer"
     info "  target:  $target"
     info "  version: $VERSION"
@@ -100,12 +67,15 @@ main() {
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT INT TERM
 
-    info "downloading $binary_url"
-    download "$binary_url" "$tmp/$target"
+    info "downloading $base/$target"
+    fetch "$tmp/$target" "$base/$target"
     info "downloading checksums"
-    download "$sums_url" "$tmp/SHA256SUMS"
+    fetch "$tmp/SHA256SUMS" "$base/SHA256SUMS"
 
-    verify_checksum "$tmp/$target" "$tmp/SHA256SUMS"
+    expected=$(awk -v t="$target" '$2 == t || $2 == "*"t { print $1; exit }' "$tmp/SHA256SUMS")
+    [ -n "$expected" ] || err "no checksum entry for $target in SHA256SUMS"
+    actual=$(sha256 "$tmp/$target")
+    [ "$expected" = "$actual" ] || err "checksum mismatch: expected $expected, got $actual"
 
     mkdir -p "$PREFIX/bin"
     install_path="$PREFIX/bin/spudplate"
