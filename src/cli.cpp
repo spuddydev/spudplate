@@ -57,6 +57,7 @@ void print_usage(std::ostream& out) {
         << "  version                         print the spudplate version\n"
         << "  update [--yes] [--force]        fetch and install the latest spudplate "
            "release\n"
+        << "  completion <bash|zsh>           print a shell completion script\n"
         << "\n"
         << "Run 'spudplate <command> --help' for help on a specific command.\n"
         << "Use --help or -h at any level to see this guidance.\n";
@@ -121,6 +122,18 @@ void print_help_version(std::ostream& out) {
     out << "usage: spudplate version\n"
         << "\n"
         << "Print the spudplate version and exit.\n";
+}
+
+void print_help_completion(std::ostream& out) {
+    out << "usage: spudplate completion <bash|zsh>\n"
+        << "\n"
+        << "Print a shell completion script to stdout. Pipe the output\n"
+        << "into your completion directory to enable tab completion of\n"
+        << "subcommands, installed template names, and .spud files.\n"
+        << "\n"
+        << "Bash:  spudplate completion bash > "
+           "~/.local/share/bash-completion/completions/spudplate\n"
+        << "Zsh:   spudplate completion zsh  > ~/.zsh/completions/_spudplate\n";
 }
 
 void print_help_update(std::ostream& out) {
@@ -521,6 +534,115 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 int cmd_version(std::ostream& out) {
     out << "spudplate v" << SPUDPLATE_VERSION_STRING << "\n";
     return 0;
+}
+
+const char* bash_completion_script() {
+    return R"BASH(_spudplate() {
+    local cur cword
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    cword=$COMP_CWORD
+
+    local subcommands="install run validate list inspect uninstall version update completion --help -h"
+
+    if [ "$cword" -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "$subcommands" -- "$cur") )
+        return
+    fi
+
+    local subcommand="${COMP_WORDS[1]}"
+    case "$subcommand" in
+        run)
+            local installed
+            installed=$(spudplate list 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$installed" -- "$cur") )
+            COMPREPLY+=( $(compgen -f -X '!*.spud' -- "$cur") )
+            COMPREPLY+=( $(compgen -f -X '!*.spp' -- "$cur") )
+            ;;
+        inspect|uninstall)
+            local installed
+            installed=$(spudplate list 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$installed" -- "$cur") )
+            ;;
+        install|validate)
+            COMPREPLY=( $(compgen -f -X '!*.spud' -- "$cur") )
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+            ;;
+    esac
+}
+complete -F _spudplate spudplate
+)BASH";
+}
+
+const char* zsh_completion_script() {
+    return R"ZSH(#compdef spudplate
+
+_spudplate() {
+    local -a subcommands
+    subcommands=(
+        'install:validate and store a template'
+        'run:run an installed template by name or a .spud/.spp file'
+        'validate:parse and validate a template without installing'
+        'list:list installed templates'
+        'inspect:print the source of an installed template'
+        'uninstall:remove an installed template'
+        'version:print the spudplate version'
+        'update:fetch and install the latest spudplate'
+        'completion:print a shell completion script'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'subcommand' subcommands
+        return
+    fi
+
+    case "$words[2]" in
+        run)
+            local -a names
+            names=( ${(f)"$(spudplate list 2>/dev/null)"} )
+            _alternative \
+                "names:installed:($names)" \
+                'files:.spud or .spp:_files -g "*.(spud|spp)"'
+            ;;
+        inspect|uninstall)
+            local -a names
+            names=( ${(f)"$(spudplate list 2>/dev/null)"} )
+            _describe 'installed template' names
+            ;;
+        install|validate)
+            _files -g '*.spud'
+            ;;
+        completion)
+            _values 'shell' bash zsh
+            ;;
+    esac
+}
+
+_spudplate "$@"
+)ZSH";
+}
+
+int cmd_completion(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc >= 3 && is_help_flag(argv[2])) {
+        print_help_completion(out);
+        return 0;
+    }
+    if (argc != 3) {
+        print_help_completion(err);
+        return 1;
+    }
+    std::string shell{argv[2]};
+    if (shell == "bash") {
+        out << bash_completion_script();
+        return 0;
+    }
+    if (shell == "zsh") {
+        out << zsh_completion_script();
+        return 0;
+    }
+    err << "unknown shell '" << shell << "'; supported: bash, zsh\n";
+    return 1;
 }
 
 int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
@@ -967,6 +1089,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
     if (subcommand == "uninstall") {
         return cmd_uninstall(argc, argv, out, err);
+    }
+    if (subcommand == "completion") {
+        return cmd_completion(argc, argv, out, err);
     }
     print_usage(err);
     return 1;
