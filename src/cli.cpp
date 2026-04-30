@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -237,6 +238,56 @@ std::vector<std::string> list_installed_names(const std::filesystem::path& home)
         }
     }
     return names;
+}
+
+std::string strip_v_prefix(std::string s) {
+    if (!s.empty() && s.front() == 'v') {
+        s.erase(0, 1);
+    }
+    return s;
+}
+
+// Resolve the latest released version by following the redirect on
+// `releases/latest`. Returns the version string without a leading `v` on
+// success, or empty on failure.
+//
+// `SPUDPLATE_LATEST_VERSION` overrides the network call. The special
+// value `fail` simulates a resolve failure for tests that exercise the
+// fail-open path.
+std::string resolve_latest_version() {
+    if (const char* env = std::getenv("SPUDPLATE_LATEST_VERSION");
+        env != nullptr && *env != '\0') {
+        if (std::string{env} == "fail") {
+            return {};
+        }
+        return strip_v_prefix(env);
+    }
+    FILE* pipe = popen(
+        "curl -fsSLI -o /dev/null -w '%{url_effective}' "
+        "https://github.com/spuddydev/spudplate/releases/latest 2>/dev/null",
+        "r");
+    if (pipe == nullptr) {
+        return {};
+    }
+    std::string url;
+    char buf[256];
+    while (std::fgets(buf, sizeof(buf), pipe) != nullptr) {
+        url += buf;
+    }
+    int status = pclose(pipe);
+    if (status != 0) {
+        return {};
+    }
+    while (!url.empty() &&
+           (url.back() == '\n' || url.back() == '\r' ||
+            url.back() == ' ' || url.back() == '\t')) {
+        url.pop_back();
+    }
+    auto pos = url.rfind('/');
+    if (pos == std::string::npos || pos + 1 >= url.size()) {
+        return {};
+    }
+    return strip_v_prefix(url.substr(pos + 1));
 }
 
 // Returns the closest installed name to `target` if it is a clear winner
