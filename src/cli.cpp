@@ -765,8 +765,18 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             err << "legacy install '" << raw_arg << "'; reinstall to upgrade\n";
             return 1;
         }
-        if (std::filesystem::exists(file_path) &&
-            !std::filesystem::is_regular_file(file_path)) {
+        if (!std::filesystem::exists(file_path)) {
+            err << "'" << raw_arg << "' is not installed";
+            std::string suggestion =
+                suggest_template_name(raw_arg, list_installed_names(home));
+            if (!suggestion.empty()) {
+                err << ", did you mean '" << suggestion << "'?\n";
+            } else {
+                err << "; run 'spudplate list' to see available templates\n";
+            }
+            return 5;
+        }
+        if (!std::filesystem::is_regular_file(file_path)) {
             err << "refusing to read: '" << raw_arg
                 << ".spp' exists but is not a regular file\n";
             return 1;
