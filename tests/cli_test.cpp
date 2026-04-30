@@ -666,6 +666,8 @@ TEST(CliTest, VersionFlagAcceptsDoubleDash) {
 TEST(CliTest, UpdateWithYesRunsOverrideCommand) {
     ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
     override.set("true");  // /bin/true succeeds, no network access
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("99.0.0");  // pretend a newer release exists
     Argv args({"spudplate", "update", "--yes"});
     std::stringstream out;
     std::stringstream err;
@@ -679,6 +681,8 @@ TEST(CliTest, UpdateWithYesRunsOverrideCommand) {
 TEST(CliTest, UpdateFailingCommandExitsOne) {
     ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
     override.set("false");  // /bin/false exits non-zero
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("99.0.0");
     Argv args({"spudplate", "update", "--yes"});
     std::stringstream out;
     std::stringstream err;
@@ -693,6 +697,8 @@ TEST(CliTest, UpdateDeclinedPromptAbortsCleanly) {
     // Set to a command that would fail loudly so the test catches any
     // accidental fall-through to execution.
     override.set("false");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("99.0.0");
     Argv args({"spudplate", "update"});
     std::stringstream out;
     std::stringstream err;
@@ -700,6 +706,53 @@ TEST(CliTest, UpdateDeclinedPromptAbortsCleanly) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0);
     EXPECT_NE(out.str().find("aborted"), std::string::npos);
+}
+
+TEST(CliTest, UpdateAlreadyUpToDateExitsZero) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    // If the up-to-date short-circuit fails, this would run /bin/false
+    // and surface as exit code 1 — the EQ(code, 0) below would fail.
+    override.set("false");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set(SPUDPLATE_VERSION_STRING);
+    Argv args({"spudplate", "update", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("already up to date"), std::string::npos);
+    EXPECT_EQ(out.str().find("running:"), std::string::npos) << out.str();
+}
+
+TEST(CliTest, UpdateForceBypassesUpToDateCheck) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    override.set("true");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set(SPUDPLATE_VERSION_STRING);  // would normally short-circuit
+    Argv args({"spudplate", "update", "--yes", "--force"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("running: true"), std::string::npos);
+    EXPECT_EQ(out.str().find("already up to date"), std::string::npos) << out.str();
+}
+
+TEST(CliTest, UpdateContinuesOnResolveFailure) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    override.set("true");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("fail");
+    Argv args({"spudplate", "update", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(err.str().find("could not resolve latest version"), std::string::npos);
+    EXPECT_NE(out.str().find("running: true"), std::string::npos);
 }
 
 TEST(CliTest, ValidateMissingFileExitsFive) {
