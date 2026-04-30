@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -199,6 +200,75 @@ std::filesystem::path resolve_template_arg(const std::string& arg, std::ostream&
 // at `<install_dir>/<name>/template.spud`.
 bool legacy_install_exists(const std::filesystem::path& home, const std::string& name) {
     return std::filesystem::is_regular_file(home / name / "template.spud");
+}
+
+std::size_t levenshtein(std::string_view a, std::string_view b) {
+    if (a.size() < b.size()) {
+        std::swap(a, b);
+    }
+    if (b.empty()) {
+        return a.size();
+    }
+    std::vector<std::size_t> prev(b.size() + 1);
+    std::vector<std::size_t> curr(b.size() + 1);
+    for (std::size_t j = 0; j <= b.size(); ++j) {
+        prev[j] = j;
+    }
+    for (std::size_t i = 1; i <= a.size(); ++i) {
+        curr[0] = i;
+        for (std::size_t j = 1; j <= b.size(); ++j) {
+            std::size_t cost = a[i - 1] == b[j - 1] ? 0 : 1;
+            curr[j] = std::min({prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost});
+        }
+        prev.swap(curr);
+    }
+    return prev[b.size()];
+}
+
+std::vector<std::string> list_installed_names(const std::filesystem::path& home) {
+    std::vector<std::string> names;
+    if (!std::filesystem::is_directory(home)) {
+        return names;
+    }
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
+        if (entry.is_regular_file() && ends_with_spp(entry.path())) {
+            names.push_back(entry.path().stem().string());
+        }
+    }
+    return names;
+}
+
+// Returns the closest installed name to `target` if it is a clear winner
+// within a typo-distance threshold that scales with name length, or empty
+// otherwise. A second-best at the same distance is treated as ambiguous
+// and yields no suggestion.
+std::string suggest_template_name(const std::string& target,
+                                  const std::vector<std::string>& names) {
+    if (names.empty()) {
+        return {};
+    }
+    std::size_t threshold = std::max<std::size_t>(2, target.size() / 3);
+    std::size_t best = std::numeric_limits<std::size_t>::max();
+    std::size_t second = std::numeric_limits<std::size_t>::max();
+    std::string winner;
+    for (const auto& n : names) {
+        std::size_t d = levenshtein(target, n);
+        if (d < best) {
+            second = best;
+            best = d;
+            winner = n;
+        } else if (d < second) {
+            second = d;
+        }
+    }
+    if (best > threshold) {
+        return {};
+    }
+    if (second <= best) {
+        return {};
+    }
+    return winner;
 }
 
 // Parse and validate `source` so install rejects broken templates before
