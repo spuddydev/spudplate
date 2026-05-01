@@ -96,6 +96,9 @@ main() {
             info "  export PATH=\"$PREFIX/bin:\$PATH\""
             ;;
     esac
+
+    info ""
+    info "to uninstall later: spudplate self-uninstall (add --purge to also drop installed templates)"
 }
 
 install_completions() {
