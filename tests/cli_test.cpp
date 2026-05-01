@@ -1242,3 +1242,157 @@ TEST(CliTest, TopLevelUsageMentionsCompletion) {
     EXPECT_EQ(code, 0);
     EXPECT_NE(out.str().find("completion"), std::string::npos);
 }
+
+// --- self-uninstall ---
+
+namespace {
+struct SelfUninstallEnv {
+    TmpDir td;
+    std::filesystem::path home;
+    std::filesystem::path bin;
+    std::filesystem::path bash_completion;
+    std::filesystem::path zsh_completion;
+    std::filesystem::path zshrc;
+    std::filesystem::path templates;
+    ScopedEnv home_env{"HOME"};
+    ScopedEnv self_bin{"SPUDPLATE_SELF_BINARY"};
+    ScopedHome spudhome;
+
+    SelfUninstallEnv() : home(td.path() / "home"), templates(home / "templates"),
+                         spudhome(templates) {
+        bin = home / ".local" / "bin" / "spudplate";
+        bash_completion = home / ".local" / "share" / "bash-completion" /
+                          "completions" / "spudplate";
+        zsh_completion = home / ".zsh" / "completions" / "_spudplate";
+        zshrc = home / ".zshrc";
+        std::filesystem::create_directories(bin.parent_path());
+        std::filesystem::create_directories(bash_completion.parent_path());
+        std::filesystem::create_directories(zsh_completion.parent_path());
+        std::filesystem::create_directories(templates);
+        std::ofstream(bin) << "fake-binary\n";
+        std::ofstream(bash_completion) << "fake-bash-completion\n";
+        std::ofstream(zsh_completion) << "fake-zsh-completion\n";
+        write_zshrc_with_block();
+        home_env.set(home.string());
+        self_bin.set(bin.string());
+    }
+
+    void write_zshrc_with_block() {
+        std::ofstream f(zshrc);
+        f << "# user config\n";
+        f << "alias ll=\"ls -la\"\n";
+        f << "\n";
+        f << "# >>> spudplate completion >>>\n";
+        f << "fpath=(~/.zsh/completions $fpath)\n";
+        f << "autoload -U compinit && compinit\n";
+        f << "# <<< spudplate completion <<<\n";
+        f << "\n";
+        f << "export EDITOR=vim\n";
+    }
+
+    void add_template(const std::string& name) {
+        std::ofstream(templates / (name + ".spp")) << "fake-spp\n";
+    }
+};
+}  // namespace
+
+TEST(CliTest, SelfUninstallRemovesBinaryAndCompletions) {
+    SelfUninstallEnv env;
+    Argv args({"spudplate", "self-uninstall", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_FALSE(std::filesystem::exists(env.bin));
+    EXPECT_FALSE(std::filesystem::exists(env.bash_completion));
+    EXPECT_FALSE(std::filesystem::exists(env.zsh_completion));
+    std::ifstream in(env.zshrc);
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content.find("spudplate completion"), std::string::npos)
+        << content;
+    EXPECT_NE(content.find("alias ll"), std::string::npos) << content;
+    EXPECT_NE(content.find("EDITOR=vim"), std::string::npos) << content;
+}
+
+TEST(CliTest, SelfUninstallDefaultPreservesTemplates) {
+    SelfUninstallEnv env;
+    env.add_template("alpha");
+    env.add_template("beta");
+    Argv args({"spudplate", "self-uninstall", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::exists(env.templates / "alpha.spp"));
+    EXPECT_TRUE(std::filesystem::exists(env.templates / "beta.spp"));
+    EXPECT_NE(out.str().find("will be preserved"), std::string::npos);
+}
+
+TEST(CliTest, SelfUninstallPurgeRemovesTemplates) {
+    SelfUninstallEnv env;
+    env.add_template("alpha");
+    env.add_template("beta");
+    Argv args({"spudplate", "self-uninstall", "--purge", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_FALSE(std::filesystem::exists(env.templates / "alpha.spp"));
+    EXPECT_FALSE(std::filesystem::exists(env.templates / "beta.spp"));
+    EXPECT_NE(out.str().find("2 .spp files"), std::string::npos);
+}
+
+TEST(CliTest, SelfUninstallPurgeWarnsIrreversibleEvenWithYes) {
+    SelfUninstallEnv env;
+    env.add_template("alpha");
+    Argv args({"spudplate", "self-uninstall", "--purge", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("irreversible"), std::string::npos);
+}
+
+TEST(CliTest, SelfUninstallDeclinedPromptAbortsCleanly) {
+    SelfUninstallEnv env;
+    Argv args({"spudplate", "self-uninstall"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_TRUE(std::filesystem::exists(env.bin));
+    EXPECT_TRUE(std::filesystem::exists(env.bash_completion));
+    EXPECT_TRUE(std::filesystem::exists(env.zsh_completion));
+    EXPECT_NE(out.str().find("aborted"), std::string::npos);
+}
+
+TEST(CliTest, SelfUninstallIdempotentWhenNothingPresent) {
+    SelfUninstallEnv env;
+    std::filesystem::remove(env.bin);
+    std::filesystem::remove(env.bash_completion);
+    std::filesystem::remove(env.zsh_completion);
+    std::filesystem::remove(env.zshrc);
+    Argv args({"spudplate", "self-uninstall", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("done"), std::string::npos);
+}
+
+TEST(CliTest, SelfUninstallHelpPrintsToStdout) {
+    Argv args({"spudplate", "self-uninstall", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate self-uninstall"), std::string::npos);
+}

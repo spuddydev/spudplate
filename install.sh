@@ -96,6 +96,9 @@ main() {
             info "  export PATH=\"$PREFIX/bin:\$PATH\""
             ;;
     esac
+
+    info ""
+    info "to uninstall later: spudplate self-uninstall (add --purge to also drop installed templates)"
 }
 
 install_completions() {
@@ -118,9 +121,28 @@ install_completions() {
     info "shell completion installed:"
     info "  bash: $bash_dir/spudplate"
     info "  zsh:  $zsh_dir/_spudplate"
+
+    setup_zshrc
+}
+
+setup_zshrc() {
+    [ "$(basename "${SHELL:-}")" = zsh ] || return 0
+    zshrc="$HOME/.zshrc"
+    marker_start="# >>> spudplate completion >>>"
+    marker_end="# <<< spudplate completion <<<"
+    if [ -f "$zshrc" ] && grep -qF "$marker_start" "$zshrc"; then
+        return 0
+    fi
+    {
+        printf '\n%s\n' "$marker_start"
+        # shellcheck disable=SC2016  # written verbatim into .zshrc; zsh expands $fpath at startup
+        printf '%s\n' 'fpath=(~/.zsh/completions $fpath)'
+        printf '%s\n' 'autoload -U compinit && compinit'
+        printf '%s\n' "$marker_end"
+    } >>"$zshrc"
     info ""
-    info "zsh users: ensure $zsh_dir is on your fpath, e.g. in ~/.zshrc:"
-    info "  fpath=($zsh_dir \$fpath); autoload -U compinit && compinit"
+    info "added zsh completion setup to $zshrc"
+    info "open a new shell or run 'source $zshrc' to enable"
 }
 
 main "$@"
