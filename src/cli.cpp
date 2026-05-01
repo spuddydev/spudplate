@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -53,8 +55,9 @@ void print_usage(std::ostream& out) {
         << "  inspect <name>                  print the source of an installed template\n"
         << "  uninstall <name>                remove an installed template\n"
         << "  version                         print the spudplate version\n"
-        << "  update [--yes]                  fetch and install the latest spudplate "
+        << "  update [--yes] [--force]        fetch and install the latest spudplate "
            "release\n"
+        << "  completion <bash|zsh>           print a shell completion script\n"
         << "\n"
         << "Run 'spudplate <command> --help' for help on a specific command.\n"
         << "Use --help or -h at any level to see this guidance.\n";
@@ -121,13 +124,27 @@ void print_help_version(std::ostream& out) {
         << "Print the spudplate version and exit.\n";
 }
 
-void print_help_update(std::ostream& out) {
-    out << "usage: spudplate update [--yes]\n"
+void print_help_completion(std::ostream& out) {
+    out << "usage: spudplate completion <bash|zsh>\n"
         << "\n"
-        << "Fetch and install the latest spudplate release.\n"
+        << "Print a shell completion script to stdout. Pipe the output\n"
+        << "into your completion directory to enable tab completion of\n"
+        << "subcommands, installed template names, and .spud files.\n"
+        << "\n"
+        << "Bash:  spudplate completion bash > "
+           "~/.local/share/bash-completion/completions/spudplate\n"
+        << "Zsh:   spudplate completion zsh  > ~/.zsh/completions/_spudplate\n";
+}
+
+void print_help_update(std::ostream& out) {
+    out << "usage: spudplate update [--yes] [--force]\n"
+        << "\n"
+        << "Fetch and install the latest spudplate release. Skips the\n"
+        << "download when already up to date.\n"
         << "\n"
         << "Options:\n"
-        << "  --yes, -y       skip the confirmation prompt\n";
+        << "  --yes, -y       skip the confirmation prompt\n"
+        << "  --force         download and install even if already up to date\n";
 }
 
 // Resolve the directory templates are installed into. Honours, in order:
@@ -199,6 +216,125 @@ std::filesystem::path resolve_template_arg(const std::string& arg, std::ostream&
 // at `<install_dir>/<name>/template.spud`.
 bool legacy_install_exists(const std::filesystem::path& home, const std::string& name) {
     return std::filesystem::is_regular_file(home / name / "template.spud");
+}
+
+std::size_t levenshtein(std::string_view a, std::string_view b) {
+    if (a.size() < b.size()) {
+        std::swap(a, b);
+    }
+    if (b.empty()) {
+        return a.size();
+    }
+    std::vector<std::size_t> prev(b.size() + 1);
+    std::vector<std::size_t> curr(b.size() + 1);
+    for (std::size_t j = 0; j <= b.size(); ++j) {
+        prev[j] = j;
+    }
+    for (std::size_t i = 1; i <= a.size(); ++i) {
+        curr[0] = i;
+        for (std::size_t j = 1; j <= b.size(); ++j) {
+            std::size_t cost = a[i - 1] == b[j - 1] ? 0 : 1;
+            curr[j] = std::min({prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost});
+        }
+        prev.swap(curr);
+    }
+    return prev[b.size()];
+}
+
+std::vector<std::string> list_installed_names(const std::filesystem::path& home) {
+    std::vector<std::string> names;
+    if (!std::filesystem::is_directory(home)) {
+        return names;
+    }
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
+        if (entry.is_regular_file() && ends_with_spp(entry.path())) {
+            names.push_back(entry.path().stem().string());
+        }
+    }
+    return names;
+}
+
+std::string strip_v_prefix(std::string s) {
+    if (!s.empty() && s.front() == 'v') {
+        s.erase(0, 1);
+    }
+    return s;
+}
+
+// Resolve the latest released version by following the redirect on
+// `releases/latest`. Returns the version string without a leading `v` on
+// success, or empty on failure.
+//
+// `SPUDPLATE_LATEST_VERSION` overrides the network call. The special
+// value `fail` simulates a resolve failure for tests that exercise the
+// fail-open path.
+std::string resolve_latest_version() {
+    if (const char* env = std::getenv("SPUDPLATE_LATEST_VERSION");
+        env != nullptr && *env != '\0') {
+        if (std::string{env} == "fail") {
+            return {};
+        }
+        return strip_v_prefix(env);
+    }
+    FILE* pipe = popen(
+        "curl -fsSLI -o /dev/null -w '%{url_effective}' "
+        "https://github.com/spuddydev/spudplate/releases/latest 2>/dev/null",
+        "r");
+    if (pipe == nullptr) {
+        return {};
+    }
+    std::string url;
+    char buf[256];
+    while (std::fgets(buf, sizeof(buf), pipe) != nullptr) {
+        url += buf;
+    }
+    int status = pclose(pipe);
+    if (status != 0) {
+        return {};
+    }
+    while (!url.empty() &&
+           (url.back() == '\n' || url.back() == '\r' ||
+            url.back() == ' ' || url.back() == '\t')) {
+        url.pop_back();
+    }
+    auto pos = url.rfind('/');
+    if (pos == std::string::npos || pos + 1 >= url.size()) {
+        return {};
+    }
+    return strip_v_prefix(url.substr(pos + 1));
+}
+
+// Returns the closest installed name to `target` if it is a clear winner
+// within a typo-distance threshold that scales with name length, or empty
+// otherwise. A second-best at the same distance is treated as ambiguous
+// and yields no suggestion.
+std::string suggest_template_name(const std::string& target,
+                                  const std::vector<std::string>& names) {
+    if (names.empty()) {
+        return {};
+    }
+    std::size_t threshold = std::max<std::size_t>(2, target.size() / 3);
+    std::size_t best = std::numeric_limits<std::size_t>::max();
+    std::size_t second = std::numeric_limits<std::size_t>::max();
+    std::string winner;
+    for (const auto& n : names) {
+        std::size_t d = levenshtein(target, n);
+        if (d < best) {
+            second = best;
+            best = d;
+            winner = n;
+        } else if (d < second) {
+            second = d;
+        }
+    }
+    if (best > threshold) {
+        return {};
+    }
+    if (second <= best) {
+        return {};
+    }
+    return winner;
 }
 
 // Parse and validate `source` so install rejects broken templates before
@@ -400,8 +536,118 @@ int cmd_version(std::ostream& out) {
     return 0;
 }
 
+const char* bash_completion_script() {
+    return R"BASH(_spudplate() {
+    local cur cword
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    cword=$COMP_CWORD
+
+    local subcommands="install run validate list inspect uninstall version update completion --help -h"
+
+    if [ "$cword" -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "$subcommands" -- "$cur") )
+        return
+    fi
+
+    local subcommand="${COMP_WORDS[1]}"
+    case "$subcommand" in
+        run)
+            local installed
+            installed=$(spudplate list 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$installed" -- "$cur") )
+            COMPREPLY+=( $(compgen -f -X '!*.spud' -- "$cur") )
+            COMPREPLY+=( $(compgen -f -X '!*.spp' -- "$cur") )
+            ;;
+        inspect|uninstall)
+            local installed
+            installed=$(spudplate list 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$installed" -- "$cur") )
+            ;;
+        install|validate)
+            COMPREPLY=( $(compgen -f -X '!*.spud' -- "$cur") )
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+            ;;
+    esac
+}
+complete -F _spudplate spudplate
+)BASH";
+}
+
+const char* zsh_completion_script() {
+    return R"ZSH(#compdef spudplate
+
+_spudplate() {
+    local -a subcommands
+    subcommands=(
+        'install:validate and store a template'
+        'run:run an installed template by name or a .spud/.spp file'
+        'validate:parse and validate a template without installing'
+        'list:list installed templates'
+        'inspect:print the source of an installed template'
+        'uninstall:remove an installed template'
+        'version:print the spudplate version'
+        'update:fetch and install the latest spudplate'
+        'completion:print a shell completion script'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'subcommand' subcommands
+        return
+    fi
+
+    case "$words[2]" in
+        run)
+            local -a names
+            names=( ${(f)"$(spudplate list 2>/dev/null)"} )
+            _alternative \
+                "names:installed:($names)" \
+                'files:.spud or .spp:_files -g "*.(spud|spp)"'
+            ;;
+        inspect|uninstall)
+            local -a names
+            names=( ${(f)"$(spudplate list 2>/dev/null)"} )
+            _describe 'installed template' names
+            ;;
+        install|validate)
+            _files -g '*.spud'
+            ;;
+        completion)
+            _values 'shell' bash zsh
+            ;;
+    esac
+}
+
+_spudplate "$@"
+)ZSH";
+}
+
+int cmd_completion(int argc, char* argv[], std::ostream& out, std::ostream& err) {
+    if (argc >= 3 && is_help_flag(argv[2])) {
+        print_help_completion(out);
+        return 0;
+    }
+    if (argc != 3) {
+        print_help_completion(err);
+        return 1;
+    }
+    std::string shell{argv[2]};
+    if (shell == "bash") {
+        out << bash_completion_script();
+        return 0;
+    }
+    if (shell == "zsh") {
+        out << zsh_completion_script();
+        return 0;
+    }
+    err << "unknown shell '" << shell << "'; supported: bash, zsh\n";
+    return 1;
+}
+
 int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     bool skip_confirm = false;
+    bool force = false;
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
@@ -411,6 +657,9 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         }
         if (arg == "--yes" || arg == "-y") {
             skip_confirm = true;
+            ++positional_start;
+        } else if (arg == "--force") {
+            force = true;
             ++positional_start;
         } else {
             break;
@@ -422,6 +671,19 @@ int cmd_update(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
 
     out << "current version: v" << SPUDPLATE_VERSION_STRING << "\n";
+
+    if (!force) {
+        std::string latest = resolve_latest_version();
+        if (latest.empty()) {
+            err << "warning: could not resolve latest version, continuing anyway\n";
+        } else if (latest == SPUDPLATE_VERSION_STRING) {
+            out << "already up to date (v" << SPUDPLATE_VERSION_STRING << ")\n";
+            return 0;
+        } else {
+            out << "latest version:  v" << latest << "\n";
+        }
+    }
+
     if (!skip_confirm) {
         if (!confirm_yes_no(out,
                             "this will download and install the latest spudplate "
@@ -695,8 +957,18 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
             err << "legacy install '" << raw_arg << "'; reinstall to upgrade\n";
             return 1;
         }
-        if (std::filesystem::exists(file_path) &&
-            !std::filesystem::is_regular_file(file_path)) {
+        if (!std::filesystem::exists(file_path)) {
+            err << "'" << raw_arg << "' is not installed";
+            std::string suggestion =
+                suggest_template_name(raw_arg, list_installed_names(home));
+            if (!suggestion.empty()) {
+                err << ", did you mean '" << suggestion << "'?\n";
+            } else {
+                err << "; run 'spudplate list' to see available templates\n";
+            }
+            return 5;
+        }
+        if (!std::filesystem::is_regular_file(file_path)) {
             err << "refusing to read: '" << raw_arg
                 << ".spp' exists but is not a regular file\n";
             return 1;
@@ -817,6 +1089,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
     if (subcommand == "uninstall") {
         return cmd_uninstall(argc, argv, out, err);
+    }
+    if (subcommand == "completion") {
+        return cmd_completion(argc, argv, out, err);
     }
     print_usage(err);
     return 1;

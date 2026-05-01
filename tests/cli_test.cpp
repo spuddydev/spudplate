@@ -403,6 +403,17 @@ TEST(CliTest, InstallMissingFileExitsFive) {
     EXPECT_EQ(code, 5);
 }
 
+namespace {
+void install_template(const std::filesystem::path& src, const std::string& body) {
+    write_file(src, body);
+    Argv args({"spudplate", "install", src.string()});
+    std::stringstream o;
+    std::stringstream e;
+    ScriptedPrompter p({});
+    ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+}
+}  // namespace
+
 // --- run by installed name ---
 
 TEST(CliTest, RunByNameLooksUpInstalledTemplate) {
@@ -440,18 +451,68 @@ TEST(CliTest, RunByUnknownNameExitsFive) {
     EXPECT_EQ(code, 5);
 }
 
-// --- list / inspect / uninstall ---
-
-namespace {
-void install_template(const std::filesystem::path& src, const std::string& body) {
-    write_file(src, body);
-    Argv args({"spudplate", "install", src.string()});
-    std::stringstream o;
-    std::stringstream e;
-    ScriptedPrompter p({});
-    ASSERT_EQ(cli_main(args.argc(), args.argv(), o, e, p), 0) << e.str();
+TEST(CliTest, RunByUnknownNameMessageNamesArgAndPointsAtList) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    Argv args({"spudplate", "run", "ghost"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_NE(err.str().find("'ghost' is not installed"), std::string::npos)
+        << err.str();
+    EXPECT_NE(err.str().find("spudplate list"), std::string::npos) << err.str();
+    EXPECT_EQ(err.str().find("cannot open"), std::string::npos) << err.str();
 }
-}  // namespace
+
+TEST(CliTest, RunByUnknownNameSuggestsClosestInstalled) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "template.spud", "mkdir \"x\"\n");
+    Argv args({"spudplate", "run", "templat"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_NE(err.str().find("did you mean 'template'?"), std::string::npos)
+        << err.str();
+}
+
+TEST(CliTest, RunByUnknownNameOmitsSuggestionForUnrelatedArg) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "template.spud", "mkdir \"x\"\n");
+    Argv args({"spudplate", "run", "wxyz123"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_EQ(err.str().find("did you mean"), std::string::npos) << err.str();
+    EXPECT_NE(err.str().find("spudplate list"), std::string::npos) << err.str();
+}
+
+TEST(CliTest, RunByUnknownNameOmitsSuggestionWhenAmbiguous) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "cat.spud", "mkdir \"x\"\n");
+    install_template(td.path() / "bat.spud", "mkdir \"y\"\n");
+    Argv args({"spudplate", "run", "rat"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 5);
+    EXPECT_EQ(err.str().find("did you mean"), std::string::npos) << err.str();
+}
+
+// --- list / inspect / uninstall ---
 
 TEST(CliTest, ListEmptyProducesNoOutput) {
     TmpDir td;
@@ -605,6 +666,8 @@ TEST(CliTest, VersionFlagAcceptsDoubleDash) {
 TEST(CliTest, UpdateWithYesRunsOverrideCommand) {
     ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
     override.set("true");  // /bin/true succeeds, no network access
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("99.0.0");  // pretend a newer release exists
     Argv args({"spudplate", "update", "--yes"});
     std::stringstream out;
     std::stringstream err;
@@ -618,6 +681,8 @@ TEST(CliTest, UpdateWithYesRunsOverrideCommand) {
 TEST(CliTest, UpdateFailingCommandExitsOne) {
     ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
     override.set("false");  // /bin/false exits non-zero
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("99.0.0");
     Argv args({"spudplate", "update", "--yes"});
     std::stringstream out;
     std::stringstream err;
@@ -632,6 +697,8 @@ TEST(CliTest, UpdateDeclinedPromptAbortsCleanly) {
     // Set to a command that would fail loudly so the test catches any
     // accidental fall-through to execution.
     override.set("false");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("99.0.0");
     Argv args({"spudplate", "update"});
     std::stringstream out;
     std::stringstream err;
@@ -639,6 +706,53 @@ TEST(CliTest, UpdateDeclinedPromptAbortsCleanly) {
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0);
     EXPECT_NE(out.str().find("aborted"), std::string::npos);
+}
+
+TEST(CliTest, UpdateAlreadyUpToDateExitsZero) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    // If the up-to-date short-circuit fails, this would run /bin/false
+    // and surface as exit code 1 — the EQ(code, 0) below would fail.
+    override.set("false");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set(SPUDPLATE_VERSION_STRING);
+    Argv args({"spudplate", "update", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("already up to date"), std::string::npos);
+    EXPECT_EQ(out.str().find("running:"), std::string::npos) << out.str();
+}
+
+TEST(CliTest, UpdateForceBypassesUpToDateCheck) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    override.set("true");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set(SPUDPLATE_VERSION_STRING);  // would normally short-circuit
+    Argv args({"spudplate", "update", "--yes", "--force"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("running: true"), std::string::npos);
+    EXPECT_EQ(out.str().find("already up to date"), std::string::npos) << out.str();
+}
+
+TEST(CliTest, UpdateContinuesOnResolveFailure) {
+    ScopedEnv override("SPUDPLATE_UPDATE_COMMAND");
+    override.set("true");
+    ScopedEnv latest("SPUDPLATE_LATEST_VERSION");
+    latest.set("fail");
+    Argv args({"spudplate", "update", "--yes"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(err.str().find("could not resolve latest version"), std::string::npos);
+    EXPECT_NE(out.str().find("running: true"), std::string::npos);
 }
 
 TEST(CliTest, ValidateMissingFileExitsFive) {
@@ -1059,4 +1173,72 @@ TEST(CliTest, UpdateHelpDoesNotRunUpdate) {
     EXPECT_NE(out.str().find("usage: spudplate update"), std::string::npos);
     // The "current version" line is only printed by the real update path.
     EXPECT_EQ(out.str().find("current version"), std::string::npos);
+}
+
+// --- completion ---
+
+TEST(CliTest, CompletionBashEmitsBashScript) {
+    Argv args({"spudplate", "completion", "bash"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("_spudplate"), std::string::npos);
+    EXPECT_NE(out.str().find("complete -F _spudplate spudplate"), std::string::npos);
+    EXPECT_NE(out.str().find("compgen"), std::string::npos);
+    EXPECT_NE(out.str().find("install run validate list"), std::string::npos);
+}
+
+TEST(CliTest, CompletionZshEmitsZshScript) {
+    Argv args({"spudplate", "completion", "zsh"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("#compdef spudplate"), std::string::npos);
+    EXPECT_NE(out.str().find("_describe"), std::string::npos);
+    EXPECT_NE(out.str().find("_files"), std::string::npos);
+}
+
+TEST(CliTest, CompletionMissingShellPrintsUsage) {
+    Argv args({"spudplate", "completion"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("usage: spudplate completion"), std::string::npos);
+}
+
+TEST(CliTest, CompletionUnknownShellRejected) {
+    Argv args({"spudplate", "completion", "fish"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("unknown shell 'fish'"), std::string::npos);
+}
+
+TEST(CliTest, CompletionHelpPrintsToStdout) {
+    Argv args({"spudplate", "completion", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("usage: spudplate completion"), std::string::npos);
+    EXPECT_EQ(out.str().find("compgen"), std::string::npos);  // not the script
+}
+
+TEST(CliTest, TopLevelUsageMentionsCompletion) {
+    Argv args({"spudplate", "--help"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0);
+    EXPECT_NE(out.str().find("completion"), std::string::npos);
 }
