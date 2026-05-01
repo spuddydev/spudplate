@@ -16,6 +16,12 @@
 #include <system_error>
 #include <vector>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
+
 #include "spudplate/binary_serializer.h"
 #include "spudplate/bundler.h"
 #include "spudplate/cli_internal.h"
@@ -58,6 +64,9 @@ void print_usage(std::ostream& out) {
         << "  update [--yes] [--force]        fetch and install the latest spudplate "
            "release\n"
         << "  completion <bash|zsh>           print a shell completion script\n"
+        << "  self-uninstall [--purge] [-y]   remove spudplate, its completion files,\n"
+        << "                                  and its block in ~/.zshrc; --purge also\n"
+        << "                                  deletes every installed template\n"
         << "\n"
         << "Run 'spudplate <command> --help' for help on a specific command.\n"
         << "Use --help or -h at any level to see this guidance.\n";
@@ -122,6 +131,18 @@ void print_help_version(std::ostream& out) {
     out << "usage: spudplate version\n"
         << "\n"
         << "Print the spudplate version and exit.\n";
+}
+
+void print_help_self_uninstall(std::ostream& out) {
+    out << "usage: spudplate self-uninstall [--purge] [--yes]\n"
+        << "\n"
+        << "Remove the spudplate binary, its shell completion files, and\n"
+        << "the completion block in ~/.zshrc added at install time.\n"
+        << "\n"
+        << "Options:\n"
+        << "  --purge         also delete every installed template "
+           "(.spp files)\n"
+        << "  --yes, -y       skip the confirmation prompt\n";
 }
 
 void print_help_completion(std::ostream& out) {
@@ -623,6 +644,209 @@ _spudplate "$@"
 )ZSH";
 }
 
+// Resolve the absolute path of the running binary. `SPUDPLATE_SELF_BINARY`
+// overrides for tests. On Linux we use `/proc/self/exe`; on macOS the
+// dyld API. Returns an empty path on failure (in which case the caller
+// reports and skips binary removal).
+std::filesystem::path resolve_self_path() {
+    if (const char* env = std::getenv("SPUDPLATE_SELF_BINARY");
+        env != nullptr && *env != '\0') {
+        return env;
+    }
+#ifdef __APPLE__
+    char buf[4096];
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0) {
+        return {};
+    }
+    std::error_code ec;
+    auto canon = std::filesystem::canonical(buf, ec);
+    return ec ? std::filesystem::path{buf} : canon;
+#else
+    char buf[4096];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0) {
+        return {};
+    }
+    buf[n] = '\0';
+    return buf;
+#endif
+}
+
+std::filesystem::path home_dir() {
+    if (const char* h = std::getenv("HOME"); h != nullptr && *h != '\0') {
+        return h;
+    }
+    return {};
+}
+
+// Remove the spudplate completion block (delimited by the markers
+// `setup_zshrc` writes in install.sh) from `zshrc`. Returns true if a
+// block was found and removed. Does nothing and returns false if the
+// file does not exist or contains no marker.
+bool remove_zshrc_block(const std::filesystem::path& zshrc) {
+    if (!std::filesystem::is_regular_file(zshrc)) {
+        return false;
+    }
+    std::ifstream in(zshrc);
+    if (!in) {
+        return false;
+    }
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    in.close();
+    const std::string start_marker = "# >>> spudplate completion >>>";
+    const std::string end_marker = "# <<< spudplate completion <<<";
+    auto start = content.find(start_marker);
+    if (start == std::string::npos) {
+        return false;
+    }
+    auto end = content.find(end_marker, start);
+    if (end == std::string::npos) {
+        return false;
+    }
+    end += end_marker.size();
+    if (end < content.size() && content[end] == '\n') {
+        ++end;
+    }
+    if (start > 0 && content[start - 1] == '\n') {
+        --start;
+    }
+    content.erase(start, end - start);
+    std::ofstream out(zshrc);
+    if (!out) {
+        return false;
+    }
+    out << content;
+    return true;
+}
+
+std::vector<std::filesystem::path> list_installed_spp_paths(
+    const std::filesystem::path& home) {
+    std::vector<std::filesystem::path> paths;
+    if (!std::filesystem::is_directory(home)) {
+        return paths;
+    }
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
+        if (entry.is_regular_file() && ends_with_spp(entry.path())) {
+            paths.push_back(entry.path());
+        }
+    }
+    return paths;
+}
+
+int cmd_self_uninstall(int argc, char* argv[], std::ostream& out,
+                       std::ostream& err) {
+    bool purge = false;
+    bool skip_confirm = false;
+    int positional_start = 2;
+    while (positional_start < argc) {
+        std::string arg{argv[positional_start]};
+        if (is_help_flag(arg)) {
+            print_help_self_uninstall(out);
+            return 0;
+        }
+        if (arg == "--purge") {
+            purge = true;
+            ++positional_start;
+        } else if (arg == "--yes" || arg == "-y") {
+            skip_confirm = true;
+            ++positional_start;
+        } else {
+            break;
+        }
+    }
+    if (argc - positional_start != 0) {
+        print_usage(err);
+        return 1;
+    }
+
+    std::filesystem::path binary = resolve_self_path();
+    std::filesystem::path home = home_dir();
+    std::filesystem::path bash_completion;
+    std::filesystem::path zsh_completion;
+    std::filesystem::path zshrc;
+    if (!home.empty()) {
+        bash_completion = home / ".local" / "share" / "bash-completion" /
+                          "completions" / "spudplate";
+        zsh_completion = home / ".zsh" / "completions" / "_spudplate";
+        zshrc = home / ".zshrc";
+    }
+    std::filesystem::path templates_root = install_dir();
+
+    std::vector<std::filesystem::path> spp_paths;
+    if (purge) {
+        spp_paths = list_installed_spp_paths(templates_root);
+    }
+
+    out << "this will remove:\n";
+    if (!binary.empty() && std::filesystem::exists(binary)) {
+        out << "  binary:           " << binary.string() << "\n";
+    }
+    if (!bash_completion.empty() && std::filesystem::exists(bash_completion)) {
+        out << "  bash completion:  " << bash_completion.string() << "\n";
+    }
+    if (!zsh_completion.empty() && std::filesystem::exists(zsh_completion)) {
+        out << "  zsh completion:   " << zsh_completion.string() << "\n";
+    }
+    if (!zshrc.empty() && std::filesystem::is_regular_file(zshrc)) {
+        std::ifstream in(zshrc);
+        std::string contents((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+        if (contents.find("# >>> spudplate completion >>>") !=
+            std::string::npos) {
+            out << "  zsh setup block:  in " << zshrc.string() << "\n";
+        }
+    }
+    if (purge && !spp_paths.empty()) {
+        out << "  installed templates: " << spp_paths.size() << " .spp file"
+            << (spp_paths.size() == 1 ? "" : "s") << " in "
+            << templates_root.string() << "\n";
+    } else if (!purge && !templates_root.empty()) {
+        out << "\ninstalled templates under " << templates_root.string()
+            << " will be preserved (pass --purge to remove them).\n";
+    }
+
+    if (!skip_confirm) {
+        const char* prompt =
+            purge ? "this is irreversible. continue? [y/N] " : "continue? [y/N] ";
+        if (!confirm_yes_no(out, prompt)) {
+            out << "aborted\n";
+            return 0;
+        }
+    }
+
+    std::error_code ec;
+    auto remove_if_exists = [&](const std::filesystem::path& p, const char* label) {
+        if (p.empty() || !std::filesystem::exists(p)) {
+            return;
+        }
+        if (std::filesystem::remove(p, ec)) {
+            out << "  removed " << label << ": " << p.string() << "\n";
+        } else {
+            err << "  failed to remove " << label << ": " << p.string() << ": "
+                << ec.message() << "\n";
+        }
+    };
+    remove_if_exists(bash_completion, "bash completion");
+    remove_if_exists(zsh_completion, "zsh completion");
+    if (!zshrc.empty() && remove_zshrc_block(zshrc)) {
+        out << "  removed zsh setup block from " << zshrc.string() << "\n";
+    }
+    if (purge) {
+        for (const auto& p : spp_paths) {
+            remove_if_exists(p, "template");
+        }
+    }
+    // Remove the binary last so any earlier-step failures still leave the
+    // user with a working binary they can re-invoke after fixing.
+    remove_if_exists(binary, "binary");
+
+    out << "done\n";
+    return 0;
+}
+
 int cmd_completion(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     if (argc >= 3 && is_help_flag(argv[2])) {
         print_help_completion(out);
@@ -1092,6 +1316,9 @@ int cli_main(int argc, char* argv[], std::ostream& out, std::ostream& err,
     }
     if (subcommand == "completion") {
         return cmd_completion(argc, argv, out, err);
+    }
+    if (subcommand == "self-uninstall") {
+        return cmd_self_uninstall(argc, argv, out, err);
     }
     print_usage(err);
     return 1;
