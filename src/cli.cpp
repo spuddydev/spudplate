@@ -808,10 +808,12 @@ int cmd_self_uninstall(int argc, char* argv[], std::ostream& out,
             << " will be preserved (pass --purge to remove them).\n";
     }
 
+    if (purge) {
+        out << "\nwarning: --purge will permanently delete every installed "
+               "template; this is irreversible\n";
+    }
     if (!skip_confirm) {
-        const char* prompt =
-            purge ? "this is irreversible. continue? [y/N] " : "continue? [y/N] ";
-        if (!confirm_yes_no(out, prompt)) {
+        if (!confirm_yes_no(out, "continue? [y/N] ")) {
             out << "aborted\n";
             return 0;
         }
