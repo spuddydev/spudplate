@@ -12,16 +12,22 @@
 namespace spudplate {
 
 /**
- * @brief The set of assets a parsed program references on disk.
+ * @brief The set of assets and dependencies a parsed program references.
  *
  * Asset paths are normalised (forward-slash separators, no leading `/`,
  * no `.` or `..` segments, no embedded NUL) and deduped by path - entries
  * with the same normalised path are collapsed iff their bytes and mode
  * match. A trailing `/` on a path means "empty leaf directory" and the
  * data field is empty.
+ *
+ * Deps are the bytes of every installed `.spp` referenced by an `include`
+ * statement, deduped by name. Deps appear in source-order of their first
+ * include site so error messages for cross-dep clashes name the earliest
+ * point where a name became live.
  */
 struct BundleResult {
     std::vector<SpudpackAsset> assets;  ///< Deduped, normalised assets ready to embed in a spudpack.
+    std::vector<SpudpackDep> deps;      ///< Deduped, name-keyed dependencies ready to embed in a spudpack.
 };
 
 /**
@@ -45,12 +51,20 @@ class BundleError : public std::runtime_error {
 };
 
 /**
- * @brief Walk a parsed program and collect every asset it references.
+ * @brief Walk a parsed program and collect every asset and dependency it references.
  *
  * `source_root` is the directory the source `.spud` lives in - relative
  * source paths in `file ... from`, `mkdir ... from`, and `copy` resolve
- * against it. The bundler dereferences symlinks, breaks loops on
- * canonical directory paths, and rejects:
+ * against it.
+ *
+ * `install_root` is the directory installed templates live in. Each
+ * `include <name>` statement resolves to `<install_root>/<name>.spp` and
+ * the file's bytes are attached as a dep. An empty `install_root` means
+ * the caller is not in install mode and any `include` statement is a
+ * `BundleError`.
+ *
+ * The bundler dereferences symlinks, breaks loops on canonical directory
+ * paths, and rejects:
  *   - source paths whose first segment is dynamic (interpolation or alias)
  *   - dynamic segments that splice mid-filename
  *   - `copy` sources that resolve to a regular file
@@ -58,9 +72,13 @@ class BundleError : public std::runtime_error {
  *   - entries whose canonical target falls outside canonical source_root
  *   - duplicates with the same normalised path but conflicting bytes or
  *     mode
+ *   - `include` whose name is not installed under `install_root`
+ *   - `include` whose resolved file is not a regular file or fails to
+ *     decode as a valid spudpack
  */
 BundleResult bundle_assets(const Program& program,
-                           const std::filesystem::path& source_root);
+                           const std::filesystem::path& source_root,
+                           const std::filesystem::path& install_root = {});
 
 }  // namespace spudplate
 

@@ -444,10 +444,20 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 3;
     }
 
+    std::filesystem::path home = install_dir();
+    if (home.empty()) {
+        err << "cannot determine install directory: set SPUDPLATE_HOME, "
+               "XDG_DATA_HOME, or HOME\n";
+        return 1;
+    }
+
     std::vector<SpudpackAsset> assets;
+    std::vector<spudplate::SpudpackDep> deps;
     try {
-        BundleResult bundled = bundle_assets(program, source_path.parent_path());
+        BundleResult bundled =
+            bundle_assets(program, source_path.parent_path(), home);
         assets = std::move(bundled.assets);
+        deps = std::move(bundled.deps);
     } catch (const BundleError& e) {
         print_error(err, source_path.string(), "bundle error", e.line(), e.column(),
                     e.what());
@@ -460,13 +470,6 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     } catch (const BinarySerializeError& e) {
         err << source_path.string() << ": " << e.what() << "\n";
         return 3;
-    }
-
-    std::filesystem::path home = install_dir();
-    if (home.empty()) {
-        err << "cannot determine install directory: set SPUDPLATE_HOME, "
-               "XDG_DATA_HOME, or HOME\n";
-        return 1;
     }
 
     std::string name = source_path.stem().string();
@@ -513,6 +516,7 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     pack.source = std::move(source);
     pack.program_bytes = std::move(program_bytes);
     pack.assets = std::move(assets);
+    pack.deps = std::move(deps);
 
     try {
         spudpack_write_file(tmp_path, pack);
