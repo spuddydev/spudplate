@@ -5,7 +5,7 @@ PROJECT_NUMBER         =
 OUTPUT_DIRECTORY       = docs
 CREATE_SUBDIRS         = NO
 
-INPUT                  = include src docs/index.md docs/getting-started.md docs/syntax.md docs/cli.md docs/spudpack-format.md docs/lang/index.md docs/lang/lexical.md docs/lang/types-and-expressions.md docs/lang/paths.md docs/lang/scoping.md docs/lang/statements/index.md docs/lang/statements/ask.md docs/lang/statements/let.md docs/lang/statements/mkdir.md docs/lang/statements/file.md docs/lang/statements/copy.md docs/lang/statements/repeat.md docs/lang/statements/if.md docs/lang/statements/include.md docs/lang/statements/run.md docs/lang/best-practices.md
+INPUT                  = include src docs/index.md docs/getting-started.md docs/syntax.md docs/cli.md docs/spudpack-format.md docs/lang/index.md docs/lang/lexical.md docs/lang/types-and-expressions.md docs/lang/paths.md docs/lang/scoping.md docs/lang/statements/index.md docs/lang/statements/ask.md docs/lang/statements/let.md docs/lang/statements/mkdir.md docs/lang/statements/file.md docs/lang/statements/copy.md docs/lang/statements/repeat.md docs/lang/statements/if.md docs/lang/statements/include.md docs/lang/statements/run.md docs/lang/best-practices.md docs/lang/pitfalls.md
 USE_MDFILE_AS_MAINPAGE = docs/index.md
 FILE_PATTERNS          = *.h *.cpp
 RECURSIVE              = YES
