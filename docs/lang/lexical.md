@@ -107,7 +107,7 @@ An integer literal is one or more decimal digits.
 2026
 ```
 
-Negative integers are written with a leading `-` operator: `-1` parses as a unary minus applied to the literal `1`. The lexer does not recognise `-1` as a single token.
+There is no unary minus. A literal `-1` does not parse — write the value as a binary subtraction such as `0 - 1`, or bind a positive integer and subtract it.
 
 There is no support for hexadecimal, octal (with the exception of `mode 0755` octal forms — see [Statements](statements.md)), or floating-point literals.
 
