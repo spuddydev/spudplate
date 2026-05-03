@@ -15,9 +15,12 @@
 #include <utility>
 
 #include "spudplate/ast.h"
+#include "spudplate/binary_serializer.h"
 #include "spudplate/lexer.h"
 #include "spudplate/parser.h"
+#include "spudplate/spudpack.h"
 #include "spudplate/token.h"
+#include "spudplate/validator.h"
 #include "test_helpers.h"
 
 using spudplate::AliasMap;
@@ -48,10 +51,15 @@ using spudplate::run;
 using spudplate::run_for_tests;
 using spudplate::RuntimeError;
 using spudplate::ScriptedPrompter;
+using spudplate::serialize_program;
+using spudplate::Spudpack;
+using spudplate::SpudpackDep;
+using spudplate::spudpack_encode;
 using spudplate::StdinPrompter;
 using spudplate::StringLiteralExpr;
 using spudplate::TokenType;
 using spudplate::UnaryExpr;
+using spudplate::validate;
 using spudplate::Value;
 using spudplate::value_to_string;
 using spudplate::VarType;
@@ -224,16 +232,64 @@ TEST(InterpreterTest, EmptyProgramRunsCleanly) {
 
 // --- Statement types still pending an implementation ---
 
-TEST(InterpreterTest, IncludeThrowsNotYetSupported) {
-    auto program = parse(R"(include claude_setup
+// Build a self-contained dep blob from spudlang source. The dep has its
+// own asks but no `from`/`copy` references, so the bundler's asset map
+// is empty and the parent test does not need to fake disk state.
+std::vector<std::uint8_t> dep_bytes_from_source(const std::string& source) {
+    Program p = parse(source);
+    validate(p);
+    Spudpack pack;
+    pack.source = source;
+    pack.program_bytes = serialize_program(p);
+    return spudpack_encode(pack);
+}
+
+TEST(InterpreterTest, IncludeRunsDepInPlaceAndIsolatesScope) {
+    // Parent asks `before`, then includes a dep that asks `dep_q`, then
+    // asks `after`. With in-place semantics the user answers in source
+    // order: before -> dep_q -> after.
+    auto dep = dep_bytes_from_source(R"(ask dep_q "dep?" string default "x"
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(ask before "before?" string default "a"
+include child
+ask after "after?" string default "b"
+)");
+    ScriptedPrompter prompter({"first", "middle", "last"});
+    Environment env =
+        run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("before")), "first");
+    EXPECT_EQ(std::get<std::string>(*env.lookup("after")), "last");
+    // The dep's `dep_q` is bound only inside the dep's scope.
+    EXPECT_FALSE(env.lookup("dep_q").has_value());
+}
+
+TEST(InterpreterTest, IncludeRespectsWhenClauseFalse) {
+    auto dep = dep_bytes_from_source(R"(ask dep_q "dep?" string default "x"
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(ask flag "flag?" bool default false
+include child when flag
+ask after "after?" string default "z"
+)");
+    // flag answered false; the dep's prompt must not fire.
+    ScriptedPrompter prompter({"n", "tail"});
+    Environment env =
+        run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+    EXPECT_EQ(std::get<bool>(*env.lookup("flag")), false);
+    EXPECT_EQ(std::get<std::string>(*env.lookup("after")), "tail");
+}
+
+TEST(InterpreterTest, IncludeWithoutBundledDepIsRuntimeError) {
+    // No deps supplied; the include statement has nothing to resolve.
+    auto program = parse(R"(include missing
 )");
     NullPrompter prompter;
-    try {
-        run(program, prompter);
-        FAIL() << "expected RuntimeError";
-    } catch (const RuntimeError& e) {
-        EXPECT_NE(std::string(e.what()).find("include"), std::string::npos);
-    }
+    EXPECT_THROW(run(program, prompter), RuntimeError);
 }
 
 // --- run_for_tests returns the interpreter's environment ---

@@ -29,8 +29,10 @@
 #include <unistd.h>
 
 #include "spudplate/ast.h"
+#include "spudplate/binary_serializer.h"
 #include "spudplate/spudpack.h"
 #include "spudplate/token.h"
+#include "spudplate/validator.h"
 
 namespace spudplate {
 
@@ -797,10 +799,27 @@ Value eval_call(const FunctionCallExpr& fc, const Environment& env) {
     type_error("unknown function '" + fc.name + "'", fc.line, fc.column);
 }
 
+// Cap nested `include` chains. A reasonable template tree fits well under
+// this; deep nesting is almost always either a self-include cycle that
+// snuck past install-time checks (e.g. running directly off bundled bytes
+// without a fresh install) or a misuse that would blow the stack.
+constexpr int kMaxIncludeDepth = 16;
+
 class Interpreter {
   public:
-    Interpreter(Prompter& prompter, const SourceProvider& source)
-        : prompter_(prompter), source_(source) {}
+    Interpreter(Prompter& prompter, const SourceProvider& source,
+                const std::vector<SpudpackDep>* deps = nullptr,
+                int include_depth = 0)
+        : prompter_(prompter),
+          source_(source),
+          deps_(deps),
+          include_depth_(include_depth) {
+        if (deps_ != nullptr) {
+            for (const auto& dep : *deps_) {
+                dep_index_.emplace(dep.name, &dep);
+            }
+        }
+    }
 
     void set_ask_total(int total) { ask_total_ = total; }
     void set_timeouts_disabled(bool b) { timeouts_disabled_ = b; }
@@ -838,9 +857,7 @@ class Interpreter {
                 } else if constexpr (std::is_same_v<T, CopyStmt>) {
                     execute_copy(s);
                 } else if constexpr (std::is_same_v<T, IncludeStmt>) {
-                    throw RuntimeError(
-                        "statement 'include' not yet supported in this build",
-                        s.line, s.column);
+                    execute_include(s);
                 } else if constexpr (std::is_same_v<T, RunStmt>) {
                     execute_run(s);
                 } else if constexpr (std::is_same_v<T, IfStmt>) {
@@ -855,6 +872,15 @@ class Interpreter {
         return pending_;
     }
 
+    // Move-out hooks the include path uses to merge a child interpreter's
+    // queued ops and created-paths into the parent at the include site.
+    [[nodiscard]] std::vector<PendingOp> take_pending() {
+        return std::move(pending_);
+    }
+    [[nodiscard]] std::unordered_set<std::string> take_created_paths() {
+        return std::move(created_during_run_);
+    }
+
     void flush() {
         for (const auto& op : pending_) {
             std::visit([&](const auto& o) { run_op(o); }, op);
@@ -862,6 +888,98 @@ class Interpreter {
     }
 
   private:
+    // Decode a bundled dep, deserialise its program, validate it, and run
+    // it inline at the include point. The dep gets a fresh `Environment`
+    // (variable scope is isolated) and its own asset map (its `from`/`copy`
+    // sources resolve against bundled assets, not the parent's). Pending
+    // filesystem ops produced by the dep are appended to the parent's
+    // queue so the whole tree flushes atomically at the end of the run.
+    void execute_include(const IncludeStmt& s) {
+        if (!when_passes(s.when_clause, env_)) {
+            return;
+        }
+        if (include_depth_ >= kMaxIncludeDepth) {
+            throw RuntimeError("include nesting exceeds maximum depth",
+                               s.line, s.column);
+        }
+        auto it = dep_index_.find(s.name);
+        if (it == dep_index_.end()) {
+            throw RuntimeError(
+                "include '" + s.name +
+                    "' was not bundled into this template; reinstall the "
+                    "parent so the dep is captured",
+                s.line, s.column);
+        }
+        const SpudpackDep& dep = *it->second;
+
+        Spudpack dep_pack;
+        try {
+            dep_pack = spudpack_decode(dep.bytes.data(), dep.bytes.size());
+        } catch (const SpudpackError& e) {
+            throw RuntimeError(
+                "include '" + s.name + "' failed to decode: " + e.what(),
+                s.line, s.column);
+        }
+
+        Program dep_program;
+        try {
+            dep_program = deserialize_program(dep_pack.program_bytes.data(),
+                                              dep_pack.program_bytes.size(),
+                                              dep_pack.version);
+        } catch (const std::exception& e) {
+            throw RuntimeError(
+                "include '" + s.name + "' failed to deserialise: " + e.what(),
+                s.line, s.column);
+        }
+
+        try {
+            validate(dep_program);
+        } catch (const std::exception& e) {
+            throw RuntimeError(
+                "include '" + s.name + "' failed validation: " + e.what(),
+                s.line, s.column);
+        }
+
+        AssetMapSourceProvider dep_source(dep_pack.assets);
+        Interpreter child(prompter_, dep_source, &dep_pack.deps,
+                          include_depth_ + 1);
+        child.set_timeouts_disabled(timeouts_disabled_);
+        child.set_ask_total(count_ask_statements_local(dep_program));
+
+        try {
+            for (const auto& stmt : dep_program.statements) {
+                if (stmt) child.execute(*stmt);
+            }
+        } catch (...) {
+            // Drop the child's queued ops on error - we are propagating up
+            // to the parent's exception path which will short-circuit the
+            // flush. Keep the child's already-populated `pending_` out of
+            // the parent so a partial dep run never half-flushes.
+            throw;
+        }
+
+        std::vector<PendingOp> child_pending = child.take_pending();
+        for (auto&& op : child_pending) {
+            pending_.push_back(std::move(op));
+        }
+        std::unordered_set<std::string> child_created =
+            child.take_created_paths();
+        created_during_run_.merge(child_created);
+    }
+
+    // Same shape as the file-scope `count_ask_statements`, defined as a
+    // class member so the include path can call it without the lambda
+    // dance the file-scope helper would otherwise need.
+    static int count_ask_statements_local(const Program& program) {
+        int total = 0;
+        for (const auto& stmt : program.statements) {
+            if (stmt && std::holds_alternative<AskStmt>(stmt->data)) {
+                ++total;
+            }
+        }
+        return total;
+    }
+
     void execute_repeat(const RepeatStmt& s) {
         if (!when_passes(s.when_clause, env_)) {
             return;
@@ -1395,6 +1513,9 @@ class Interpreter {
     Environment env_;
     Prompter& prompter_;
     const SourceProvider& source_;
+    const std::vector<SpudpackDep>* deps_;
+    std::unordered_map<std::string, const SpudpackDep*> dep_index_;
+    int include_depth_;
     AliasMap alias_map_;
     std::vector<PendingOp> pending_;
     std::unordered_set<std::string> created_during_run_;
@@ -1672,7 +1793,8 @@ std::string value_to_string(const Value& value) {
 }
 
 void run(const Program& program, Prompter& prompter, bool skip_authorization,
-         const SourceProvider* source, bool timeouts_disabled) {
+         const SourceProvider* source, bool timeouts_disabled,
+         const std::vector<SpudpackDep>* deps) {
     if (!skip_authorization) {
         std::string summary = build_authorize_summary(program);
         if (!summary.empty() && !prompter.authorize(summary)) {
@@ -1680,15 +1802,18 @@ void run(const Program& program, Prompter& prompter, bool skip_authorization,
         }
     }
     Interpreter interp(prompter,
-                       source != nullptr ? *source : default_source_provider());
+                       source != nullptr ? *source : default_source_provider(),
+                       deps);
     interp.set_timeouts_disabled(timeouts_disabled);
     run_program(program, interp);
 }
 
 Environment run_for_tests(const Program& program, Prompter& prompter,
-                          const SourceProvider* source) {
+                          const SourceProvider* source,
+                          const std::vector<SpudpackDep>* deps) {
     Interpreter interp(prompter,
-                       source != nullptr ? *source : default_source_provider());
+                       source != nullptr ? *source : default_source_provider(),
+                       deps);
     run_program(program, interp);
     return std::move(interp.env());
 }
@@ -1863,9 +1988,11 @@ bool locale_is_utf8() {
 }
 
 void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
-             bool ascii_only, const SourceProvider* source) {
+             bool ascii_only, const SourceProvider* source,
+             const std::vector<SpudpackDep>* deps) {
     Interpreter interp(prompter,
-                       source != nullptr ? *source : default_source_provider());
+                       source != nullptr ? *source : default_source_provider(),
+                       deps);
     interp.set_ask_total(count_ask_statements(program));
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);

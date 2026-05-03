@@ -13,6 +13,7 @@
 
 using spudplate::Spudpack;
 using spudplate::SpudpackAsset;
+using spudplate::SpudpackDep;
 using spudplate::SpudpackError;
 using spudplate::is_normalized_asset_path;
 using spudplate::normalize_asset_path;
@@ -163,20 +164,20 @@ TEST(SpudpackCodec, UnsupportedVersionZero) {
     }
 }
 
-TEST(SpudpackCodec, UnsupportedVersionThree) {
-    // v1 and v2 are accepted; v3 (and above) is not.
+TEST(SpudpackCodec, UnsupportedVersionFour) {
+    // v1, v2, and v3 are accepted; v4 (and above) is not.
     Spudpack in = make_simple();
     auto bytes = spudpack_encode(in);
-    bytes[4] = 3;
+    bytes[4] = 4;
     rewrite_crc(bytes);
     EXPECT_THROW(spudpack_decode(bytes.data(), bytes.size()), SpudpackError);
 }
 
 TEST(SpudpackCodec, V1FixtureDecodes) {
-    // Encoder writes v2; flip the byte to 1 and rewrite the CRC. Decoding
-    // succeeds and the resulting Spudpack carries version=1 so downstream
-    // code (binary serialiser) can decode RunStmt without the trailing
-    // timeout field.
+    // Encoder writes the highest supported version; flip the byte to 1 and
+    // rewrite the CRC. Decoding succeeds and the resulting Spudpack carries
+    // version=1 so downstream code (binary serialiser) can decode RunStmt
+    // without the trailing timeout field.
     Spudpack in = make_simple();
     auto bytes = spudpack_encode(in);
     bytes[4] = 1;
@@ -184,6 +185,17 @@ TEST(SpudpackCodec, V1FixtureDecodes) {
     auto out = spudpack_decode(bytes.data(), bytes.size());
     EXPECT_EQ(out.version, 1u);
     EXPECT_EQ(out.source, in.source);
+}
+
+TEST(SpudpackCodec, V2FixtureDecodes) {
+    // v2 packs in the wild carry no deps - flip the byte to 2 and decode.
+    Spudpack in = make_simple();
+    auto bytes = spudpack_encode(in);
+    bytes[4] = 2;
+    rewrite_crc(bytes);
+    auto out = spudpack_decode(bytes.data(), bytes.size());
+    EXPECT_EQ(out.version, 2u);
+    EXPECT_TRUE(out.deps.empty());
 }
 
 TEST(SpudpackCodec, CrcMismatchDetected) {
@@ -201,8 +213,9 @@ TEST(SpudpackCodec, CrcMismatchDetected) {
     }
 }
 
-TEST(SpudpackCodec, DepCountNonZeroRejected) {
-    // Hand-craft a minimal valid header with dep_count = 1.
+TEST(SpudpackCodec, DepCountNonZeroInV1Rejected) {
+    // Hand-craft a minimal valid header with version=1 and dep_count=1.
+    // v1 packs in the wild never carry deps, so the decoder must refuse.
     std::vector<std::uint8_t> bytes;
     bytes.insert(bytes.end(), {'S', 'P', 'U', 'D'});
     bytes.push_back(1);  // version
@@ -218,6 +231,95 @@ TEST(SpudpackCodec, DepCountNonZeroRejected) {
         FAIL() << "expected throw";
     } catch (const SpudpackError& e) {
         EXPECT_NE(std::string(e.what()).find("does not support deps"),
+                  std::string::npos);
+    }
+}
+
+TEST(SpudpackCodec, RoundTripWithDeps) {
+    // Build a self-contained dep blob first, then bundle two of them as
+    // deps of an outer pack. The dep bytes are stored opaquely so the
+    // outer encode/decode does not care about their internals.
+    Spudpack inner_a;
+    inner_a.source = "ask q \"q?\" string\n";
+    inner_a.program_bytes = {9, 9, 9};
+    auto inner_a_bytes = spudpack_encode(inner_a);
+
+    Spudpack inner_b;
+    inner_b.source = "let x = 1\n";
+    inner_b.program_bytes = {1, 1};
+    auto inner_b_bytes = spudpack_encode(inner_b);
+
+    Spudpack in = make_simple();
+    in.deps.push_back({"inner_a", inner_a_bytes});
+    in.deps.push_back({"inner_b", inner_b_bytes});
+    auto bytes = spudpack_encode(in);
+    Spudpack out = spudpack_decode(bytes.data(), bytes.size());
+    EXPECT_EQ(out.version, 3u);
+    ASSERT_EQ(out.deps.size(), 2u);
+    EXPECT_EQ(out.deps[0].name, "inner_a");
+    EXPECT_EQ(out.deps[0].bytes, inner_a_bytes);
+    EXPECT_EQ(out.deps[1].name, "inner_b");
+    EXPECT_EQ(out.deps[1].bytes, inner_b_bytes);
+
+    // The dep bytes must round-trip back through the codec untouched.
+    Spudpack a_decoded = spudpack_decode(out.deps[0].bytes.data(),
+                                         out.deps[0].bytes.size());
+    EXPECT_EQ(a_decoded.source, inner_a.source);
+}
+
+TEST(SpudpackCodec, EncodeRejectsDepNameWithSlash) {
+    Spudpack in;
+    in.deps.push_back({"a/b", {1, 2, 3}});
+    EXPECT_THROW(spudpack_encode(in), SpudpackError);
+}
+
+TEST(SpudpackCodec, EncodeRejectsEmptyDepName) {
+    Spudpack in;
+    in.deps.push_back({"", {1, 2, 3}});
+    EXPECT_THROW(spudpack_encode(in), SpudpackError);
+}
+
+TEST(SpudpackCodec, EncodeRejectsDepNameDotDot) {
+    Spudpack in;
+    in.deps.push_back({"..", {1, 2, 3}});
+    EXPECT_THROW(spudpack_encode(in), SpudpackError);
+}
+
+TEST(SpudpackCodec, DecodeRejectsDepNameWithSlash) {
+    // Build a v3 pack and patch the dep name in place to "a/b".
+    Spudpack in;
+    in.deps.push_back({"abc", {1, 2, 3}});
+    auto bytes = spudpack_encode(in);
+    // After magic(4)+version(1)+flags(1)+source_len(1)+program_len(1)+
+    // asset_count(1)+dep_count(1)+name_len(1), the next 3 bytes are "abc".
+    std::size_t name_off = 4 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    bytes[name_off] = 'a';
+    bytes[name_off + 1] = '/';
+    bytes[name_off + 2] = 'b';
+    rewrite_crc(bytes);
+    EXPECT_THROW(spudpack_decode(bytes.data(), bytes.size()), SpudpackError);
+}
+
+TEST(SpudpackCodec, DecodeRejectsHugeDepCount) {
+    // Hand-craft a v3 pack with dep_count = (1 << 16), well above the cap.
+    std::vector<std::uint8_t> bytes;
+    bytes.insert(bytes.end(), {'S', 'P', 'U', 'D'});
+    bytes.push_back(3);  // version
+    bytes.push_back(0);  // flags
+    bytes.push_back(0);  // source_len = 0
+    bytes.push_back(0);  // program_len = 0
+    bytes.push_back(0);  // asset_count = 0
+    // varint 1<<16 -> 0x80 0x80 0x04
+    bytes.push_back(0x80);
+    bytes.push_back(0x80);
+    bytes.push_back(0x04);
+    bytes.insert(bytes.end(), 4, 0);
+    rewrite_crc(bytes);
+    try {
+        spudpack_decode(bytes.data(), bytes.size());
+        FAIL() << "expected throw";
+    } catch (const SpudpackError& e) {
+        EXPECT_NE(std::string(e.what()).find("dep_count exceeds maximum"),
                   std::string::npos);
     }
 }

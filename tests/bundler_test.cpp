@@ -12,6 +12,7 @@
 
 #include "spudplate/lexer.h"
 #include "spudplate/parser.h"
+#include "spudplate/spudpack.h"
 #include "test_helpers.h"
 
 using spudplate::BundleError;
@@ -19,8 +20,11 @@ using spudplate::BundleResult;
 using spudplate::Lexer;
 using spudplate::Parser;
 using spudplate::Program;
+using spudplate::Spudpack;
 using spudplate::SpudpackAsset;
 using spudplate::bundle_assets;
+using spudplate::spudpack_encode;
+using spudplate::spudpack_write_file;
 using spudplate::test::TmpDir;
 
 namespace fs = std::filesystem;
@@ -111,12 +115,12 @@ TEST(Bundler, NonAssetStatementsAreSkipped) {
     Program p = parse(
         "ask name \"Name?\" string\n"
         "let upper_name = upper(name)\n"
-        "include foo when name == \"x\"\n"
         "run \"echo hi\"\n"
         "file \"inline.txt\" content \"hi\"\n");
 
     BundleResult r = bundle_assets(p, tmp.path());
     EXPECT_TRUE(r.assets.empty());
+    EXPECT_TRUE(r.deps.empty());
 }
 
 // --- path classification ---------------------------------------------------
@@ -234,4 +238,82 @@ TEST(Bundler, SymlinkLoopBroken) {
     } catch (const BundleError&) {
         // Acceptable - escaping or unsupported types may surface here.
     }
+}
+
+// --- include / dep collection ----------------------------------------------
+
+namespace {
+
+// Write a minimal valid `.spp` for `name` under `install_root` so the
+// bundler can resolve `include <name>`. The dep's program/assets are
+// empty - we only care that the bytes round-trip through the codec.
+void install_stub(const fs::path& install_root, const std::string& name) {
+    fs::create_directories(install_root);
+    Spudpack p;
+    p.source = "ask q \"q?\" string\n";
+    p.program_bytes = {};  // empty; bundler does not deserialise the dep
+    spudpack_write_file(install_root / (name + ".spp"), p);
+}
+
+}  // namespace
+
+TEST(Bundler, IncludeCollectsInstalledDep) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    install_stub(install_root, "child");
+
+    Program p = parse("include child\n");
+    BundleResult r = bundle_assets(p, tmp.path(), install_root);
+    ASSERT_EQ(r.deps.size(), 1u);
+    EXPECT_EQ(r.deps[0].name, "child");
+    EXPECT_FALSE(r.deps[0].bytes.empty());
+}
+
+TEST(Bundler, IncludeDedupesByName) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    install_stub(install_root, "shared");
+
+    Program p = parse(
+        "ask flag \"flag?\" bool default false\n"
+        "include shared\n"
+        "include shared when flag\n");
+    BundleResult r = bundle_assets(p, tmp.path(), install_root);
+    ASSERT_EQ(r.deps.size(), 1u);
+    EXPECT_EQ(r.deps[0].name, "shared");
+}
+
+TEST(Bundler, IncludeWithoutInstallRootIsAnError) {
+    TmpDir tmp;
+    Program p = parse("include foo\n");
+    EXPECT_THROW(bundle_assets(p, tmp.path()), BundleError);
+}
+
+TEST(Bundler, IncludeMissingDepIsAnError) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    fs::create_directories(install_root);
+    Program p = parse("include not_installed\n");
+    EXPECT_THROW(bundle_assets(p, tmp.path(), install_root), BundleError);
+}
+
+TEST(Bundler, IncludeInsideRepeatAndIfIsCollected) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    install_stub(install_root, "looped");
+    install_stub(install_root, "guarded");
+
+    Program p = parse(
+        "ask n \"n?\" int default 1\n"
+        "ask use_x \"use x?\" bool default false\n"
+        "repeat n as i\n"
+        "  include looped\n"
+        "end\n"
+        "if use_x\n"
+        "  include guarded\n"
+        "end\n");
+    BundleResult r = bundle_assets(p, tmp.path(), install_root);
+    ASSERT_EQ(r.deps.size(), 2u);
+    EXPECT_EQ(r.deps[0].name, "looped");
+    EXPECT_EQ(r.deps[1].name, "guarded");
 }
