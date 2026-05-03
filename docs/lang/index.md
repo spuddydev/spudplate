@@ -22,17 +22,17 @@ This reference describes the language as it stands today. The [CLI reference](..
 
 ## Reference
 
-- @subpage lang_lexical — comments, line continuation, identifiers, keywords, literals
-- @subpage lang_types — types, operators, function calls, and `{expr}` interpolation
-- @subpage lang_paths — path expressions, aliases, and the rules for using each
-- @subpage lang_statements — every statement: `ask`, `let`, `mkdir`, `file`, `copy`, `repeat`, `if`, `include`, `run`
-- @subpage lang_scoping — variable scoping, `repeat`/`if` scope, alias scoping, and condition normalisation
+- @subpage lang_lexical (comments, line continuation, identifiers, keywords, literals)
+- @subpage lang_types (types, operators, function calls, and `{expr}` interpolation)
+- @subpage lang_paths (path expressions, aliases, and the rules for using each)
+- @subpage lang_statements (every statement: `ask`, `let`, `mkdir`, `file`, `copy`, `repeat`, `if`, `include`, `run`)
+- @subpage lang_scoping (variable scoping, `repeat` and `if` scope, alias scoping, and condition normalisation)
 
 ## Guides
 
-- @subpage lang_best_practices — how to write idiomatic, maintainable templates
-- @subpage lang_pitfalls — known footguns and how to avoid them
-- @subpage lang_examples — fully-worked examples from minimal to full-featured
+- @subpage lang_best_practices (how to write idiomatic, maintainable templates)
+- @subpage lang_pitfalls (known footguns and how to avoid them)
+- @subpage lang_examples (fully-worked examples from minimal to full-featured)
 
 ## Conventions used in this reference
 

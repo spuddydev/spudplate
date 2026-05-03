@@ -71,7 +71,7 @@ The following words are reserved and cannot be used as identifiers:
 | Logical     | `and`, `or`, `not`                                                                                 |
 | Boolean     | `true`, `false`                                                                                    |
 
-Reserved words also cannot appear as bare path segments — see [Path expressions](paths.md) and [Pitfalls](pitfalls.md) for the practical consequences.
+Reserved words also cannot appear as bare path segments. See [Path expressions](paths.md) and [Pitfalls](pitfalls.md) for the practical consequences.
 
 ## Literals
 
@@ -107,9 +107,9 @@ An integer literal is one or more decimal digits.
 2026
 ```
 
-There is no unary minus. A literal `-1` does not parse — write the value as a binary subtraction such as `0 - 1`, or bind a positive integer and subtract it.
+There is no unary minus. A literal `-1` does not parse. Write the value as a binary subtraction such as `0 - 1`, or bind a positive integer and subtract it.
 
-There is no support for hexadecimal, octal (with the exception of `mode 0755` octal forms — see [Statements](statements.md)), or floating-point literals.
+There is no support for hexadecimal, octal (with the exception of `mode 0755` octal forms on `mkdir` and `file`, see [Statements](statements.md)), or floating-point literals.
 
 ### Boolean
 
