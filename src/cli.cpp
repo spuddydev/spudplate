@@ -1252,16 +1252,20 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
 
     std::optional<AssetMapSourceProvider> provider;
     const SourceProvider* source_ptr = nullptr;
+    const std::vector<spudplate::SpudpackDep>* deps_ptr = nullptr;
     if (have_pack) {
         provider.emplace(pack.assets);
         source_ptr = &*provider;
+        deps_ptr = &pack.deps;
     }
 
     try {
         if (dry_run_mode) {
-            dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8(), source_ptr);
+            dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8(),
+                    source_ptr, deps_ptr);
         } else {
-            run(program, prompter, skip_authorization, source_ptr, timeouts_disabled);
+            run(program, prompter, skip_authorization, source_ptr,
+                timeouts_disabled, deps_ptr);
         }
     } catch (const RuntimeError& e) {
         print_error(err, file_path.string(), "runtime error", e.line(), e.column(),

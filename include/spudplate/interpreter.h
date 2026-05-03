@@ -291,11 +291,19 @@ class AssetMapSourceProvider final : public SourceProvider {
  * per-`run` timeout enforcement entirely - both the 60-second default and
  * any per-statement `timeout <int>` clause. Useful for known-slow templates
  * and CI runs where an outer scheduler already enforces wall-clock limits.
+ *
+ * `deps` is the dependency vector decoded from the parent spudpack. Each
+ * `include <name>` statement looks the name up here, decodes the bundled
+ * `.spp` bytes, and runs the dependency inline at the include point with
+ * isolated variable scope. A null `deps` argument means the program may
+ * not contain any `include` statements; one that does will throw
+ * `RuntimeError` at the include site.
  */
 void run(const Program& program, Prompter& prompter,
          bool skip_authorization = false,
          const SourceProvider* source = nullptr,
-         bool timeouts_disabled = false);
+         bool timeouts_disabled = false,
+         const std::vector<SpudpackDep>* deps = nullptr);
 
 /**
  * @brief Test-only entry point: like `run`, but returns the final environment.
@@ -304,7 +312,8 @@ void run(const Program& program, Prompter& prompter,
  * on bindings without relying on filesystem side effects.
  */
 Environment run_for_tests(const Program& program, Prompter& prompter,
-                          const SourceProvider* source = nullptr);
+                          const SourceProvider* source = nullptr,
+                          const std::vector<SpudpackDep>* deps = nullptr);
 
 /**
  * @brief Run a program without touching the filesystem.
@@ -324,7 +333,8 @@ Environment run_for_tests(const Program& program, Prompter& prompter,
  */
 void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
              bool ascii_only = false,
-             const SourceProvider* source = nullptr);
+             const SourceProvider* source = nullptr,
+             const std::vector<SpudpackDep>* deps = nullptr);
 
 /**
  * @brief Heuristic check: does the current environment look UTF-8 capable?
