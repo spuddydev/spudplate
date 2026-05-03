@@ -19,18 +19,40 @@ namespace {
 constexpr std::array<std::uint8_t, 4> kMagic = {'S', 'P', 'U', 'D'};
 // v1: original format.
 // v2: RunStmt encoding gains a trailing optional `timeout` field; old packs
-// without it deserialise as nullopt. Encoder always writes v2; decoder
-// accepts both 1 and 2 for backward compatibility with shipped packs.
-constexpr std::uint8_t kVersion = 2;
+// without it deserialise as nullopt.
+// v3: dep_count may be nonzero. Per dep: varint name_len, name bytes,
+// varint blob_len, blob bytes. The blob is itself a complete spudpack
+// byte stream. v1 and v2 still require dep_count == 0.
+// Encoder always writes the highest supported version; decoder accepts
+// every version in [kMinVersion, kVersion].
+constexpr std::uint8_t kVersion = 3;
 constexpr std::uint8_t kMinVersion = 1;
+constexpr std::uint8_t kVersionDepsAllowed = 3;
 constexpr std::uint8_t kFlags = 0;
 
-// Per-asset and per-file caps. Both apply to declared lengths inside the
-// stream and are checked before any allocation so a malformed header
-// cannot trigger a multi-gigabyte `vector::reserve`.
+// Per-asset, per-dep, and per-file caps. All apply to declared lengths
+// inside the stream and are checked before any allocation so a malformed
+// header cannot trigger a multi-gigabyte `vector::reserve`. Dep blobs
+// reuse the per-asset cap since a dep is itself a small spudpack.
 constexpr std::size_t kMaxAssetBytes = std::size_t{256} * 1024 * 1024;
 constexpr std::size_t kMaxTotalBytes = std::size_t{2} * 1024 * 1024 * 1024;
 constexpr std::size_t kMaxAssetCount = std::size_t{1} << 20;
+constexpr std::size_t kMaxDepCount = std::size_t{1} << 10;
+constexpr std::size_t kMaxDepBytes = kMaxAssetBytes;
+
+// A dep name must be a bare identifier matching the rules already enforced
+// by `spudplate install` for installed template names. Specifically: it
+// must be nonempty, free of `/`, free of NUL, and must not be `.` or `..`.
+// Stricter constraints (e.g. shell-safe characters) are not enforced here -
+// the install-time path resolution is the source of truth.
+bool is_valid_dep_name(std::string_view name) noexcept {
+    if (name.empty()) return false;
+    if (name == "." || name == "..") return false;
+    for (char c : name) {
+        if (c == '/' || c == '\0') return false;
+    }
+    return true;
+}
 
 // Producer convention: spudplate's own bundler masks asset modes to 0o0777
 // before encode. The decoder additionally rejects anything outside 0o7777
@@ -270,10 +292,21 @@ std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack) {
         write_length_prefixed(out, asset.data.data(), asset.data.size());
     }
 
-    // dep_count: spudpack v1 does not bundle dependencies. Reserved as a
-    // varint (rather than a fixed byte) so a future version that wants
-    // hundreds of deps does not need a layout change.
-    write_varint(out, 0);
+    if (pack.deps.size() > kMaxDepCount) {
+        throw SpudpackError("spudpack dep_count exceeds maximum");
+    }
+    write_varint(out, static_cast<std::uint64_t>(pack.deps.size()));
+    for (const SpudpackDep& dep : pack.deps) {
+        if (!is_valid_dep_name(dep.name)) {
+            throw SpudpackError("spudpack dep name is not a bare identifier: " +
+                                dep.name);
+        }
+        if (dep.bytes.size() > kMaxDepBytes) {
+            throw SpudpackError("spudpack dep exceeds 256MiB cap: " + dep.name);
+        }
+        write_length_prefixed(out, dep.name.data(), dep.name.size());
+        write_length_prefixed(out, dep.bytes.data(), dep.bytes.size());
+    }
 
     if (out.size() + 4 > kMaxTotalBytes) {
         throw SpudpackError("spudpack exceeds 2GiB total cap");
@@ -363,9 +396,38 @@ Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size) {
     }
 
     std::size_t dep_at = r.offset();
-    std::uint64_t dep_count = r.read_varint();
-    if (dep_count != 0) {
-        throw SpudpackError("spudpack v1 does not support deps", dep_at);
+    std::uint64_t dep_count_raw = r.read_varint();
+    if (version < kVersionDepsAllowed && dep_count_raw != 0) {
+        throw SpudpackError(
+            "spudpack v" + std::to_string(version) + " does not support deps",
+            dep_at);
+    }
+    if (dep_count_raw > kMaxDepCount) {
+        throw SpudpackError("spudpack dep_count exceeds maximum", dep_at);
+    }
+    std::size_t dep_count = static_cast<std::size_t>(dep_count_raw);
+    pack.deps.reserve(dep_count);
+
+    for (std::size_t i = 0; i < dep_count; ++i) {
+        SpudpackDep dep;
+
+        std::size_t name_at = r.offset();
+        std::size_t name_len = r.read_checked_length();
+        r.read_bytes_into(dep.name, name_len);
+        if (!is_valid_dep_name(dep.name)) {
+            throw SpudpackError(
+                "spudpack dep name is not a bare identifier", name_at);
+        }
+
+        std::size_t blob_len_at = r.offset();
+        std::size_t blob_len = r.read_checked_length();
+        if (blob_len > kMaxDepBytes) {
+            throw SpudpackError(
+                "spudpack dep exceeds 256MiB cap", blob_len_at);
+        }
+        r.read_bytes_into(dep.bytes, blob_len);
+
+        pack.deps.push_back(std::move(dep));
     }
 
     if (r.remaining() != 0) {
