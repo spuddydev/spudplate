@@ -11,7 +11,7 @@ Write a `.spud` file in spudlang, install it once, and run it whenever you want 
 | Page | What's in it |
 |------|--------------|
 | [Getting Started](getting-started.md) | Install spudplate, write a tiny `.spud`, install and run it. |
-| [Spudlang Syntax Reference](syntax.md) | The full language: questions, actions, expressions, scoping rules. |
+| @ref lang_reference "Spudlang Language Reference" | The full language: lexical structure, types, statements, scoping, best practices, pitfalls, examples. |
 | [CLI Reference](cli.md) | Every subcommand, every flag, every environment variable. |
 | [Spudpack Binary Format](spudpack-format.md) | The on-disk layout of `.spp` files. |
 | [API Reference](annotated.html) | C++ class and struct documentation generated from the headers. |
@@ -41,7 +41,7 @@ file project/"src/main.cpp" from "templates/main.cpp"
 file project/"tests/test_main.cpp" from "templates/test_main.cpp" when use_tests
 ```
 
-Read the [syntax reference](syntax.md) for the rest.
+Read the @ref lang_reference "language reference" for the rest.
 
 ---
 

@@ -40,7 +40,8 @@ Create `hello.spud`:
 ask name "Your name?" string
 
 mkdir "hello" as dir
-file dir/"greeting.txt" content "Hello, " + name + "!\n"
+file dir/"greeting.txt" content "Hello, {name}.
+"
 ```
 
 Three things are happening here:
@@ -88,7 +89,7 @@ Run it again from anywhere - the bundled assets travel with the template, so the
 
 ## 5. Where to next
 
-- **The full language:** [Spudlang Syntax Reference](syntax.md). Path expressions, conditional actions, repeats, includes, and the rest.
+- **The full language:** @ref lang_reference "Spudlang Language Reference". Lexical structure, statements, paths, scoping, best practices, pitfalls, examples.
 - **Every CLI flag:** [CLI Reference](cli.md).
 - **The wire format:** [Spudpack Binary Format](spudpack-format.md), if you're curious how `.spp` files are laid out.
 - **Sharing templates:** send the `.spp` file. The recipient runs it directly with `spudplate run path/to/template.spp` - no install step required.
