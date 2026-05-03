@@ -5,7 +5,7 @@ PROJECT_NUMBER         =
 OUTPUT_DIRECTORY       = docs
 CREATE_SUBDIRS         = NO
 
-INPUT                  = include src docs/index.md docs/getting-started.md docs/syntax.md docs/cli.md docs/spudpack-format.md docs/lang/index.md docs/lang/lexical.md
+INPUT                  = include src docs/index.md docs/getting-started.md docs/syntax.md docs/cli.md docs/spudpack-format.md docs/lang/index.md docs/lang/lexical.md docs/lang/types-and-expressions.md
 USE_MDFILE_AS_MAINPAGE = docs/index.md
 FILE_PATTERNS          = *.h *.cpp
 RECURSIVE              = YES
