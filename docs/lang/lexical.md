@@ -125,7 +125,7 @@ let ready = true
 | Token | Used in                                                                       |
 |-------|-------------------------------------------------------------------------------|
 | `+`, `-`, `*`, `/` | Arithmetic and string concatenation (`+`)                          |
-| `==`, `!=`, `<`, `<=`, `>`, `>=` | Comparison operators                                 |
+| `==`, `!=`, `&lt;`, `&lt;=`, `>`, `>=` | Comparison operators                           |
 | `=`   | Assignment in `let` and reassignment statements                               |
 | `(`, `)` | Grouping in expressions; argument lists for `lower`, `upper`, `trim`, `replace` |
 | `{`, `}` | Open and close interpolation in path expressions                            |
