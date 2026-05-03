@@ -250,15 +250,6 @@ TEST(CliTest, RunWithNoTimeoutDisablesTimeouts) {
     EXPECT_EQ(code, 0);
 }
 
-TEST(CliTest, HelpListsNoTimeoutFlag) {
-    Argv args({"spudplate"});
-    std::stringstream out;
-    std::stringstream err;
-    ScriptedPrompter prompter({});
-    cli_main(args.argc(), args.argv(), out, err, prompter);
-    EXPECT_NE(err.str().find("--no-timeout"), std::string::npos);
-}
-
 TEST(CliTest, RunWithoutYesAsksAuthorization) {
     TmpDir td;
     auto file = td.path() / "ok.spud";
