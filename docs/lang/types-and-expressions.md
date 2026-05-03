@@ -137,7 +137,7 @@ mkdir "week_{n}"
 file "src/{slug}/main.cpp" content ""
 ```
 
-`{...}` outside a quoted segment in a path is a parse error: bare-identifier path segments must be plain identifiers (variable references), and there is no syntax for inline interpolation in an unquoted segment. See [Path expressions](paths.md) for the full path grammar.
+`{...}` outside a quoted segment in a path is a parse error: bare-identifier path segments must be plain identifiers (variable references), and there is no syntax for inline interpolation in an unquoted segment. See @ref lang_paths "Path expressions" for the full path grammar.
 
 ### 3. `from` source files and `copy` source files
 
