@@ -110,6 +110,24 @@ Fetches and installs the latest spudplate release by re-running the install scri
 
 ---
 
+## completion
+
+```
+spudplate completion <bash|zsh>
+```
+
+Prints a shell completion script to stdout. Pipe it into your completion directory to enable tab completion of subcommands, installed template names, and `.spud` files.
+
+```
+# Bash
+spudplate completion bash > ~/.local/share/bash-completion/completions/spudplate
+
+# Zsh
+spudplate completion zsh > ~/.zsh/completions/_spudplate
+```
+
+---
+
 ## Environment variables
 
 | Variable | Effect |
