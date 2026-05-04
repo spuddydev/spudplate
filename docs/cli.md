@@ -38,7 +38,7 @@ Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
 | Flag | Effect |
 |------|--------|
 | `--dry-run` | Walk the program and print the questions and actions without writing any files. |
-| `--yes`, `-y` | Auto-accept question prompts that have a default. |
+| `--yes`, `-y` | Skip the authorisation prompt for `run` statements during this invocation. |
 | `--no-timeout` | Disable per-`run` timeouts for this invocation (default is 60 seconds per shell command). |
 
 `run` decides whether the argument is a path or an installed name. An argument containing `/` or ending in `.spud` or `.spp` is treated as a path; everything else is looked up as `<install-root>/<arg>.spp`.
