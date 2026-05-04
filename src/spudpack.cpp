@@ -46,20 +46,6 @@ constexpr std::size_t kMaxAssetCount = std::size_t{1} << 20;
 constexpr std::size_t kMaxDepCount = std::size_t{1} << 10;
 constexpr std::size_t kMaxDepBytes = kMaxAssetBytes;
 
-// A dep name must be a bare identifier matching the rules already enforced
-// by `spudplate install` for installed template names. Specifically: it
-// must be nonempty, free of `/`, free of NUL, and must not be `.` or `..`.
-// Stricter constraints (e.g. shell-safe characters) are not enforced here -
-// the install-time path resolution is the source of truth.
-bool is_valid_dep_name(std::string_view name) noexcept {
-    if (name.empty()) return false;
-    if (name == "." || name == "..") return false;
-    for (char c : name) {
-        if (c == '/' || c == '\0') return false;
-    }
-    return true;
-}
-
 // Producer convention: spudplate's own bundler masks asset modes to 0o0777
 // before encode. The decoder additionally rejects anything outside 0o7777
 // to give us forward room without accepting nonsense.
@@ -192,6 +178,22 @@ class Reader {
 
 SpudpackError::SpudpackError(std::string message, std::optional<std::size_t> offset)
     : std::runtime_error(std::move(message)), offset_(offset) {}
+
+bool is_valid_dep_name(std::string_view name) noexcept {
+    if (name.empty()) return false;
+    if (name == "." || name == "..") return false;
+    for (char c : name) {
+        if (c == '/' || c == '\0') return false;
+    }
+    return true;
+}
+
+std::filesystem::path archive_path_for(const std::filesystem::path& install_root,
+                                       std::string_view name,
+                                       std::uint32_t version_tag) {
+    return install_root / kArchiveDir /
+           (std::string(name) + ".v" + std::to_string(version_tag) + ".spp");
+}
 
 bool is_normalized_asset_path(std::string_view path) noexcept {
     if (path.empty()) return false;

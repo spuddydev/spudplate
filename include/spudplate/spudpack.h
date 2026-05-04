@@ -140,6 +140,37 @@ std::string normalize_asset_path(std::string_view raw);
  */
 bool is_normalized_asset_path(std::string_view path) noexcept;
 
+/**
+ * @brief Validate a dep name against the bare-identifier rules.
+ *
+ * A valid name is nonempty, contains no `/` or NUL, and is not `.` or
+ * `..`. The codec, the bundler, and the install layer all share this
+ * predicate so they reject the same set of inputs.
+ */
+bool is_valid_dep_name(std::string_view name) noexcept;
+
+/**
+ * @brief Subdirectory of the install root that holds archived previous
+ * versions of installed templates.
+ *
+ * One file per `(name, version_tag)` pair, named `<name>.v<N>.spp`. The
+ * install layer copies the previous on-disk pack here before
+ * overwriting; the bundler reads it back when an `include foo@N` pin
+ * cannot be satisfied by the current install.
+ */
+inline constexpr std::string_view kArchiveDir = ".archive";
+
+/**
+ * @brief Path of an archived previous version under `<install_root>`.
+ *
+ * Exists only as a sibling to the live `<install_root>/<name>.spp` and
+ * is computed identically by every caller, so the format is encoded
+ * once here.
+ */
+std::filesystem::path archive_path_for(const std::filesystem::path& install_root,
+                                       std::string_view name,
+                                       std::uint32_t version_tag);
+
 }  // namespace spudplate
 
 #endif  // SPUDPLATE_SPUDPACK_H

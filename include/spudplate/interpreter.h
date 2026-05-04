@@ -183,6 +183,12 @@ class ScriptedPrompter : public Prompter {
         return last_;
     }
 
+    /** @brief Every request seen so far, in order. Useful for asserting on
+     *         counter, indent, or iteration sequences across a multi-prompt run. */
+    [[nodiscard]] const std::vector<PromptRequest>& requests() const {
+        return requests_;
+    }
+
     /** @brief Set what `authorize` returns. Defaults to true (accept). */
     void set_authorize_response(bool value) { authorize_response_ = value; }
 
@@ -195,6 +201,7 @@ class ScriptedPrompter : public Prompter {
     std::vector<std::string> answers_;
     std::size_t index_{0};
     std::optional<PromptRequest> last_;
+    std::vector<PromptRequest> requests_;
     bool authorize_response_{true};
     std::optional<std::string> last_authorize_summary_;
 };

@@ -292,34 +292,6 @@ TEST(InterpreterTest, IncludeWithoutBundledDepIsRuntimeError) {
     EXPECT_THROW(run(program, prompter), RuntimeError);
 }
 
-// Records every PromptRequest the interpreter issues, in order. Each call
-// returns the matching scripted answer. Lets tests assert on counter
-// indices, indent levels, and iteration ladders for prompts buried in
-// nested includes or repeats.
-class RecordingPrompter : public Prompter {
-  public:
-    explicit RecordingPrompter(std::vector<std::string> answers)
-        : answers_(std::move(answers)) {}
-
-    std::string prompt(const PromptRequest& req) override {
-        requests_.push_back(req);
-        if (index_ >= answers_.size()) {
-            throw std::logic_error("RecordingPrompter ran out of answers");
-        }
-        return answers_[index_++];
-    }
-    bool authorize(const std::string& /*summary*/) override { return true; }
-
-    [[nodiscard]] const std::vector<PromptRequest>& requests() const {
-        return requests_;
-    }
-
-  private:
-    std::vector<std::string> answers_;
-    std::size_t index_{0};
-    std::vector<PromptRequest> requests_;
-};
-
 TEST(InterpreterTest, IncludePromptsContinueParentCounterAndIndent) {
     // Parent has two asks straddling an include; the dep has two asks. All
     // four share one denominator (1/4..4/4) in source order, with the dep's
@@ -334,7 +306,7 @@ ask b2 "b2?" string default "y"
 include child
 ask a2 "a2?" string default "q"
 )");
-    RecordingPrompter prompter({"v1", "v2", "v3", "v4"});
+    ScriptedPrompter prompter({"v1", "v2", "v3", "v4"});
     run_for_tests(program, prompter, /*source=*/nullptr, &deps);
 
     const auto& reqs = prompter.requests();
@@ -380,7 +352,7 @@ include grandchild
 
     auto program = parse(R"(include child
 )");
-    RecordingPrompter prompter({"a", "b"});
+    ScriptedPrompter prompter({"a", "b"});
     run_for_tests(program, prompter, /*source=*/nullptr, &deps);
 
     const auto& reqs = prompter.requests();
@@ -411,7 +383,7 @@ ask d3 "d3?" string default "z"
     auto program = parse(R"(include child
 ask tail "tail?" string default "t"
 )");
-    RecordingPrompter prompter({"a", "b", "c", "d"});
+    ScriptedPrompter prompter({"a", "b", "c", "d"});
     run_for_tests(program, prompter, /*source=*/nullptr, &deps);
 
     const auto& reqs = prompter.requests();

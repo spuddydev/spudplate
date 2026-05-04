@@ -1780,6 +1780,7 @@ bool StdinPrompter::authorize(const std::string& summary) {
 
 std::string ScriptedPrompter::prompt(const PromptRequest& req) {
     last_ = req;
+    requests_.push_back(req);
     if (index_ >= answers_.size()) {
         throw std::logic_error("ScriptedPrompter exhausted");
     }

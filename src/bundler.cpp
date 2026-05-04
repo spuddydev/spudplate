@@ -177,9 +177,7 @@ class Bundler {
         int line = s.line;
         int column = s.column;
 
-        if (name.empty() || name.find('/') != std::string::npos ||
-            name.find('\0') != std::string::npos || name == "." ||
-            name == "..") {
+        if (!is_valid_dep_name(name)) {
             throw BundleError(
                 "include name is not a bare identifier: '" + name + "'",
                 line, column);
@@ -227,11 +225,13 @@ class Bundler {
         dep_order_.push_back(name);
     }
 
-    // Read+verify a spudpack from disk. Used both by pin and by sticky
-    // refresh paths.
-    std::vector<std::uint8_t> read_dep_pack(const std::string& name,
-                                            const fs::path& dep_path,
-                                            int line, int column) {
+    struct ReadDep {
+        std::vector<std::uint8_t> bytes;
+        std::uint32_t version_tag;
+    };
+
+    ReadDep read_dep_pack(const std::string& name, const fs::path& dep_path,
+                          int line, int column) {
         std::error_code ec;
         if (!fs::exists(dep_path, ec) || ec) {
             throw BundleError(
@@ -245,22 +245,21 @@ class Bundler {
                     dep_path.string(),
                 line, column);
         }
-        std::vector<std::uint8_t> bytes =
-            read_file_bytes(dep_path, line, column);
+        ReadDep out;
+        out.bytes = read_file_bytes(dep_path, line, column);
         try {
-            spudpack_decode(bytes.data(), bytes.size());
+            Spudpack decoded =
+                spudpack_decode(out.bytes.data(), out.bytes.size());
+            out.version_tag = decoded.version_tag;
         } catch (const SpudpackError& e) {
             throw BundleError(
                 "include '" + name + "' at " + dep_path.string() +
                     " is not a valid spudpack: " + e.what(),
                 line, column);
         }
-        return bytes;
+        return out;
     }
 
-    // Resolve a hard pin: try the install root first, then the archive.
-    // Returns the dep's full byte stream. Throws if no installed or
-    // archived copy carries the pinned version.
     std::vector<std::uint8_t> resolve_pinned_dep(const std::string& name,
                                                  std::uint32_t pin,
                                                  int line, int column) {
@@ -268,25 +267,15 @@ class Bundler {
         std::error_code ec;
         if (fs::exists(dep_path, ec) && !ec &&
             fs::is_regular_file(dep_path, ec) && !ec) {
-            std::vector<std::uint8_t> bytes =
-                read_file_bytes(dep_path, line, column);
-            try {
-                Spudpack p =
-                    spudpack_decode(bytes.data(), bytes.size());
-                if (p.version_tag == pin) {
-                    return bytes;
-                }
-            } catch (const SpudpackError& e) {
-                throw BundleError(
-                    "include '" + name + "' at " + dep_path.string() +
-                        " is not a valid spudpack: " + e.what(),
-                    line, column);
+            ReadDep r = read_dep_pack(name, dep_path, line, column);
+            if (r.version_tag == pin) {
+                return std::move(r.bytes);
             }
         }
-        fs::path archive_path = install_root_ / ".archive" /
-                                (name + ".v" + std::to_string(pin) + ".spp");
+        fs::path archive_path = archive_path_for(install_root_, name, pin);
         if (fs::exists(archive_path, ec) && !ec) {
-            return read_dep_pack(name, archive_path, line, column);
+            return std::move(
+                read_dep_pack(name, archive_path, line, column).bytes);
         }
         throw BundleError(
             "include '" + name + "' version pin v" + std::to_string(pin) +
@@ -295,10 +284,6 @@ class Bundler {
             line, column);
     }
 
-    // Resolve an unpinned include: sticky reuse from existing parent
-    // unless `--update-deps` requested refresh, falling back to a fresh
-    // install-root read on first install or when no existing dep
-    // matches.
     std::pair<std::vector<std::uint8_t>, std::uint32_t> resolve_unpinned_dep(
         const std::string& name, int line, int column) {
         bool wants_refresh =
@@ -310,11 +295,8 @@ class Bundler {
             }
         }
         fs::path dep_path = install_root_ / (name + ".spp");
-        std::vector<std::uint8_t> bytes =
-            read_dep_pack(name, dep_path, line, column);
-        std::uint32_t tag =
-            spudpack_decode(bytes.data(), bytes.size()).version_tag;
-        return {std::move(bytes), tag};
+        ReadDep r = read_dep_pack(name, dep_path, line, column);
+        return {std::move(r.bytes), r.version_tag};
     }
 
     // `file ... from <path>` - the path may resolve to a regular file

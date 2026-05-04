@@ -69,6 +69,33 @@ std::vector<std::uint8_t> read_all_bytes(const std::filesystem::path& path) {
     return out;
 }
 
+// Missing or unreadable installed copies are silent: the bundled bytes
+// always run, the warning is purely informational.
+void warn_on_dep_drift(std::ostream& err, const Spudpack& pack,
+                       const std::filesystem::path& home) {
+    if (home.empty()) return;
+    for (const auto& dep : pack.deps) {
+        std::filesystem::path dep_path = home / (dep.name + ".spp");
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(dep_path, ec) || ec) continue;
+        Spudpack installed;
+        try {
+            std::vector<std::uint8_t> bytes = read_all_bytes(dep_path);
+            installed = spudpack_decode(bytes.data(), bytes.size());
+        } catch (...) {
+            continue;
+        }
+        if (installed.version_tag == dep.version_tag) continue;
+        err << "warning: dep '" << dep.name << "' is bundled at v"
+            << dep.version_tag << ", installed v" << installed.version_tag;
+        if (installed.version_tag > dep.version_tag) {
+            err << " (newer; reinstall this template to update)\n";
+        } else {
+            err << " (older than what this template was built against)\n";
+        }
+    }
+}
+
 void print_usage(std::ostream& out) {
     out << "usage: spudplate <command> [args...]\n"
         << "\n"
@@ -636,17 +663,15 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     // non-fatal but loud - the install proceeds, but the user gets told
     // their archive may be incomplete.
     if (existing_parent.has_value()) {
-        std::filesystem::path archive_dir = home / ".archive";
+        std::filesystem::path archive_dir = home / kArchiveDir;
         std::error_code adir_ec;
         std::filesystem::create_directories(archive_dir, adir_ec);
         if (adir_ec) {
             err << "warning: cannot create archive directory "
                 << archive_dir.string() << ": " << adir_ec.message() << "\n";
         } else {
-            std::filesystem::path archive_path =
-                archive_dir / (name + ".v" +
-                               std::to_string(existing_parent->version_tag) +
-                               ".spp");
+            std::filesystem::path archive_path = archive_path_for(
+                home, name, existing_parent->version_tag);
             std::error_code cp_ec;
             std::filesystem::copy_file(
                 final_path, archive_path,
@@ -1162,7 +1187,7 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         std::string n = entry.path().filename().string();
         // Skip the archive directory - it holds historical .spp files,
         // not installable templates.
-        if (n == ".archive") continue;
+        if (n == kArchiveDir) continue;
         if (!std::filesystem::is_regular_file(entry.path() / "template.spud")) {
             continue;
         }
@@ -1297,12 +1322,10 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
         removed_anything = true;
     }
 
-    // Sweep any archived previous versions of this name. Pattern is
-    // `<name>.v<N>.spp` under `<home>/.archive/`. We do a safe prefix
-    // match so we do not accidentally remove an unrelated archive entry
-    // whose name happens to start with the same letters (`foobar` vs
-    // `foo`).
-    std::filesystem::path archive_dir = home / ".archive";
+    // Prefix-match must include the trailing `.v` and the `.spp` suffix
+    // with all-digits middle, otherwise `foobar.v1.spp` is wrongly swept
+    // by `uninstall foo`.
+    std::filesystem::path archive_dir = home / kArchiveDir;
     if (std::filesystem::is_directory(archive_dir, ec)) {
         std::string prefix = name + ".v";
         std::string suffix = ".spp";
@@ -1316,7 +1339,6 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
             if (fname.compare(fname.size() - suffix.size(), suffix.size(),
                               suffix) != 0)
                 continue;
-            // Middle bytes must be all digits to qualify as a version.
             std::string mid = fname.substr(
                 prefix.size(), fname.size() - prefix.size() - suffix.size());
             bool all_digits = !mid.empty();
@@ -1478,48 +1500,8 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         return 3;
     }
 
-    // Drift warnings: for each top-level bundled dep, compare its tag
-    // against the currently-installed copy under the install root (only
-    // when running an installed .spp by name - direct .spud and .spp
-    // paths are not necessarily anchored to any install root). Mismatch
-    // surfaces as a non-fatal warning; a missing or unreadable installed
-    // copy is silent (the bundled bytes always run).
     if (have_pack && shape == RunShape::InstalledSpp && !pack.deps.empty()) {
-        std::filesystem::path drift_home = install_dir();
-        if (!drift_home.empty()) {
-            for (const auto& dep : pack.deps) {
-                std::filesystem::path dep_path =
-                    drift_home / (dep.name + ".spp");
-                std::error_code drift_ec;
-                if (!std::filesystem::is_regular_file(dep_path, drift_ec) ||
-                    drift_ec) {
-                    continue;
-                }
-                std::vector<std::uint8_t> dep_bytes;
-                try {
-                    dep_bytes = read_all_bytes(dep_path);
-                } catch (...) {
-                    continue;
-                }
-                Spudpack installed;
-                try {
-                    installed = spudpack_decode(dep_bytes.data(),
-                                                dep_bytes.size());
-                } catch (...) {
-                    continue;
-                }
-                if (installed.version_tag == dep.version_tag) continue;
-                err << "warning: dep '" << dep.name << "' is bundled at v"
-                    << dep.version_tag << ", installed v"
-                    << installed.version_tag;
-                if (installed.version_tag > dep.version_tag) {
-                    err << " (newer; reinstall this template to update)\n";
-                } else {
-                    err << " (older than what this template was built "
-                           "against)\n";
-                }
-            }
-        }
+        warn_on_dep_drift(err, pack, install_dir());
     }
 
     std::optional<AssetMapSourceProvider> provider;
