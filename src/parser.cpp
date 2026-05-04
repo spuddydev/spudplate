@@ -1,5 +1,8 @@
 #include "spudplate/parser.h"
 
+#include <limits>
+#include <string>
+
 namespace spudplate {
 
 Parser::Parser(Lexer lexer) : lexer_(std::move(lexer)) {
@@ -502,11 +505,35 @@ StmtPtr Parser::parseInclude() {
     Token start = expect(TokenType::INCLUDE, "expected 'include'");
     Token name =
         expect(TokenType::IDENTIFIER, "expected template name after 'include'");
+
+    // Optional `@N` pin clause: `include foo@2`. The `@` must be the very
+    // next token (no whitespace tolerance enforced at parse level - the
+    // lexer treats `@` as a single-char token regardless), and must be
+    // followed by a positive integer literal.
+    std::optional<std::uint32_t> version_pin;
+    if (check(TokenType::AT)) {
+        Token at_tok = advance();
+        Token n =
+            expect(TokenType::INTEGER_LITERAL, "expected version number after '@'");
+        long long v = std::stoll(n.value);
+        if (v < 1) {
+            throw ParseError(
+                "include version pin must be >= 1", n.line, n.column);
+        }
+        if (v > std::numeric_limits<std::uint32_t>::max()) {
+            throw ParseError(
+                "include version pin overflows u32", n.line, n.column);
+        }
+        version_pin = static_cast<std::uint32_t>(v);
+        (void)at_tok;
+    }
+
     auto when_clause = parse_when_clause();
     expect_newline("include statement");
 
     auto stmt = std::make_unique<Stmt>();
     stmt->data = IncludeStmt{.name = name.value,
+                             .version_pin = version_pin,
                              .when_clause = std::move(when_clause),
                              .line = start.line,
                              .column = start.column};
