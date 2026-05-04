@@ -1,7 +1,7 @@
 # include {#lang_stmt_include}
 
 ```
-include <name> [when <condition>]
+include <name>[@<int>] [when <condition>]
 ```
 
 Runs another installed spudplate template by name, **inline at the include point**. The included template has isolated variable scope, but its prompts and filesystem operations interleave with the caller's in source order.
@@ -29,6 +29,24 @@ The user is prompted for `use_claude`, then (if true) for whatever questions `cl
 ## Resolving the name
 
 The argument to `include` is a bare identifier (no quotes). At install time, the named template must already be installed under the install root (`$SPUDPLATE_HOME`, `$XDG_DATA_HOME/spudplate`, or `~/.local/share/spudplate`). The bundler reads the bytes of `<install-root>/<name>.spp` and embeds them inside the parent spudpack as a dependency. At run time the parent reads the dep from its own bundle, so the recipient does not need the dep separately installed.
+
+When reinstalling a parent without `--update-deps`, the bundler reuses whatever dep bytes the previous parent bundled (sticky default). To refresh from the install root explicitly:
+
+```
+spudplate install bar.spud --update-deps foo,baz
+```
+
+## Pinning a dep to a specific version
+
+Each installed template carries a monotonic `version_tag` that bumps on every install whose content differs from what is on disk. To require a specific version, use `@N` in the source:
+
+```
+include claude_setup@3
+```
+
+The bundler tries `<install-root>/claude_setup.spp` first; if its `version_tag` is not `3`, it falls back to `<install-root>/.archive/claude_setup.v3.spp`. If neither carries v3, the install fails with a clear error pointing to both paths it tried.
+
+Pinned deps are unaffected by `--update-deps`; the flag is silently no-op for them with a one-line `note: '<name>' is pinned in source; --update-deps ignored`.
 
 ## when
 
