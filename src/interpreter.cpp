@@ -824,6 +824,20 @@ class Interpreter {
     void set_ask_total(int total) { ask_total_ = total; }
     void set_timeouts_disabled(bool b) { timeouts_disabled_ = b; }
 
+    // The include path uses these to thread the parent's prompt counter,
+    // indent baseline, and enclosing-repeat state into a child interpreter
+    // so dep prompts continue the parent's `(n/m)` and inherit indent.
+    void set_ask_index(int index) { ask_index_ = index; }
+    [[nodiscard]] int ask_index() const { return ask_index_; }
+    void set_indent_floor(int floor) { indent_floor_ = floor; }
+    void set_enclosing_repeat_depth(int depth) {
+        enclosing_repeat_depth_ = depth;
+    }
+    void set_inherited_iters(
+        std::vector<std::pair<std::int64_t, std::int64_t>> iters) {
+        inherited_iters_ = std::move(iters);
+    }
+
     void execute(const Stmt& stmt) {
         std::visit(
             [&](const auto& s) {
@@ -831,17 +845,24 @@ class Interpreter {
                 if constexpr (std::is_same_v<T, AskStmt>) {
                     // ask_index_ counts top-level (static) prompts only - the
                     // same static `ask` repeated in a `repeat` body should not
-                    // bump the counter past `ask_total_`. Inside a repeat the
+                    // bump the counter past `ask_total_`. Inside a repeat
+                    // (here or in a parent that included us) the
                     // already-incremented index is reused so the renderer can
                     // still show "(N/M)" as a positional anchor alongside any
                     // iteration counter the prompter assembles.
-                    if (ask_total_ > 0 && repeat_depth_ == 0) {
+                    if (ask_total_ > 0 && repeat_depth_ == 0 &&
+                        enclosing_repeat_depth_ == 0) {
                         ++ask_index_;
                     }
                     int index = ask_total_ > 0 ? ask_index_ : 0;
                     int total = ask_total_;
-                    execute_ask(s, env_, prompter_, index, total,
-                                repeat_depth_, repeat_iters_);
+                    int indent = indent_floor_ + repeat_depth_;
+                    std::vector<std::pair<std::int64_t, std::int64_t>> iters =
+                        inherited_iters_;
+                    iters.insert(iters.end(), repeat_iters_.begin(),
+                                 repeat_iters_.end());
+                    execute_ask(s, env_, prompter_, index, total, indent,
+                                iters);
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
@@ -944,7 +965,27 @@ class Interpreter {
         Interpreter child(prompter_, dep_source, &dep_pack.deps,
                           include_depth_ + 1);
         child.set_timeouts_disabled(timeouts_disabled_);
-        child.set_ask_total(count_ask_statements_local(dep_program));
+        // Inherit, do not recompute. The top-level run already counted every
+        // `ask` reachable through the include tree, and the parent has been
+        // bumping `ask_index_` as its own prompts went past. The child picks
+        // up at that index and continues toward the same denominator.
+        child.set_ask_total(ask_total_);
+        child.set_ask_index(ask_index_);
+        // Visually nest the dep's prompts: a 2-space step per include level,
+        // additive over any repeat indent already in effect at the include
+        // site.
+        child.set_indent_floor(indent_floor_ + repeat_depth_ + 1);
+        // If the parent is currently inside a `repeat` at the include point,
+        // every `ask` in the dep is effectively under that repeat. Treat the
+        // dep's top-level prompts the same way `ask`-in-`repeat` is treated
+        // here: do not bump the static counter.
+        child.set_enclosing_repeat_depth(enclosing_repeat_depth_ +
+                                         repeat_depth_);
+        std::vector<std::pair<std::int64_t, std::int64_t>> child_inherited =
+            inherited_iters_;
+        child_inherited.insert(child_inherited.end(), repeat_iters_.begin(),
+                               repeat_iters_.end());
+        child.set_inherited_iters(std::move(child_inherited));
 
         try {
             for (const auto& stmt : dep_program.statements) {
@@ -958,6 +999,10 @@ class Interpreter {
             throw;
         }
 
+        // Carry the child's final counter back so prompts after the include
+        // continue from where the dep left off.
+        ask_index_ = child.ask_index();
+
         std::vector<PendingOp> child_pending = child.take_pending();
         for (auto&& op : child_pending) {
             pending_.push_back(std::move(op));
@@ -965,19 +1010,6 @@ class Interpreter {
         std::unordered_set<std::string> child_created =
             child.take_created_paths();
         created_during_run_.merge(child_created);
-    }
-
-    // Same shape as the file-scope `count_ask_statements`, defined as a
-    // class member so the include path can call it without the lambda
-    // dance the file-scope helper would otherwise need.
-    static int count_ask_statements_local(const Program& program) {
-        int total = 0;
-        for (const auto& stmt : program.statements) {
-            if (stmt && std::holds_alternative<AskStmt>(stmt->data)) {
-                ++total;
-            }
-        }
-        return total;
     }
 
     void execute_repeat(const RepeatStmt& s) {
@@ -1522,28 +1554,93 @@ class Interpreter {
     int ask_total_{0};
     int ask_index_{0};
     int repeat_depth_{0};
+    // Base indent (in `repeat`-equivalent levels) the parent passes down at
+    // an include site. Zero on the top-level program; non-zero when this
+    // interpreter is running an included child. Each `ask` renders at
+    // `indent_floor_ + repeat_depth_` levels.
+    int indent_floor_{0};
+    // Parent's `repeat_depth_` at the include site, snapshotted at child
+    // construction time. Combined with this interpreter's own
+    // `repeat_depth_` it gates the static-counter increment so a static
+    // `ask` under any enclosing repeat (in the parent or here) does not
+    // bump the index past `ask_total_`.
+    int enclosing_repeat_depth_{0};
     // One {1-based current, total} pair pushed per active `repeat` iteration,
     // outermost first. `execute_repeat` pushes at the top of each iteration
     // body and pops on both normal-exit and exception paths so the stack is
     // never left dirty.
     std::vector<std::pair<std::int64_t, std::int64_t>> repeat_iters_;
+    // Parent's full iter chain at the include site. Prepended to this
+    // interpreter's `repeat_iters_` when assembling a `PromptRequest`, so
+    // a dep prompt under nested repeats sees the whole "iteration k of n"
+    // ladder from outermost down.
+    std::vector<std::pair<std::int64_t, std::int64_t>> inherited_iters_;
     // When true, every queued `run` ignores its statement-level and default
     // timeout and runs without one. Set via `--no-timeout` on the CLI.
     bool timeouts_disabled_{false};
 };
 
-int count_ask_statements(const Program& program) {
+// Recursive counter: walks the program's top-level statements (matching
+// the existing static-counter semantics where `ask` inside `repeat`/`if`
+// is not pre-counted), and recurses into each `include`'s bundled
+// dependency program. The total is used as the static denominator for
+// the whole run so prompts in included deps continue the parent's
+// `(n/m)` toward one shared M.
+//
+// `when` clauses on `include` are not consulted here. The counter is a
+// static denominator, so a conditionally-skipped include still
+// contributes its `ask` count - the same way a when-skipped top-level
+// `ask` still counts (its default binds and the index moves on). Users
+// see at most M prompts; conditional skips simply leave some unfilled.
+//
+// Decode/deserialise errors in a dep are silently treated as zero. The
+// real error is raised at the include site when the dep is actually
+// run, with proper source positions and the `RuntimeError` shape.
+int count_ask_statements(const Program& program,
+                         const std::vector<SpudpackDep>* deps,
+                         int depth = 0) {
+    if (depth > kMaxIncludeDepth) {
+        return 0;
+    }
+    std::unordered_map<std::string, const SpudpackDep*> dep_index;
+    if (deps != nullptr) {
+        for (const auto& d : *deps) {
+            dep_index.emplace(d.name, &d);
+        }
+    }
+
     int total = 0;
     for (const auto& stmt : program.statements) {
+        if (!stmt) continue;
         if (std::holds_alternative<AskStmt>(stmt->data)) {
             ++total;
+            continue;
+        }
+        if (!std::holds_alternative<IncludeStmt>(stmt->data)) continue;
+        const auto& inc = std::get<IncludeStmt>(stmt->data);
+        auto it = dep_index.find(inc.name);
+        if (it == dep_index.end()) continue;
+        try {
+            Spudpack dep_pack = spudpack_decode(it->second->bytes.data(),
+                                                it->second->bytes.size());
+            Program dep_program =
+                deserialize_program(dep_pack.program_bytes.data(),
+                                    dep_pack.program_bytes.size(),
+                                    dep_pack.version);
+            total += count_ask_statements(dep_program, &dep_pack.deps,
+                                          depth + 1);
+        } catch (...) {
+            // Dep is unreadable: leave counter at zero for this branch
+            // and let the include site surface the real error at run
+            // time with full source position context.
         }
     }
     return total;
 }
 
-void run_program(const Program& program, Interpreter& interp) {
-    interp.set_ask_total(count_ask_statements(program));
+void run_program(const Program& program, Interpreter& interp,
+                 const std::vector<SpudpackDep>* deps) {
+    interp.set_ask_total(count_ask_statements(program, deps));
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
@@ -1805,7 +1902,7 @@ void run(const Program& program, Prompter& prompter, bool skip_authorization,
                        source != nullptr ? *source : default_source_provider(),
                        deps);
     interp.set_timeouts_disabled(timeouts_disabled);
-    run_program(program, interp);
+    run_program(program, interp, deps);
 }
 
 Environment run_for_tests(const Program& program, Prompter& prompter,
@@ -1814,7 +1911,7 @@ Environment run_for_tests(const Program& program, Prompter& prompter,
     Interpreter interp(prompter,
                        source != nullptr ? *source : default_source_provider(),
                        deps);
-    run_program(program, interp);
+    run_program(program, interp, deps);
     return std::move(interp.env());
 }
 
@@ -1993,7 +2090,7 @@ void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
     Interpreter interp(prompter,
                        source != nullptr ? *source : default_source_provider(),
                        deps);
-    interp.set_ask_total(count_ask_statements(program));
+    interp.set_ask_total(count_ask_statements(program, deps));
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
