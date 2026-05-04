@@ -290,7 +290,7 @@ ask use_claude "Set up Claude config?" bool default false
 include claude_setup when use_claude
 ```
 
-The included template runs as its own subprocess, asks its own questions, and stays maintainable independently.
+The included template runs inline at the include point, asks its own questions in source order, and stays maintainable independently. Its bytes are bundled into the parent at install time, so the recipient does not need the dependency installed separately.
 
 ### Keep includes opt-in
 

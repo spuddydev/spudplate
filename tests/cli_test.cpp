@@ -1387,3 +1387,88 @@ TEST(CliTest, SelfUninstallHelpPrintsToStdout) {
     EXPECT_EQ(code, 0);
     EXPECT_NE(out.str().find("usage: spudplate self-uninstall"), std::string::npos);
 }
+
+// --- include with bundled deps ---------------------------------------------
+
+TEST(CliTest, InstallParentBundlesIncludedDep) {
+    TmpDir td;
+    ScopedHome home(td.path() / "home");
+
+    write_file(td.path() / "child.spud", "ask greeting \"Greeting?\" string\n");
+    {
+        Argv args({"spudplate", "install", (td.path() / "child.spud").string()});
+        std::stringstream out;
+        std::stringstream err;
+        ScriptedPrompter prompter({});
+        int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+        ASSERT_EQ(code, 0) << err.str();
+    }
+
+    write_file(td.path() / "parent.spud",
+               "ask before \"Before?\" string\n"
+               "include child\n"
+               "ask after \"After?\" string\n");
+    {
+        Argv args({"spudplate", "install", (td.path() / "parent.spud").string()});
+        std::stringstream out;
+        std::stringstream err;
+        ScriptedPrompter prompter({});
+        int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+        ASSERT_EQ(code, 0) << err.str();
+    }
+
+    auto pack = spudplate::spudpack_read_file(td.path() / "home" / "parent.spp");
+    ASSERT_EQ(pack.deps.size(), 1u);
+    EXPECT_EQ(pack.deps[0].name, "child");
+}
+
+TEST(CliTest, RunInstalledParentPromptsInSourceOrder) {
+    TmpDir td;
+    ScopedHome home(td.path() / "home");
+
+    write_file(td.path() / "child.spud", "ask middle \"Middle?\" string\n");
+    {
+        Argv args({"spudplate", "install", (td.path() / "child.spud").string()});
+        std::stringstream out;
+        std::stringstream err;
+        ScriptedPrompter prompter({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
+            << err.str();
+    }
+
+    write_file(td.path() / "parent.spud",
+               "ask before \"Before?\" string\n"
+               "include child\n"
+               "ask after \"After?\" string\n"
+               "mkdir \"{before}_{after}\"\n");
+    {
+        Argv args({"spudplate", "install", (td.path() / "parent.spud").string()});
+        std::stringstream out;
+        std::stringstream err;
+        ScriptedPrompter prompter({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
+            << err.str();
+    }
+
+    // Uninstall the child to prove the parent is now self-contained: a
+    // freshly installed parent must run without the dep being separately
+    // present on the install root.
+    {
+        Argv args({"spudplate", "uninstall", "child"});
+        std::stringstream out;
+        std::stringstream err;
+        ScriptedPrompter prompter({});
+        ASSERT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0)
+            << err.str();
+    }
+
+    Argv run_args({"spudplate", "run", "parent"});
+    std::stringstream run_out;
+    std::stringstream run_err;
+    // Source order: before -> middle (from child) -> after.
+    ScriptedPrompter run_prompter({"start", "mid", "end"});
+    int code = cli_main(run_args.argc(), run_args.argv(), run_out, run_err,
+                        run_prompter);
+    EXPECT_EQ(code, 0) << run_err.str();
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "start_end"));
+}

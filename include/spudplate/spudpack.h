@@ -26,8 +26,23 @@ struct SpudpackAsset {
 };
 
 /**
+ * @brief One bundled dependency inside a spudpack.
+ *
+ * Each dep is the complete byte stream of another spudpack referenced by an
+ * `include <name>` statement in the parent program. Names match the bare
+ * identifier used in `include` and follow the same rules as installed
+ * template names: nonempty, no `/`, no NUL, not `.` or `..`. Bytes are kept
+ * opaque - the consumer decodes them through `spudpack_decode` when an
+ * `include` statement actually fires at runtime.
+ */
+struct SpudpackDep {
+    std::string name;                ///< Bare include name, matching `<name>.spp` on the install root.
+    std::vector<std::uint8_t> bytes; ///< Full byte stream of the bundled dep's spudpack.
+};
+
+/**
  * @brief A decoded spudpack - the source text, the opaque compiled program,
- * and every bundled asset.
+ * every bundled asset, and every bundled dependency.
  *
  * `program_bytes` is held opaquely; this header does not include the
  * binary-serializer header so the codec stays decoupled from the AST.
@@ -37,7 +52,8 @@ struct Spudpack {
     std::string source;                       ///< Original `.spud` source text.
     std::vector<std::uint8_t> program_bytes;  ///< Opaque serialised AST; decoded by the binary serializer.
     std::vector<SpudpackAsset> assets;        ///< Every bundled asset referenced by the program.
-    std::uint8_t version{2};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
+    std::vector<SpudpackDep> deps;            ///< Every bundled dependency referenced by `include` statements.
+    std::uint8_t version{3};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
 };
 
 /**
@@ -60,11 +76,13 @@ class SpudpackError : public std::runtime_error {
 /**
  * @brief Encode a `Spudpack` into a tightly packed byte stream.
  *
- * Layout: magic `"SPUD"` (4 bytes), version `u8` (currently `2`; `1` is
- * still accepted on decode for backward compatibility), flags `u8 = 0`,
- * `varint`+`bytes` source, `varint`+`bytes` program, `varint` asset_count,
- * per asset (`varint`+`bytes` path, `u16 LE` mode, `varint`+`bytes` data),
- * `varint` dep_count `= 0`, `u32 LE` CRC32 over `[0, size-4)`.
+ * Layout: magic `"SPUD"` (4 bytes), version `u8` (currently `3`; `1` and
+ * `2` are still accepted on decode for backward compatibility), flags
+ * `u8 = 0`, `varint`+`bytes` source, `varint`+`bytes` program, `varint`
+ * asset_count, per asset (`varint`+`bytes` path, `u16 LE` mode,
+ * `varint`+`bytes` data), `varint` dep_count, per dep (`varint`+`bytes`
+ * name, `varint`+`bytes` blob), `u32 LE` CRC32 over `[0, size-4)`. Packs
+ * decoded as v1 or v2 must report `dep_count = 0`; v3 may carry deps.
  */
 std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack);
 
@@ -72,11 +90,12 @@ std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack);
  * @brief Decode a byte stream into a `Spudpack`.
  *
  * Validates magic, version, flags, every varint length against the input
- * bounds, the per-asset cap (256 MiB), the total file cap (2 GiB), the
- * asset-count cap (`1 << 20`), each asset path against the normalisation
- * rules, mode bits against `0o7777`, dep count `= 0`, and the trailing
- * CRC32. Every failure throws `SpudpackError` with the byte offset at
- * which decoding gave up.
+ * bounds, the per-asset and per-dep cap (256 MiB), the total file cap
+ * (2 GiB), the asset-count cap (`1 << 20`), the dep-count cap (`1 << 10`),
+ * each asset path against the normalisation rules, each dep name against
+ * the bare-identifier rules, mode bits against `0o7777`, and the trailing
+ * CRC32. v1 and v2 packs are rejected if `dep_count != 0`. Every failure
+ * throws `SpudpackError` with the byte offset at which decoding gave up.
  */
 Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size);
 

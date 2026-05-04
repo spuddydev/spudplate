@@ -315,12 +315,17 @@ struct RunStmt {
 };
 
 /**
- * @brief An `include` statement - runs another installed template as a subprocess.
+ * @brief An `include` statement - runs another bundled template inline.
  *
  * Example: `include claude_setup when use_claude`
  *
- * The named template is referenced by its installed name and runs in its own
- * scope at runtime. The optional `when` clause skips the include if false.
+ * At install time the bundler reads the bytes of the named installed
+ * template and embeds them as a dep inside the parent spudpack. At run
+ * time the include site decodes the dep, deserialises and validates the
+ * dep program, and runs it inline at the include point with isolated
+ * variable scope. Prompts interleave with the parent's in source order;
+ * filesystem operations join the parent's deferred queue. The optional
+ * `when` clause skips the include entirely if false.
  */
 struct IncludeStmt {
     std::string name;                    ///< Name of the installed template to run.

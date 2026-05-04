@@ -102,8 +102,9 @@ std::uint16_t disk_mode_to_asset_mode(fs::perms p) {
 
 class Bundler {
   public:
-    explicit Bundler(const fs::path& source_root)
-        : root_(fs::weakly_canonical(source_root)) {}
+    Bundler(const fs::path& source_root, const fs::path& install_root)
+        : root_(fs::weakly_canonical(source_root)),
+          install_root_(install_root) {}
 
     BundleResult run(const Program& program) {
         for (const auto& stmt : program.statements) {
@@ -113,6 +114,10 @@ class Bundler {
         out.assets.reserve(by_path_.size());
         for (const auto& key : insertion_order_) {
             out.assets.push_back(std::move(by_path_[key]));
+        }
+        out.deps.reserve(dep_order_.size());
+        for (const auto& name : dep_order_) {
+            out.deps.push_back(std::move(deps_[name]));
         }
         return out;
     }
@@ -143,11 +148,62 @@ class Bundler {
                     for (const auto& body : s.body) {
                         if (body) visit_stmt(*body);
                     }
+                } else if constexpr (std::is_same_v<T, IncludeStmt>) {
+                    process_include(s.name, s.line, s.column);
                 }
-                // AskStmt, LetStmt, AssignStmt, IncludeStmt, RunStmt carry
-                // no asset references and are intentionally skipped.
+                // AskStmt, LetStmt, AssignStmt, RunStmt carry no asset or
+                // dep references and are intentionally skipped.
             },
             stmt.data);
+    }
+
+    // Resolve `include <name>` against the install root, read the bundled
+    // `.spp` bytes, and attach them as a dep. Multiple includes of the
+    // same name dedupe to one record; the first encounter wins on order.
+    void process_include(const std::string& name, int line, int column) {
+        if (deps_.find(name) != deps_.end()) {
+            return;  // already collected
+        }
+        if (install_root_.empty()) {
+            throw BundleError(
+                "include '" + name +
+                    "' has no install root to resolve against",
+                line, column);
+        }
+        if (name.empty() || name.find('/') != std::string::npos ||
+            name.find('\0') != std::string::npos || name == "." ||
+            name == "..") {
+            throw BundleError(
+                "include name is not a bare identifier: '" + name + "'",
+                line, column);
+        }
+        fs::path dep_path = install_root_ / (name + ".spp");
+        std::error_code ec;
+        if (!fs::exists(dep_path, ec) || ec) {
+            throw BundleError(
+                "include '" + name + "' is not installed at " +
+                    dep_path.string(),
+                line, column);
+        }
+        if (!fs::is_regular_file(dep_path, ec) || ec) {
+            throw BundleError(
+                "include '" + name + "' is not a regular file at " +
+                    dep_path.string(),
+                line, column);
+        }
+        std::vector<std::uint8_t> bytes = read_file_bytes(dep_path, line, column);
+        try {
+            spudpack_decode(bytes.data(), bytes.size());
+        } catch (const SpudpackError& e) {
+            throw BundleError(
+                "include '" + name + "' is not a valid spudpack: " + e.what(),
+                line, column);
+        }
+        SpudpackDep dep;
+        dep.name = name;
+        dep.bytes = std::move(bytes);
+        deps_.emplace(name, std::move(dep));
+        dep_order_.push_back(name);
     }
 
     // `file ... from <path>` - the path may resolve to a regular file
@@ -403,14 +459,18 @@ class Bundler {
     }
 
     fs::path root_;
+    fs::path install_root_;
     std::unordered_map<std::string, SpudpackAsset> by_path_;
     std::vector<std::string> insertion_order_;
+    std::unordered_map<std::string, SpudpackDep> deps_;
+    std::vector<std::string> dep_order_;
 };
 
 }  // namespace
 
-BundleResult bundle_assets(const Program& program, const fs::path& source_root) {
-    Bundler b(source_root);
+BundleResult bundle_assets(const Program& program, const fs::path& source_root,
+                           const fs::path& install_root) {
+    Bundler b(source_root, install_root);
     return b.run(program);
 }
 

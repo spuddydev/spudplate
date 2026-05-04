@@ -15,7 +15,7 @@ A spudlang program is a sequence of statements that the interpreter executes top
 | @subpage lang_stmt_copy    | Merge a source directory into an existing destination                  |
 | @subpage lang_stmt_repeat  | Loop a block N times, with a per-iteration index                       |
 | @subpage lang_stmt_if      | Run a block when a condition is true                                   |
-| @subpage lang_stmt_include | Run another installed template as a subprocess                         |
+| @subpage lang_stmt_include | Run another bundled template inline with isolated variable scope        |
 | @subpage lang_stmt_run     | Execute a shell command after explicit user authorisation              |
 
 ## What should I use?
@@ -61,14 +61,14 @@ Use `repeat` with an `int` count. The iterator is local to the loop body. `ask` 
 
 | If you want to...                                              | Use                                       |
 |----------------------------------------------------------------|-------------------------------------------|
-| Run another spudplate template as a subprocess                  | `include`                                 |
+| Run another bundled template inline at this point               | `include`                                 |
 | Run a shell command after the user authorises                   | `run`                                     |
 
 ## Execution model
 
 Filesystem actions (`mkdir`, `file`, `copy`) are queued during execution and flushed at the end of the run. Internal state (variables, loop counters, `if` and `when` evaluations) runs throughout, so a `let` based on an `ask` answer is bound the moment the answer is received, not at flush time.
 
-`run` and `include` execute in source order alongside the queued filesystem operations during the flush. A failed `run` aborts the rest of the flush; operations queued before the failure remain on disk.
+`include` runs the bundled child template inline at the include point, so its prompts interleave with the parent's in source order; the child's filesystem operations join the parent's deferred queue. `run` executes during the flush. A failed `run` aborts the rest of the flush; operations queued before the failure remain on disk.
 
 If the user aborts at any prompt, no flush happens and the filesystem is untouched.
 
