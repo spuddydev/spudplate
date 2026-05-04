@@ -34,10 +34,16 @@ struct SpudpackAsset {
  * template names: nonempty, no `/`, no NUL, not `.` or `..`. Bytes are kept
  * opaque - the consumer decodes them through `spudpack_decode` when an
  * `include` statement actually fires at runtime.
+ *
+ * `version_tag` is the monotonic install counter the dep carried at the
+ * time the parent was bundled. Used for drift comparison against the
+ * currently-installed dep at run time. v3 packs decode with `version_tag = 1`
+ * by default; v4 reads the field explicitly.
  */
 struct SpudpackDep {
     std::string name;                ///< Bare include name, matching `<name>.spp` on the install root.
     std::vector<std::uint8_t> bytes; ///< Full byte stream of the bundled dep's spudpack.
+    std::uint32_t version_tag{1};    ///< Monotonic install counter the dep carried when bundled. Defaults to 1 for v3 decodes.
 };
 
 /**
@@ -53,7 +59,8 @@ struct Spudpack {
     std::vector<std::uint8_t> program_bytes;  ///< Opaque serialised AST; decoded by the binary serializer.
     std::vector<SpudpackAsset> assets;        ///< Every bundled asset referenced by the program.
     std::vector<SpudpackDep> deps;            ///< Every bundled dependency referenced by `include` statements.
-    std::uint8_t version{3};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
+    std::uint8_t version{4};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
+    std::uint32_t version_tag{1};             ///< Monotonic install counter for this template. Bumped on each install that produces different content. v3 decodes default to 1.
 };
 
 /**
@@ -76,13 +83,15 @@ class SpudpackError : public std::runtime_error {
 /**
  * @brief Encode a `Spudpack` into a tightly packed byte stream.
  *
- * Layout: magic `"SPUD"` (4 bytes), version `u8` (currently `3`; `1` and
- * `2` are still accepted on decode for backward compatibility), flags
- * `u8 = 0`, `varint`+`bytes` source, `varint`+`bytes` program, `varint`
- * asset_count, per asset (`varint`+`bytes` path, `u16 LE` mode,
- * `varint`+`bytes` data), `varint` dep_count, per dep (`varint`+`bytes`
- * name, `varint`+`bytes` blob), `u32 LE` CRC32 over `[0, size-4)`. Packs
- * decoded as v1 or v2 must report `dep_count = 0`; v3 may carry deps.
+ * Layout: magic `"SPUD"` (4 bytes), version `u8` (currently `4`; `1`, `2`,
+ * and `3` are still accepted on decode for backward compatibility), flags
+ * `u8 = 0`, `u32 LE` version_tag (v4 only; default 1 for older decodes),
+ * `varint`+`bytes` source, `varint`+`bytes` program, `varint` asset_count,
+ * per asset (`varint`+`bytes` path, `u16 LE` mode, `varint`+`bytes` data),
+ * `varint` dep_count, per dep (`varint`+`bytes` name, `u32 LE` dep
+ * version_tag (v4 only; default 1), `varint`+`bytes` blob), `u32 LE` CRC32
+ * over `[0, size-4)`. Packs decoded as v1 or v2 must report
+ * `dep_count = 0`; v3 may carry deps but no version_tag fields.
  */
 std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack);
 
@@ -93,9 +102,11 @@ std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack);
  * bounds, the per-asset and per-dep cap (256 MiB), the total file cap
  * (2 GiB), the asset-count cap (`1 << 20`), the dep-count cap (`1 << 10`),
  * each asset path against the normalisation rules, each dep name against
- * the bare-identifier rules, mode bits against `0o7777`, and the trailing
- * CRC32. v1 and v2 packs are rejected if `dep_count != 0`. Every failure
- * throws `SpudpackError` with the byte offset at which decoding gave up.
+ * the bare-identifier rules, mode bits against `0o7777`, version_tag
+ * fields against the `>= 1` requirement (v4 only), and the trailing
+ * CRC32. v1 and v2 packs are rejected if `dep_count != 0`; v1, v2, and
+ * v3 packs decode with `version_tag = 1` defaults. Every failure throws
+ * `SpudpackError` with the byte offset at which decoding gave up.
  */
 Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size);
 
