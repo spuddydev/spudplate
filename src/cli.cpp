@@ -1296,6 +1296,48 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
         }
         removed_anything = true;
     }
+
+    // Sweep any archived previous versions of this name. Pattern is
+    // `<name>.v<N>.spp` under `<home>/.archive/`. We do a safe prefix
+    // match so we do not accidentally remove an unrelated archive entry
+    // whose name happens to start with the same letters (`foobar` vs
+    // `foo`).
+    std::filesystem::path archive_dir = home / ".archive";
+    if (std::filesystem::is_directory(archive_dir, ec)) {
+        std::string prefix = name + ".v";
+        std::string suffix = ".spp";
+        std::error_code it_ec;
+        for (const auto& ent :
+             std::filesystem::directory_iterator(archive_dir, it_ec)) {
+            if (!ent.is_regular_file()) continue;
+            std::string fname = ent.path().filename().string();
+            if (fname.size() <= prefix.size() + suffix.size()) continue;
+            if (fname.compare(0, prefix.size(), prefix) != 0) continue;
+            if (fname.compare(fname.size() - suffix.size(), suffix.size(),
+                              suffix) != 0)
+                continue;
+            // Middle bytes must be all digits to qualify as a version.
+            std::string mid = fname.substr(
+                prefix.size(), fname.size() - prefix.size() - suffix.size());
+            bool all_digits = !mid.empty();
+            for (char c : mid) {
+                if (c < '0' || c > '9') {
+                    all_digits = false;
+                    break;
+                }
+            }
+            if (!all_digits) continue;
+            std::error_code rm_ec;
+            std::filesystem::remove(ent.path(), rm_ec);
+            if (rm_ec) {
+                err << name
+                    << ": cannot remove archive " << ent.path().string()
+                    << ": " << rm_ec.message() << "\n";
+                return 1;
+            }
+            removed_anything = true;
+        }
+    }
     if (!removed_anything) {
         err << name << ": not installed\n";
         return 5;
