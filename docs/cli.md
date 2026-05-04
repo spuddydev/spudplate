@@ -11,14 +11,17 @@ Every subcommand spudplate ships, with its full flag set.
 ## install
 
 ```
-spudplate install [--yes] <file.spud>
+spudplate install [--yes] [--update-deps NAMES] <file.spud>
 ```
 
-Validates and stores a template. Bundles every asset the template references into a single `<name>.spp` file under the install root.
+Validates and stores a template. Bundles every asset the template references into a single `<name>.spp` file under the install root. Each install carries a monotonic `version_tag`: first install of a name is v1, subsequent installs that change the content bump by one, and reinstalling identical content is a no-op.
 
 | Flag | Effect |
 |------|--------|
 | `--yes`, `-y` | Skip the overwrite confirmation when a template of the same name already exists. |
+| `--update-deps NAMES` | Comma-separated list of unpinned `include` deps to refresh from the install root. Pinned deps (`include foo@N` in source) ignore the flag with a one-line note. |
+
+Bundled `include` deps are sticky by default: reinstalling a parent reuses the dep bytes the previous install bundled. Use `--update-deps` to refresh listed deps from the install root.
 
 `install` rejects pre-built `.spp` input - only `.spud` sources can be bundled.
 
