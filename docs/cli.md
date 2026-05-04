@@ -98,14 +98,15 @@ Prints the spudplate version. `--version` works as an alias.
 ## update
 
 ```
-spudplate update [--yes]
+spudplate update [--yes] [--force]
 ```
 
-Fetches and installs the latest spudplate release by re-running the install script.
+Fetches and installs the latest spudplate release by re-running the install script. Skips the download when already up to date.
 
 | Flag | Effect |
 |------|--------|
 | `--yes`, `-y` | Skip the confirmation prompt. |
+| `--force` | Download and install even if already up to date. |
 
 ---
 
