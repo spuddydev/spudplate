@@ -51,7 +51,7 @@ Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
 spudplate validate <file.spud>
 ```
 
-Parses and validates a `.spud` file without installing anything. Useful in CI and editor integrations. Same semantic checks as `install`. Also available as `check`.
+Parses and validates a `.spud` file without installing anything. Useful in CI and editor integrations. Same semantic checks as `install`.
 
 ---
 
