@@ -128,6 +128,21 @@ spudplate completion zsh > ~/.zsh/completions/_spudplate
 
 ---
 
+## self-uninstall
+
+```
+spudplate self-uninstall [--purge] [--yes]
+```
+
+Removes the spudplate binary, its shell completion files, and the completion block in `~/.zshrc` added at install time.
+
+| Flag | Effect |
+|------|--------|
+| `--purge` | Also delete every installed template (`.spp` files under the install root). |
+| `--yes`, `-y` | Skip the confirmation prompt. |
+
+---
+
 ## Environment variables
 
 | Variable | Effect |
