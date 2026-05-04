@@ -292,6 +292,136 @@ TEST(InterpreterTest, IncludeWithoutBundledDepIsRuntimeError) {
     EXPECT_THROW(run(program, prompter), RuntimeError);
 }
 
+// Records every PromptRequest the interpreter issues, in order. Each call
+// returns the matching scripted answer. Lets tests assert on counter
+// indices, indent levels, and iteration ladders for prompts buried in
+// nested includes or repeats.
+class RecordingPrompter : public Prompter {
+  public:
+    explicit RecordingPrompter(std::vector<std::string> answers)
+        : answers_(std::move(answers)) {}
+
+    std::string prompt(const PromptRequest& req) override {
+        requests_.push_back(req);
+        if (index_ >= answers_.size()) {
+            throw std::logic_error("RecordingPrompter ran out of answers");
+        }
+        return answers_[index_++];
+    }
+    bool authorize(const std::string& /*summary*/) override { return true; }
+
+    [[nodiscard]] const std::vector<PromptRequest>& requests() const {
+        return requests_;
+    }
+
+  private:
+    std::vector<std::string> answers_;
+    std::size_t index_{0};
+    std::vector<PromptRequest> requests_;
+};
+
+TEST(InterpreterTest, IncludePromptsContinueParentCounterAndIndent) {
+    // Parent has two asks straddling an include; the dep has two asks. All
+    // four share one denominator (1/4..4/4) in source order, with the dep's
+    // pair indented one level deeper than the parent's.
+    auto dep = dep_bytes_from_source(R"(ask b1 "b1?" string default "x"
+ask b2 "b2?" string default "y"
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(ask a1 "a1?" string default "p"
+include child
+ask a2 "a2?" string default "q"
+)");
+    RecordingPrompter prompter({"v1", "v2", "v3", "v4"});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+
+    const auto& reqs = prompter.requests();
+    ASSERT_EQ(reqs.size(), 4u);
+
+    EXPECT_EQ(reqs[0].text, "a1?");
+    EXPECT_EQ(reqs[0].question_index, 1);
+    EXPECT_EQ(reqs[0].question_total, 4);
+    EXPECT_EQ(reqs[0].indent_level, 0);
+
+    EXPECT_EQ(reqs[1].text, "b1?");
+    EXPECT_EQ(reqs[1].question_index, 2);
+    EXPECT_EQ(reqs[1].question_total, 4);
+    EXPECT_EQ(reqs[1].indent_level, 1);
+
+    EXPECT_EQ(reqs[2].text, "b2?");
+    EXPECT_EQ(reqs[2].question_index, 3);
+    EXPECT_EQ(reqs[2].question_total, 4);
+    EXPECT_EQ(reqs[2].indent_level, 1);
+
+    EXPECT_EQ(reqs[3].text, "a2?");
+    EXPECT_EQ(reqs[3].question_index, 4);
+    EXPECT_EQ(reqs[3].question_total, 4);
+    EXPECT_EQ(reqs[3].indent_level, 0);
+}
+
+TEST(InterpreterTest, NestedIncludesStackIndentAndShareCounter) {
+    // A dep that itself includes another dep: indent grows by one level
+    // per include, and all asks count toward one shared denominator.
+    auto inner = dep_bytes_from_source(R"(ask i1 "i1?" string default "x"
+)");
+    Program outer_program = parse(R"(ask o1 "o1?" string default "y"
+include grandchild
+)");
+    Spudpack outer_pack;
+    outer_pack.source = "<inline>";
+    outer_pack.program_bytes = serialize_program(outer_program);
+    outer_pack.deps.push_back({"grandchild", inner});
+    auto outer = spudpack_encode(outer_pack);
+
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", outer});
+
+    auto program = parse(R"(include child
+)");
+    RecordingPrompter prompter({"a", "b"});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+
+    const auto& reqs = prompter.requests();
+    ASSERT_EQ(reqs.size(), 2u);
+
+    EXPECT_EQ(reqs[0].text, "o1?");
+    EXPECT_EQ(reqs[0].question_index, 1);
+    EXPECT_EQ(reqs[0].question_total, 2);
+    EXPECT_EQ(reqs[0].indent_level, 1);
+
+    EXPECT_EQ(reqs[1].text, "i1?");
+    EXPECT_EQ(reqs[1].question_index, 2);
+    EXPECT_EQ(reqs[1].question_total, 2);
+    EXPECT_EQ(reqs[1].indent_level, 2);
+}
+
+TEST(InterpreterTest, ParentAskAfterIncludeResumesCounter) {
+    // After the dep finishes, the parent's `ask_index_` must reflect the
+    // dep's progress so the next parent prompt does not collide with one
+    // already shown.
+    auto dep = dep_bytes_from_source(R"(ask d1 "d1?" string default "x"
+ask d2 "d2?" string default "y"
+ask d3 "d3?" string default "z"
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(include child
+ask tail "tail?" string default "t"
+)");
+    RecordingPrompter prompter({"a", "b", "c", "d"});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+
+    const auto& reqs = prompter.requests();
+    ASSERT_EQ(reqs.size(), 4u);
+    EXPECT_EQ(reqs[3].text, "tail?");
+    EXPECT_EQ(reqs[3].question_index, 4);
+    EXPECT_EQ(reqs[3].question_total, 4);
+    EXPECT_EQ(reqs[3].indent_level, 0);
+}
+
 // --- run_for_tests returns the interpreter's environment ---
 
 TEST(InterpreterTest, RunForTestsReturnsEnvironmentOnEmptyProgram) {
