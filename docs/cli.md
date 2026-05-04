@@ -11,14 +11,17 @@ Every subcommand spudplate ships, with its full flag set.
 ## install
 
 ```
-spudplate install [--yes] <file.spud>
+spudplate install [--yes] [--update-deps NAMES] <file.spud>
 ```
 
-Validates and stores a template. Bundles every asset the template references into a single `<name>.spp` file under the install root.
+Validates and stores a template. Bundles every asset the template references into a single `<name>.spp` file under the install root. Each install carries a monotonic `version_tag`: first install of a name is v1, subsequent installs that change the content bump by one, and reinstalling identical content is a no-op.
 
 | Flag | Effect |
 |------|--------|
 | `--yes`, `-y` | Skip the overwrite confirmation when a template of the same name already exists. |
+| `--update-deps NAMES` | Comma-separated list of unpinned `include` deps to refresh from the install root. Pinned deps (`include foo@N` in source) ignore the flag with a one-line note. |
+
+Bundled `include` deps are sticky by default: reinstalling a parent reuses the dep bytes the previous install bundled. Use `--update-deps` to refresh listed deps from the install root.
 
 `install` rejects pre-built `.spp` input - only `.spud` sources can be bundled.
 
@@ -35,7 +38,7 @@ Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
 | Flag | Effect |
 |------|--------|
 | `--dry-run` | Walk the program and print the questions and actions without writing any files. |
-| `--yes`, `-y` | Auto-accept question prompts that have a default. |
+| `--yes`, `-y` | Skip the authorisation prompt for `run` statements during this invocation. |
 | `--no-timeout` | Disable per-`run` timeouts for this invocation (default is 60 seconds per shell command). |
 
 `run` decides whether the argument is a path or an installed name. An argument containing `/` or ending in `.spud` or `.spp` is treated as a path; everything else is looked up as `<install-root>/<arg>.spp`.
@@ -48,7 +51,7 @@ Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
 spudplate validate <file.spud>
 ```
 
-Parses and validates a `.spud` file without installing anything. Useful in CI and editor integrations. Same semantic checks as `install`. Also available as `check`.
+Parses and validates a `.spud` file without installing anything. Useful in CI and editor integrations. Same semantic checks as `install`.
 
 ---
 
@@ -58,7 +61,7 @@ Parses and validates a `.spud` file without installing anything. Useful in CI an
 spudplate list
 ```
 
-Prints every installed template, one per line.
+Prints every installed template as `name (vN)`, one per line, where `vN` is the current `version_tag` of the template.
 
 ---
 
@@ -68,7 +71,7 @@ Prints every installed template, one per line.
 spudplate inspect <name>
 ```
 
-Prints the original `.spud` source captured at install time. Accepts a bare name only - not a path.
+Prints the version tag of an installed template, the version tag of every dep it bundles, and the original `.spud` source captured at install time. Accepts a bare name only - not a path.
 
 ---
 
@@ -95,13 +98,47 @@ Prints the spudplate version. `--version` works as an alias.
 ## update
 
 ```
-spudplate update [--yes]
+spudplate update [--yes] [--force]
 ```
 
-Fetches and installs the latest spudplate release by re-running the install script.
+Fetches and installs the latest spudplate release by re-running the install script. Skips the download when already up to date.
 
 | Flag | Effect |
 |------|--------|
+| `--yes`, `-y` | Skip the confirmation prompt. |
+| `--force` | Download and install even if already up to date. |
+
+---
+
+## completion
+
+```
+spudplate completion <bash|zsh>
+```
+
+Prints a shell completion script to stdout. Pipe it into your completion directory to enable tab completion of subcommands, installed template names, and `.spud` files.
+
+```
+# Bash
+spudplate completion bash > ~/.local/share/bash-completion/completions/spudplate
+
+# Zsh
+spudplate completion zsh > ~/.zsh/completions/_spudplate
+```
+
+---
+
+## self-uninstall
+
+```
+spudplate self-uninstall [--purge] [--yes]
+```
+
+Removes the spudplate binary, its shell completion files, and the completion block in `~/.zshrc` added at install time.
+
+| Flag | Effect |
+|------|--------|
+| `--purge` | Also delete every installed template (`.spp` files under the install root). |
 | `--yes`, `-y` | Skip the confirmation prompt. |
 
 ---
