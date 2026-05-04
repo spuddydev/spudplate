@@ -102,9 +102,19 @@ std::uint16_t disk_mode_to_asset_mode(fs::perms p) {
 
 class Bundler {
   public:
-    Bundler(const fs::path& source_root, const fs::path& install_root)
+    Bundler(const fs::path& source_root, const fs::path& install_root,
+            const BundleOptions& options, BundleNotes* notes)
         : root_(fs::weakly_canonical(source_root)),
-          install_root_(install_root) {}
+          install_root_(install_root),
+          existing_parent_(options.existing_parent),
+          update_deps_(options.update_deps),
+          notes_(notes) {
+        if (existing_parent_ != nullptr) {
+            for (const auto& d : existing_parent_->deps) {
+                existing_dep_index_.emplace(d.name, &d);
+            }
+        }
+    }
 
     BundleResult run(const Program& program) {
         for (const auto& stmt : program.statements) {
@@ -149,7 +159,7 @@ class Bundler {
                         if (body) visit_stmt(*body);
                     }
                 } else if constexpr (std::is_same_v<T, IncludeStmt>) {
-                    process_include(s.name, s.line, s.column);
+                    process_include(s);
                 }
                 // AskStmt, LetStmt, AssignStmt, RunStmt carry no asset or
                 // dep references and are intentionally skipped.
@@ -157,19 +167,16 @@ class Bundler {
             stmt.data);
     }
 
-    // Resolve `include <name>` against the install root, read the bundled
-    // `.spp` bytes, and attach them as a dep. Multiple includes of the
-    // same name dedupe to one record; the first encounter wins on order.
-    void process_include(const std::string& name, int line, int column) {
-        if (deps_.find(name) != deps_.end()) {
-            return;  // already collected
-        }
-        if (install_root_.empty()) {
-            throw BundleError(
-                "include '" + name +
-                    "' has no install root to resolve against",
-                line, column);
-        }
+    // Resolve `include <name>[@N]` against the install root, the install
+    // root's archive, or the existing parent's bundled deps. Multiple
+    // includes of the same name dedupe to one record; the first
+    // encounter wins on dep order. If a later encounter pins a different
+    // version than the earlier one, that is rejected as inconsistent.
+    void process_include(const IncludeStmt& s) {
+        const std::string& name = s.name;
+        int line = s.line;
+        int column = s.column;
+
         if (name.empty() || name.find('/') != std::string::npos ||
             name.find('\0') != std::string::npos || name == "." ||
             name == "..") {
@@ -177,7 +184,54 @@ class Bundler {
                 "include name is not a bare identifier: '" + name + "'",
                 line, column);
         }
-        fs::path dep_path = install_root_ / (name + ".spp");
+
+        auto it_existing = deps_.find(name);
+        if (it_existing != deps_.end()) {
+            // Already collected. If both encounters carry pins, the pins
+            // must match - we cannot bundle a single name at two
+            // different versions.
+            if (s.version_pin.has_value()) {
+                std::uint32_t prev_pin = it_existing->second.version_tag;
+                if (*s.version_pin != prev_pin) {
+                    throw BundleError(
+                        "include '" + name + "' is bundled at v" +
+                            std::to_string(prev_pin) +
+                            " but a later include pins v" +
+                            std::to_string(*s.version_pin),
+                        line, column);
+                }
+            }
+            return;
+        }
+
+        if (install_root_.empty()) {
+            throw BundleError(
+                "include '" + name +
+                    "' has no install root to resolve against",
+                line, column);
+        }
+
+        SpudpackDep dep;
+        dep.name = name;
+
+        if (s.version_pin.has_value()) {
+            dep.bytes = resolve_pinned_dep(name, *s.version_pin, line, column);
+            dep.version_tag = *s.version_pin;
+        } else {
+            auto resolved = resolve_unpinned_dep(name, line, column);
+            dep.bytes = std::move(resolved.first);
+            dep.version_tag = resolved.second;
+        }
+
+        deps_.emplace(name, std::move(dep));
+        dep_order_.push_back(name);
+    }
+
+    // Read+verify a spudpack from disk. Used both by pin and by sticky
+    // refresh paths.
+    std::vector<std::uint8_t> read_dep_pack(const std::string& name,
+                                            const fs::path& dep_path,
+                                            int line, int column) {
         std::error_code ec;
         if (!fs::exists(dep_path, ec) || ec) {
             throw BundleError(
@@ -191,19 +245,76 @@ class Bundler {
                     dep_path.string(),
                 line, column);
         }
-        std::vector<std::uint8_t> bytes = read_file_bytes(dep_path, line, column);
+        std::vector<std::uint8_t> bytes =
+            read_file_bytes(dep_path, line, column);
         try {
             spudpack_decode(bytes.data(), bytes.size());
         } catch (const SpudpackError& e) {
             throw BundleError(
-                "include '" + name + "' is not a valid spudpack: " + e.what(),
+                "include '" + name + "' at " + dep_path.string() +
+                    " is not a valid spudpack: " + e.what(),
                 line, column);
         }
-        SpudpackDep dep;
-        dep.name = name;
-        dep.bytes = std::move(bytes);
-        deps_.emplace(name, std::move(dep));
-        dep_order_.push_back(name);
+        return bytes;
+    }
+
+    // Resolve a hard pin: try the install root first, then the archive.
+    // Returns the dep's full byte stream. Throws if no installed or
+    // archived copy carries the pinned version.
+    std::vector<std::uint8_t> resolve_pinned_dep(const std::string& name,
+                                                 std::uint32_t pin,
+                                                 int line, int column) {
+        fs::path dep_path = install_root_ / (name + ".spp");
+        std::error_code ec;
+        if (fs::exists(dep_path, ec) && !ec &&
+            fs::is_regular_file(dep_path, ec) && !ec) {
+            std::vector<std::uint8_t> bytes =
+                read_file_bytes(dep_path, line, column);
+            try {
+                Spudpack p =
+                    spudpack_decode(bytes.data(), bytes.size());
+                if (p.version_tag == pin) {
+                    return bytes;
+                }
+            } catch (const SpudpackError& e) {
+                throw BundleError(
+                    "include '" + name + "' at " + dep_path.string() +
+                        " is not a valid spudpack: " + e.what(),
+                    line, column);
+            }
+        }
+        fs::path archive_path = install_root_ / ".archive" /
+                                (name + ".v" + std::to_string(pin) + ".spp");
+        if (fs::exists(archive_path, ec) && !ec) {
+            return read_dep_pack(name, archive_path, line, column);
+        }
+        throw BundleError(
+            "include '" + name + "' version pin v" + std::to_string(pin) +
+                " is not installed (looked at " + dep_path.string() +
+                " and " + archive_path.string() + ")",
+            line, column);
+    }
+
+    // Resolve an unpinned include: sticky reuse from existing parent
+    // unless `--update-deps` requested refresh, falling back to a fresh
+    // install-root read on first install or when no existing dep
+    // matches.
+    std::pair<std::vector<std::uint8_t>, std::uint32_t> resolve_unpinned_dep(
+        const std::string& name, int line, int column) {
+        bool wants_refresh =
+            update_deps_ != nullptr && update_deps_->count(name) > 0;
+        if (!wants_refresh) {
+            auto it = existing_dep_index_.find(name);
+            if (it != existing_dep_index_.end()) {
+                return {it->second->bytes, it->second->version_tag};
+            }
+        }
+        fs::path dep_path = install_root_ / (name + ".spp");
+        std::vector<std::uint8_t> bytes =
+            read_dep_pack(name, dep_path, line, column);
+        std::uint32_t tag =
+            spudpack_decode(bytes.data(), bytes.size()).version_tag;
+        return {std::move(bytes), tag};
     }
 
     // `file ... from <path>` - the path may resolve to a regular file
@@ -460,17 +571,57 @@ class Bundler {
 
     fs::path root_;
     fs::path install_root_;
+    const Spudpack* existing_parent_;
+    const std::unordered_set<std::string>* update_deps_;
+    BundleNotes* notes_;
+    std::unordered_map<std::string, const SpudpackDep*> existing_dep_index_;
     std::unordered_map<std::string, SpudpackAsset> by_path_;
     std::vector<std::string> insertion_order_;
     std::unordered_map<std::string, SpudpackDep> deps_;
     std::vector<std::string> dep_order_;
 };
 
+// Walk the program once and surface any dep names that the user listed in
+// --update-deps but the source pinned with `@N`. The bundler honours the
+// pin (refresh is meaningless against a pinned dep), and the CLI relays
+// these names so users learn why their flag did nothing.
+void note_ignored_update_pins(const Program& program,
+                              const std::unordered_set<std::string>& update_deps,
+                              std::vector<std::string>& out) {
+    std::unordered_set<std::string> seen;
+    auto walk = [&](auto& self, const std::vector<StmtPtr>& body) -> void {
+        for (const auto& sp : body) {
+            if (!sp) continue;
+            std::visit(
+                [&](const auto& s) {
+                    using T = std::decay_t<decltype(s)>;
+                    if constexpr (std::is_same_v<T, IncludeStmt>) {
+                        if (s.version_pin.has_value() &&
+                            update_deps.count(s.name) > 0 &&
+                            seen.insert(s.name).second) {
+                            out.push_back(s.name);
+                        }
+                    } else if constexpr (std::is_same_v<T, RepeatStmt> ||
+                                         std::is_same_v<T, IfStmt>) {
+                        self(self, s.body);
+                    }
+                },
+                sp->data);
+        }
+    };
+    walk(walk, program.statements);
+}
+
 }  // namespace
 
 BundleResult bundle_assets(const Program& program, const fs::path& source_root,
-                           const fs::path& install_root) {
-    Bundler b(source_root, install_root);
+                           const fs::path& install_root,
+                           const BundleOptions& options, BundleNotes* notes) {
+    if (notes != nullptr && options.update_deps != nullptr) {
+        note_ignored_update_pins(program, *options.update_deps,
+                                 notes->ignored_update_pins);
+    }
+    Bundler b(source_root, install_root, options, notes);
     return b.run(program);
 }
 
