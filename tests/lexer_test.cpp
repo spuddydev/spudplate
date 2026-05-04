@@ -67,10 +67,10 @@ TEST(LexerTest, EofIsIdempotent) {
 }
 
 TEST(LexerTest, UnrecognizedCharReturnsError) {
-    Lexer lexer("@");
+    Lexer lexer("$");
     Token tok = lexer.nextToken();
     EXPECT_EQ(tok.type, TokenType::ERROR);
-    EXPECT_EQ(tok.value, "@");
+    EXPECT_EQ(tok.value, "$");
     EXPECT_EQ(tok.line, 1);
     EXPECT_EQ(tok.column, 1);
 
@@ -79,10 +79,10 @@ TEST(LexerTest, UnrecognizedCharReturnsError) {
 }
 
 TEST(LexerTest, WhitespaceBeforeUnrecognized) {
-    Lexer lexer("  @");
+    Lexer lexer("  $");
     Token tok = lexer.nextToken();
     EXPECT_EQ(tok.type, TokenType::ERROR);
-    EXPECT_EQ(tok.value, "@");
+    EXPECT_EQ(tok.value, "$");
     EXPECT_EQ(tok.column, 3);
 }
 

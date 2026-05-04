@@ -530,7 +530,7 @@ TEST(CliTest, ListShowsInstalledNamesSorted) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0);
-    EXPECT_EQ(out.str(), "alpha\nzebra\n");
+    EXPECT_EQ(out.str(), "alpha (v1)\nzebra (v1)\n");
 }
 
 TEST(CliTest, InspectPrintsSource) {
@@ -545,7 +545,7 @@ TEST(CliTest, InspectPrintsSource) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0);
-    EXPECT_EQ(out.str(), body);
+    EXPECT_EQ(out.str(), "demo (v1)\n\n" + body);
 }
 
 TEST(CliTest, InspectUnknownExitsFive) {
@@ -961,7 +961,7 @@ TEST(CliTest, InspectPrintsSourceFromSpudpack) {
     std::stringstream err;
     ScriptedPrompter prompter({});
     EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0) << err.str();
-    EXPECT_EQ(out.str(), body);
+    EXPECT_EQ(out.str(), "demo (v1)\n\n" + body);
 }
 
 TEST(CliTest, InstallRunDeleteSourceMaterialisesAssets) {
@@ -1031,7 +1031,7 @@ TEST(CliTest, ListWarnsAboutShadowedLegacy) {
     std::stringstream err;
     ScriptedPrompter prompter({});
     EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0);
-    EXPECT_EQ(out.str(), "demo\n");
+    EXPECT_EQ(out.str(), "demo (v1)\n");
     EXPECT_NE(err.str().find("shadowed"), std::string::npos);
 }
 
@@ -1471,4 +1471,361 @@ TEST(CliTest, RunInstalledParentPromptsInSourceOrder) {
                         run_prompter);
     EXPECT_EQ(code, 0) << run_err.str();
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "start_end"));
+}
+
+// --- Version tags: install/bump/archive/sticky/pin/drift -------------------
+
+namespace {
+
+// Run a single CLI invocation with the supplied argv and return its stdout,
+// stderr, and exit code. Helps the version-tag tests stay readable.
+struct CliRun {
+    int code;
+    std::string out;
+    std::string err;
+};
+
+CliRun run_cli(std::vector<std::string> argv) {
+    Argv args(argv);
+    std::stringstream out, err;
+    ScriptedPrompter p({});
+    int code = cli_main(args.argc(), args.argv(), out, err, p);
+    return {code, out.str(), err.str()};
+}
+
+}  // namespace
+
+TEST(CliTest, FirstInstallTagsAsV1) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud", "ask q \"q?\" string default \"x\"\n");
+    auto r = run_cli({"spudplate", "install",
+                      (td.path() / "foo.spud").string()});
+    ASSERT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.out.find("(v1)"), std::string::npos) << r.out;
+    auto p = spudplate::spudpack_read_file(home_path / "foo.spp");
+    EXPECT_EQ(p.version_tag, 1u);
+}
+
+TEST(CliTest, IdenticalReinstallIsAlreadyUpToDate) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud", "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli(
+        {"spudplate", "install", (td.path() / "foo.spud").string()});
+    EXPECT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.out.find("already up to date"), std::string::npos) << r.out;
+    auto p = spudplate::spudpack_read_file(home_path / "foo.spp");
+    EXPECT_EQ(p.version_tag, 1u);
+}
+
+TEST(CliTest, ChangedReinstallBumpsAndArchives) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud", "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "foo.spud", "ask q \"q changed?\" string default \"x\"\n");
+    auto r = run_cli({"spudplate", "install", "--yes",
+                      (td.path() / "foo.spud").string()});
+    ASSERT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.out.find("(v2)"), std::string::npos) << r.out;
+    auto p = spudplate::spudpack_read_file(home_path / "foo.spp");
+    EXPECT_EQ(p.version_tag, 2u);
+    EXPECT_TRUE(std::filesystem::is_regular_file(home_path / ".archive" /
+                                                 "foo.v1.spp"));
+}
+
+TEST(CliTest, ParentBundlesDepAtCurrentVersion) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "parent.spud", "include child\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "parent.spud").string()})
+                  .code,
+              0);
+    auto p = spudplate::spudpack_read_file(home_path / "parent.spp");
+    ASSERT_EQ(p.deps.size(), 1u);
+    EXPECT_EQ(p.deps[0].name, "child");
+    EXPECT_EQ(p.deps[0].version_tag, 2u);
+}
+
+TEST(CliTest, ReinstallParentIsStickyForUnpinnedDeps) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v1?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "parent.spud", "include child\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "parent.spud").string()})
+                  .code,
+              0);
+    // Child gets bumped to v2 in the install root.
+    write_file(td.path() / "child.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    // Parent reinstall without --update-deps must keep child at v1 - the
+    // bytes are unchanged, so the bundler's content compare flags this
+    // as a no-op.
+    auto r = run_cli({"spudplate", "install", "--yes",
+                      (td.path() / "parent.spud").string()});
+    ASSERT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.out.find("already up to date"), std::string::npos) << r.out;
+    auto p = spudplate::spudpack_read_file(home_path / "parent.spp");
+    EXPECT_EQ(p.deps[0].version_tag, 1u);
+}
+
+TEST(CliTest, UpdateDepsRefreshesBundledDep) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v1?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "parent.spud", "include child\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "parent.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli({"spudplate", "install", "--yes", "--update-deps",
+                      "child", (td.path() / "parent.spud").string()});
+    ASSERT_EQ(r.code, 0) << r.err;
+    auto p = spudplate::spudpack_read_file(home_path / "parent.spp");
+    EXPECT_EQ(p.deps[0].version_tag, 2u);
+    EXPECT_EQ(p.version_tag, 2u);  // parent itself bumped because content changed
+}
+
+TEST(CliTest, PinResolvesAgainstArchive) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v1?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    // child is now v2 in the install root; v1 is in archive.
+    write_file(td.path() / "parent.spud", "include child@1\n");
+    auto r = run_cli({"spudplate", "install",
+                      (td.path() / "parent.spud").string()});
+    ASSERT_EQ(r.code, 0) << r.err;
+    auto p = spudplate::spudpack_read_file(home_path / "parent.spp");
+    EXPECT_EQ(p.deps[0].version_tag, 1u);
+}
+
+TEST(CliTest, PinForUnknownVersionFails) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "parent.spud", "include child@9\n");
+    auto r = run_cli({"spudplate", "install",
+                      (td.path() / "parent.spud").string()});
+    EXPECT_NE(r.code, 0);
+    EXPECT_NE(r.err.find("version pin v9"), std::string::npos) << r.err;
+}
+
+TEST(CliTest, UpdateDepsOnPinnedPrintsNoteAndDoesNothing) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v1?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "parent.spud", "include child@1\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "parent.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli({"spudplate", "install", "--yes", "--update-deps",
+                      "child", (td.path() / "parent.spud").string()});
+    EXPECT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.err.find("'child' is pinned"), std::string::npos) << r.err;
+    EXPECT_NE(r.out.find("already up to date"), std::string::npos) << r.out;
+}
+
+TEST(CliTest, UninstallSweepsArchiveEntries) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud",
+               "ask q \"q v1?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "foo.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    EXPECT_TRUE(std::filesystem::is_regular_file(home_path / ".archive" /
+                                                 "foo.v1.spp"));
+    auto r = run_cli({"spudplate", "uninstall", "foo"});
+    EXPECT_EQ(r.code, 0) << r.err;
+    EXPECT_FALSE(std::filesystem::exists(home_path / "foo.spp"));
+    EXPECT_FALSE(std::filesystem::exists(home_path / ".archive" /
+                                         "foo.v1.spp"));
+}
+
+TEST(CliTest, UninstallLeavesOtherNamesArchive) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud", "ask q \"q?\" string default \"x\"\n");
+    write_file(td.path() / "foobar.spud",
+               "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foobar.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "foobar.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "foobar.spud").string()})
+                  .code,
+              0);
+    // Uninstalling foo must not touch foobar.v1.spp (different name).
+    auto r = run_cli({"spudplate", "uninstall", "foo"});
+    ASSERT_EQ(r.code, 0) << r.err;
+    EXPECT_TRUE(std::filesystem::is_regular_file(home_path / ".archive" /
+                                                 "foobar.v1.spp"));
+}
+
+TEST(CliTest, ListShowsTagsAndSkipsArchive) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud",
+               "ask q \"q v1?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "foo.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli({"spudplate", "list"});
+    EXPECT_EQ(r.code, 0) << r.err;
+    EXPECT_EQ(r.out, "foo (v2)\n");
+}
+
+TEST(CliTest, InspectShowsVersionAndDeps) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "parent.spud", "include child\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "parent.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli({"spudplate", "inspect", "parent"});
+    EXPECT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.out.find("parent (v1)"), std::string::npos) << r.out;
+    EXPECT_NE(r.out.find("child (v1)"), std::string::npos) << r.out;
+    EXPECT_NE(r.out.find("Dependencies:"), std::string::npos) << r.out;
+}
+
+TEST(CliTest, RunDriftWarnsWhenInstalledDepNewer) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v1?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "parent.spud",
+               "include child\nask done \"done?\" string default \"d\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "parent.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "child.spud",
+               "ask q \"q v2?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "child.spud").string()})
+                  .code,
+              0);
+    // Run parent: drift expected.
+    Argv run_args({"spudplate", "run", "--yes", "parent"});
+    std::stringstream rout, rerr;
+    ScriptedPrompter rprompter({"a", "b"});
+    int code = cli_main(run_args.argc(), run_args.argv(), rout, rerr,
+                        rprompter);
+    EXPECT_EQ(code, 0) << rerr.str();
+    EXPECT_NE(rerr.str().find("warning: dep 'child'"), std::string::npos)
+        << rerr.str();
+    EXPECT_NE(rerr.str().find("bundled at v1, installed v2"),
+              std::string::npos)
+        << rerr.str();
 }

@@ -1,6 +1,7 @@
 #ifndef SPUDPLATE_AST_H
 #define SPUDPLATE_AST_H
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -328,8 +329,9 @@ struct RunStmt {
  * `when` clause skips the include entirely if false.
  */
 struct IncludeStmt {
-    std::string name;                    ///< Name of the installed template to run.
-    std::optional<ExprPtr> when_clause;  ///< Optional condition guarding the include.
+    std::string name;                          ///< Name of the installed template to run.
+    std::optional<std::uint32_t> version_pin;  ///< Optional `@N` pin from source. Bundler resolves to that exact installed/archived version.
+    std::optional<ExprPtr> when_clause;        ///< Optional condition guarding the include.
     int line;    ///< 1-based source line where this node begins.
     int column;  ///< 1-based source column where this node begins.
 };

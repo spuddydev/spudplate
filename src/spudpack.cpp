@@ -23,11 +23,17 @@ constexpr std::array<std::uint8_t, 4> kMagic = {'S', 'P', 'U', 'D'};
 // v3: dep_count may be nonzero. Per dep: varint name_len, name bytes,
 // varint blob_len, blob bytes. The blob is itself a complete spudpack
 // byte stream. v1 and v2 still require dep_count == 0.
+// v4: pack-level `version_tag: u32 LE` written immediately after the
+// flags byte; per-dep `version_tag: u32 LE` written between the dep
+// name and the dep blob. Both default to 1 when decoding v1/v2/v3 packs
+// so older bytes round-trip into a fully-populated `Spudpack` without
+// any callers having to handle a missing-tag case.
 // Encoder always writes the highest supported version; decoder accepts
 // every version in [kMinVersion, kVersion].
-constexpr std::uint8_t kVersion = 3;
+constexpr std::uint8_t kVersion = 4;
 constexpr std::uint8_t kMinVersion = 1;
 constexpr std::uint8_t kVersionDepsAllowed = 3;
+constexpr std::uint8_t kVersionTagsAllowed = 4;
 constexpr std::uint8_t kFlags = 0;
 
 // Per-asset, per-dep, and per-file caps. All apply to declared lengths
@@ -39,20 +45,6 @@ constexpr std::size_t kMaxTotalBytes = std::size_t{2} * 1024 * 1024 * 1024;
 constexpr std::size_t kMaxAssetCount = std::size_t{1} << 20;
 constexpr std::size_t kMaxDepCount = std::size_t{1} << 10;
 constexpr std::size_t kMaxDepBytes = kMaxAssetBytes;
-
-// A dep name must be a bare identifier matching the rules already enforced
-// by `spudplate install` for installed template names. Specifically: it
-// must be nonempty, free of `/`, free of NUL, and must not be `.` or `..`.
-// Stricter constraints (e.g. shell-safe characters) are not enforced here -
-// the install-time path resolution is the source of truth.
-bool is_valid_dep_name(std::string_view name) noexcept {
-    if (name.empty()) return false;
-    if (name == "." || name == "..") return false;
-    for (char c : name) {
-        if (c == '/' || c == '\0') return false;
-    }
-    return true;
-}
 
 // Producer convention: spudplate's own bundler masks asset modes to 0o0777
 // before encode. The decoder additionally rejects anything outside 0o7777
@@ -187,6 +179,22 @@ class Reader {
 SpudpackError::SpudpackError(std::string message, std::optional<std::size_t> offset)
     : std::runtime_error(std::move(message)), offset_(offset) {}
 
+bool is_valid_dep_name(std::string_view name) noexcept {
+    if (name.empty()) return false;
+    if (name == "." || name == "..") return false;
+    for (char c : name) {
+        if (c == '/' || c == '\0') return false;
+    }
+    return true;
+}
+
+std::filesystem::path archive_path_for(const std::filesystem::path& install_root,
+                                       std::string_view name,
+                                       std::uint32_t version_tag) {
+    return install_root / kArchiveDir /
+           (std::string(name) + ".v" + std::to_string(version_tag) + ".spp");
+}
+
 bool is_normalized_asset_path(std::string_view path) noexcept {
     if (path.empty()) return false;
     if (path.front() == '/') return false;
@@ -268,6 +276,11 @@ std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack) {
     out.push_back(kVersion);
     out.push_back(kFlags);
 
+    if (pack.version_tag == 0) {
+        throw SpudpackError("spudpack version_tag must be >= 1");
+    }
+    write_u32_le(out, pack.version_tag);
+
     write_length_prefixed(out, pack.source.data(), pack.source.size());
     write_length_prefixed(out, pack.program_bytes.data(), pack.program_bytes.size());
 
@@ -304,7 +317,12 @@ std::vector<std::uint8_t> spudpack_encode(const Spudpack& pack) {
         if (dep.bytes.size() > kMaxDepBytes) {
             throw SpudpackError("spudpack dep exceeds 256MiB cap: " + dep.name);
         }
+        if (dep.version_tag == 0) {
+            throw SpudpackError("spudpack dep version_tag must be >= 1: " +
+                                dep.name);
+        }
         write_length_prefixed(out, dep.name.data(), dep.name.size());
+        write_u32_le(out, dep.version_tag);
         write_length_prefixed(out, dep.bytes.data(), dep.bytes.size());
     }
 
@@ -346,6 +364,17 @@ Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size) {
 
     Spudpack pack;
     pack.version = version;
+    // v3 and below carry no version_tag on the wire. The struct field
+    // defaults to 1 so callers see a fully-populated pack regardless of
+    // which on-disk version they decoded.
+    if (version >= kVersionTagsAllowed) {
+        std::size_t tag_at = r.offset();
+        std::uint32_t tag = r.read_u32_le();
+        if (tag == 0) {
+            throw SpudpackError("spudpack version_tag must be >= 1", tag_at);
+        }
+        pack.version_tag = tag;
+    }
 
     std::size_t source_len = r.read_checked_length();
     r.read_bytes_into(pack.source, source_len);
@@ -417,6 +446,19 @@ Spudpack spudpack_decode(const std::uint8_t* data, std::size_t size) {
         if (!is_valid_dep_name(dep.name)) {
             throw SpudpackError(
                 "spudpack dep name is not a bare identifier", name_at);
+        }
+
+        // v4 only: read the dep's version_tag before its blob. v3 packs
+        // leave the struct's default of 1 untouched, matching the
+        // top-level fall-back.
+        if (version >= kVersionTagsAllowed) {
+            std::size_t dep_tag_at = r.offset();
+            std::uint32_t dep_tag = r.read_u32_le();
+            if (dep_tag == 0) {
+                throw SpudpackError(
+                    "spudpack dep version_tag must be >= 1", dep_tag_at);
+            }
+            dep.version_tag = dep_tag;
         }
 
         std::size_t blob_len_at = r.offset();

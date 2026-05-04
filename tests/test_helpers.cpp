@@ -219,6 +219,7 @@ bool stmts_equal(const Stmt& a, const Stmt& b) {
                 return av.line == bv.line && av.column == bv.column;
             } else if constexpr (std::is_same_v<T, IncludeStmt>) {
                 if (av.name != bv.name) return false;
+                if (av.version_pin != bv.version_pin) return false;
                 if (!optional_expr_equal(av.when_clause, bv.when_clause)) {
                     return false;
                 }

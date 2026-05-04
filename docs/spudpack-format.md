@@ -9,21 +9,23 @@ This document is the on-disk contract. The encoder lives in `src/spudpack.cpp`; 
 ## At a glance
 
 ```
-magic    "SPUD"        4 bytes
-version  u8            1 byte    currently 3; 1 and 2 still accepted on decode
-flags    u8            1 byte    must be 0
-source   length+bytes            varint length, raw UTF-8 source
-program  length+bytes            varint length, opaque AST bytes
-asset_count varint                number of asset records
+magic       "SPUD"     4 bytes
+version     u8         1 byte    currently 4; 1, 2, 3 still accepted on decode
+flags       u8         1 byte    must be 0
+version_tag u32 LE     4 bytes   v4 only; monotonic install counter; >= 1
+source      length+bytes         varint length, raw UTF-8 source
+program     length+bytes         varint length, opaque AST bytes
+asset_count varint               number of asset records
 per asset:
-  path   length+bytes            varint length, normalised path
-  mode   u16 LE                  POSIX mode bits, masked to 0o0777
-  data   length+bytes            varint length, raw bytes
-dep_count varint                  number of dependency records (must be 0 in v1/v2)
+  path      length+bytes         varint length, normalised path
+  mode      u16 LE               POSIX mode bits, masked to 0o0777
+  data      length+bytes         varint length, raw bytes
+dep_count   varint               number of dependency records (must be 0 in v1/v2)
 per dep:
-  name   length+bytes            varint length, bare identifier
-  blob   length+bytes            varint length, full bytes of another spudpack
-trailer  u32 LE                  CRC32 over [0, size-4)
+  name      length+bytes         varint length, bare identifier
+  version_tag u32 LE             v4 only; the dep's version_tag at bundle time; >= 1
+  blob      length+bytes         varint length, full bytes of another spudpack
+trailer     u32 LE               CRC32 over [0, size-4)
 ```
 
 All multi-byte integers are little-endian. Variable-length integers (`varint`) are unsigned LEB128 capped at 10 bytes.
@@ -37,6 +39,7 @@ All multi-byte integers are little-endian. Variable-length integers (`varint`) a
 | 1 | Original format. |
 | 2 | `RunStmt` gains a trailing optional `timeout` field (one present-flag byte plus, if set, the encoded expression). Packs without `run` statements are byte-identical to v1 once the version byte is bumped. |
 | 3 | `dep_count` may be nonzero. Each dep is a bare-identifier name plus the full bytes of another spudpack. v1 and v2 packs still require `dep_count == 0`. |
+| 4 | Pack-level `version_tag: u32 LE` written immediately after the flags byte; per-dep `version_tag: u32 LE` written between the dep name and the dep blob. Both must be `>= 1`. The `IncludeStmt` AST also gains a trailing optional `version_pin` (one present-flag byte plus, if set, a varint version number) inside the binary AST stream. v1, v2, and v3 decodes leave both tags at the default of 1 and any `version_pin` at nullopt. |
 
 The encoder always writes the latest version. The decoder accepts every version in `[kMinVersion, kVersion]`; the version is threaded through to the binary deserialiser so trailing-optional fields decode correctly across versions.
 
@@ -103,6 +106,7 @@ Common failure cases:
 - `spudpack vN does not support deps` - non-zero `dep_count` in a v1 or v2 pack.
 - `dep_count exceeds maximum` - hostile dep count.
 - `spudpack dep name is not a bare identifier` - dep name contains `/`, NUL, or is `.` / `..`.
+- `spudpack version_tag must be >= 1` - pack-level or per-dep tag is zero.
 - `spudpack CRC mismatch` - trailer does not match recomputed CRC.
 
 ---

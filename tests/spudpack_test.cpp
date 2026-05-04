@@ -164,45 +164,90 @@ TEST(SpudpackCodec, UnsupportedVersionZero) {
     }
 }
 
-TEST(SpudpackCodec, UnsupportedVersionFour) {
-    // v1, v2, and v3 are accepted; v4 (and above) is not.
+TEST(SpudpackCodec, UnsupportedVersionFive) {
+    // v1..v4 are accepted; v5 (and above) is not.
     Spudpack in = make_simple();
     auto bytes = spudpack_encode(in);
-    bytes[4] = 4;
+    bytes[4] = 5;
     rewrite_crc(bytes);
     EXPECT_THROW(spudpack_decode(bytes.data(), bytes.size()), SpudpackError);
 }
 
 TEST(SpudpackCodec, V1FixtureDecodes) {
-    // Encoder writes the highest supported version; flip the byte to 1 and
-    // rewrite the CRC. Decoding succeeds and the resulting Spudpack carries
-    // version=1 so downstream code (binary serialiser) can decode RunStmt
-    // without the trailing timeout field.
-    Spudpack in = make_simple();
-    auto bytes = spudpack_encode(in);
-    bytes[4] = 1;
+    // Hand-craft a minimal v1 envelope (no version_tag, no per-dep tags)
+    // to verify the decoder still accepts wire bytes from before v4. The
+    // resulting Spudpack falls back to version_tag=1 since the field did
+    // not exist on the wire.
+    std::vector<std::uint8_t> bytes;
+    bytes.insert(bytes.end(), {'S', 'P', 'U', 'D'});
+    bytes.push_back(1);                       // version
+    bytes.push_back(0);                       // flags
+    bytes.push_back(3);                       // source_len = 3
+    bytes.insert(bytes.end(), {'a', 'b', 'c'});
+    bytes.push_back(0);                       // program_len = 0
+    bytes.push_back(0);                       // asset_count = 0
+    bytes.push_back(0);                       // dep_count = 0
+    bytes.insert(bytes.end(), 4, 0);          // CRC placeholder
     rewrite_crc(bytes);
     auto out = spudpack_decode(bytes.data(), bytes.size());
     EXPECT_EQ(out.version, 1u);
-    EXPECT_EQ(out.source, in.source);
+    EXPECT_EQ(out.source, "abc");
+    EXPECT_EQ(out.version_tag, 1u);
 }
 
 TEST(SpudpackCodec, V2FixtureDecodes) {
-    // v2 packs in the wild carry no deps - flip the byte to 2 and decode.
-    Spudpack in = make_simple();
-    auto bytes = spudpack_encode(in);
-    bytes[4] = 2;
+    // Same shape as v1 - the v2 difference is internal to the program
+    // byte stream (RunStmt timeout field), invisible at the spudpack
+    // envelope. version_tag still defaults to 1.
+    std::vector<std::uint8_t> bytes;
+    bytes.insert(bytes.end(), {'S', 'P', 'U', 'D'});
+    bytes.push_back(2);                       // version
+    bytes.push_back(0);                       // flags
+    bytes.push_back(0);                       // source_len = 0
+    bytes.push_back(0);                       // program_len = 0
+    bytes.push_back(0);                       // asset_count = 0
+    bytes.push_back(0);                       // dep_count = 0
+    bytes.insert(bytes.end(), 4, 0);          // CRC placeholder
     rewrite_crc(bytes);
     auto out = spudpack_decode(bytes.data(), bytes.size());
     EXPECT_EQ(out.version, 2u);
     EXPECT_TRUE(out.deps.empty());
+    EXPECT_EQ(out.version_tag, 1u);
+}
+
+TEST(SpudpackCodec, V3FixtureDecodes) {
+    // v3 carries deps but still no version_tag fields. Hand-craft a v3
+    // envelope with one zero-byte dep blob (the blob would not actually
+    // round-trip through spudpack_decode, but the outer envelope decodes
+    // fine and we never recurse into the blob here).
+    std::vector<std::uint8_t> bytes;
+    bytes.insert(bytes.end(), {'S', 'P', 'U', 'D'});
+    bytes.push_back(3);                       // version
+    bytes.push_back(0);                       // flags
+    bytes.push_back(0);                       // source_len = 0
+    bytes.push_back(0);                       // program_len = 0
+    bytes.push_back(0);                       // asset_count = 0
+    bytes.push_back(1);                       // dep_count = 1
+    bytes.push_back(3);                       // dep[0] name_len = 3
+    bytes.insert(bytes.end(), {'f', 'o', 'o'});
+    bytes.push_back(0);                       // dep[0] blob_len = 0
+    bytes.insert(bytes.end(), 4, 0);          // CRC placeholder
+    rewrite_crc(bytes);
+    auto out = spudpack_decode(bytes.data(), bytes.size());
+    EXPECT_EQ(out.version, 3u);
+    ASSERT_EQ(out.deps.size(), 1u);
+    EXPECT_EQ(out.deps[0].name, "foo");
+    EXPECT_EQ(out.deps[0].version_tag, 1u);
+    EXPECT_EQ(out.version_tag, 1u);
 }
 
 TEST(SpudpackCodec, CrcMismatchDetected) {
     Spudpack in = make_simple();
     auto bytes = spudpack_encode(in);
-    // Flip a byte inside the source field, leaving the trailer alone.
-    bytes[10] ^= 0xFF;
+    // Flip a byte inside the source content. v4 layout: magic(4) +
+    // version(1) + flags(1) + version_tag(4) + source_len varint (1 byte
+    // for "Name?" length 24 = 0x18). Source content begins at byte 11.
+    bytes[12] ^= 0xFF;
     try {
         spudpack_decode(bytes.data(), bytes.size());
         FAIL() << "expected throw";
@@ -250,21 +295,57 @@ TEST(SpudpackCodec, RoundTripWithDeps) {
     auto inner_b_bytes = spudpack_encode(inner_b);
 
     Spudpack in = make_simple();
-    in.deps.push_back({"inner_a", inner_a_bytes});
-    in.deps.push_back({"inner_b", inner_b_bytes});
+    in.version_tag = 7;
+    in.deps.push_back({"inner_a", inner_a_bytes, 3});
+    in.deps.push_back({"inner_b", inner_b_bytes, 11});
     auto bytes = spudpack_encode(in);
     Spudpack out = spudpack_decode(bytes.data(), bytes.size());
-    EXPECT_EQ(out.version, 3u);
+    EXPECT_EQ(out.version, 4u);
+    EXPECT_EQ(out.version_tag, 7u);
     ASSERT_EQ(out.deps.size(), 2u);
     EXPECT_EQ(out.deps[0].name, "inner_a");
+    EXPECT_EQ(out.deps[0].version_tag, 3u);
     EXPECT_EQ(out.deps[0].bytes, inner_a_bytes);
     EXPECT_EQ(out.deps[1].name, "inner_b");
+    EXPECT_EQ(out.deps[1].version_tag, 11u);
     EXPECT_EQ(out.deps[1].bytes, inner_b_bytes);
 
     // The dep bytes must round-trip back through the codec untouched.
     Spudpack a_decoded = spudpack_decode(out.deps[0].bytes.data(),
                                          out.deps[0].bytes.size());
     EXPECT_EQ(a_decoded.source, inner_a.source);
+}
+
+TEST(SpudpackCodec, EncodeRejectsZeroVersionTag) {
+    Spudpack in = make_simple();
+    in.version_tag = 0;
+    EXPECT_THROW(spudpack_encode(in), SpudpackError);
+}
+
+TEST(SpudpackCodec, EncodeRejectsZeroDepVersionTag) {
+    Spudpack in = make_simple();
+    in.deps.push_back({"foo", {1, 2, 3}, /*version_tag=*/0});
+    EXPECT_THROW(spudpack_encode(in), SpudpackError);
+}
+
+TEST(SpudpackCodec, DecodeRejectsZeroVersionTag) {
+    Spudpack in = make_simple();
+    auto bytes = spudpack_encode(in);
+    // version_tag sits at bytes[6..9] (LE u32) in v4. Zero it out.
+    bytes[6] = 0;
+    bytes[7] = 0;
+    bytes[8] = 0;
+    bytes[9] = 0;
+    rewrite_crc(bytes);
+    try {
+        spudpack_decode(bytes.data(), bytes.size());
+        FAIL() << "expected throw";
+    } catch (const SpudpackError& e) {
+        EXPECT_NE(std::string(e.what()).find("version_tag must be >= 1"),
+                  std::string::npos);
+        ASSERT_TRUE(e.offset().has_value());
+        EXPECT_EQ(*e.offset(), 6u);
+    }
 }
 
 TEST(SpudpackCodec, EncodeRejectsDepNameWithSlash) {
@@ -400,10 +481,11 @@ TEST(SpudpackCodec, DecodeRejectsModeWithReservedBits) {
     in.assets.push_back({"foo", 0644, {1, 2, 3}});
     auto bytes = spudpack_encode(in);
 
-    // Locate the mode field. After magic(4)+version(1)+flags(1)+source_len(1
-    // varint byte = 0)+program_len(1 = 0)+asset_count(1 = 1)+path_len(1)+
-    // path("foo" = 3 bytes), the next 2 bytes are the mode.
-    std::size_t mode_off = 4 + 1 + 1 + 1 + 1 + 1 + 1 + 3;
+    // Locate the mode field. v4 layout:
+    // magic(4) + version(1) + flags(1) + version_tag(4) + source_len(1=0)
+    // + program_len(1=0) + asset_count(1=1) + path_len(1) + path("foo"=3),
+    // the next 2 bytes are the mode.
+    std::size_t mode_off = 4 + 1 + 1 + 4 + 1 + 1 + 1 + 1 + 3;
     bytes[mode_off] = 0xFF;
     bytes[mode_off + 1] = 0xFF;
     rewrite_crc(bytes);

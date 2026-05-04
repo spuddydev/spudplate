@@ -37,19 +37,22 @@ Alternatives:
 ```
 spudplate install my_template.spud      # bundle assets, write <name>.spp under the install root
 spudplate install --yes my_template.spud  # overwrite an existing install without prompting
+spudplate install --update-deps a,b ... # refresh the listed unpinned deps from the install root
 spudplate validate my_template.spud     # parse and validate without installing (also: `check`)
 spudplate run my_template               # run by installed name
 spudplate run path/to/file.spud         # or run a file directly (cwd-relative assets)
 spudplate run path/to/file.spp          # or run a built spudpack directly
-spudplate list                          # list installed templates
-spudplate inspect my_template           # print the source captured at install time
-spudplate uninstall my_template         # remove
+spudplate list                          # list installed templates with their version tag
+spudplate inspect my_template           # print the version, dep versions, and source
+spudplate uninstall my_template         # remove (also clears archived previous versions)
 
 spudplate version                       # print the spudplate version
 spudplate update                        # fetch and install the latest spudplate release
 ```
 
 `install` prompts before overwriting an existing template. Pass `--yes` to skip the prompt (useful for scripts and CI). `update` fetches the latest release of spudplate itself by re-running the install script.
+
+Each install carries a monotonic `version_tag` that bumps on every reinstall whose content differs. Reinstalling identical content is a no-op (`already up to date`). The previous on-disk pack is archived under `<install-root>/.archive/<name>.v<N>.spp` before being overwritten. Bundled deps are sticky on reinstall: a parent keeps the dep bytes it previously bundled unless `--update-deps` lists the dep, or unless the source pins it with `include foo@N`.
 
 To share a template, send the `<name>.spp` file. The recipient runs it with `spudplate run path/to/template.spp`. (Direct `install` from a `.spp` is intentionally not supported in this version - share the source instead, or run the spudpack directly.)
 

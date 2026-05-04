@@ -120,7 +120,7 @@ std::vector<std::uint8_t> serialize_program(const Program& program);
  *   - tag values outside the legal range for their position
  */
 Program deserialize_program(const std::uint8_t* data, std::size_t size,
-                            std::uint8_t pack_version = 2);
+                            std::uint8_t pack_version = 4);
 
 }  // namespace spudplate
 

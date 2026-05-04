@@ -1,6 +1,8 @@
 #include "spudplate/binary_serializer.h"
 
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 #include <type_traits>
 #include <variant>
 
@@ -65,7 +67,7 @@ class Writer {
 class Reader {
   public:
     Reader(const std::uint8_t* data, std::size_t size,
-           std::uint8_t pack_version = 2)
+           std::uint8_t pack_version = 4)
         : data_(data), size_(size), pack_version_(pack_version) {}
 
     std::size_t pos() const noexcept { return pos_; }
@@ -632,6 +634,12 @@ void encode_stmt(Writer& w, const Stmt& s) {
             } else if constexpr (std::is_same_v<T, IncludeStmt>) {
                 w.write_string(node.name);
                 encode_opt_expr(w, node.when_clause);
+                // Trailing field added with pack v4. Earlier packs leave
+                // it absent and decode as nullopt.
+                w.write_bool(node.version_pin.has_value());
+                if (node.version_pin.has_value()) {
+                    w.write_varint(*node.version_pin);
+                }
             } else if constexpr (std::is_same_v<T, RunStmt>) {
                 encode_expr(w, *node.command);
                 encode_opt_path_expr(w, node.cwd);
@@ -774,9 +782,21 @@ StmtPtr decode_stmt(Reader& r) {
         case StmtTag::Include: {
             std::string name = r.read_string();
             auto when_clause = decode_opt_expr(r);
+            // Trailing field added with pack v4. v3 and earlier do not
+            // carry it and decode as nullopt.
+            std::optional<std::uint32_t> version_pin;
+            if (r.pack_version() >= 4 && r.read_bool()) {
+                std::uint64_t v = r.read_varint();
+                if (v == 0 || v > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::runtime_error(
+                        "include version_pin out of range");
+                }
+                version_pin = static_cast<std::uint32_t>(v);
+            }
             const int line = static_cast<int>(r.read_zigzag());
             const int column = static_cast<int>(r.read_zigzag());
             return wrap(IncludeStmt{.name = std::move(name),
+                                    .version_pin = version_pin,
                                     .when_clause = std::move(when_clause),
                                     .line = line,
                                     .column = column});

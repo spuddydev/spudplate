@@ -22,6 +22,8 @@
 #include <unistd.h>
 #endif
 
+#include <unordered_set>
+
 #include "spudplate/binary_serializer.h"
 #include "spudplate/bundler.h"
 #include "spudplate/cli_internal.h"
@@ -47,6 +49,53 @@ RenameFn& install_rename_fn() {
 
 namespace {
 
+std::vector<std::uint8_t> read_all_bytes(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("could not open: " + path.string());
+    }
+    in.seekg(0, std::ios::end);
+    auto end = in.tellg();
+    if (end < 0) {
+        throw std::runtime_error("could not size: " + path.string());
+    }
+    std::vector<std::uint8_t> out(static_cast<std::size_t>(end));
+    in.seekg(0, std::ios::beg);
+    in.read(reinterpret_cast<char*>(out.data()),
+            static_cast<std::streamsize>(out.size()));
+    if (in.gcount() != static_cast<std::streamsize>(out.size())) {
+        throw std::runtime_error("short read on: " + path.string());
+    }
+    return out;
+}
+
+// Missing or unreadable installed copies are silent: the bundled bytes
+// always run, the warning is purely informational.
+void warn_on_dep_drift(std::ostream& err, const Spudpack& pack,
+                       const std::filesystem::path& home) {
+    if (home.empty()) return;
+    for (const auto& dep : pack.deps) {
+        std::filesystem::path dep_path = home / (dep.name + ".spp");
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(dep_path, ec) || ec) continue;
+        Spudpack installed;
+        try {
+            std::vector<std::uint8_t> bytes = read_all_bytes(dep_path);
+            installed = spudpack_decode(bytes.data(), bytes.size());
+        } catch (...) {
+            continue;
+        }
+        if (installed.version_tag == dep.version_tag) continue;
+        err << "warning: dep '" << dep.name << "' is bundled at v"
+            << dep.version_tag << ", installed v" << installed.version_tag;
+        if (installed.version_tag > dep.version_tag) {
+            err << " (newer; reinstall this template to update)\n";
+        } else {
+            err << " (older than what this template was built against)\n";
+        }
+    }
+}
+
 void print_usage(std::ostream& out) {
     out << "usage: spudplate <command> [args...]\n"
         << "\n"
@@ -70,13 +119,27 @@ bool is_help_flag(std::string_view arg) {
 }
 
 void print_help_install(std::ostream& out) {
-    out << "usage: spudplate install [--yes] <file.spud>\n"
+    out << "usage: spudplate install [--yes] [--update-deps NAMES] "
+           "<file.spud>\n"
         << "\n"
         << "Validate a .spud template and store it under the install root\n"
         << "as <name>.spp. Prompts before overwriting an existing template.\n"
         << "\n"
+        << "Each install carries a monotonic version tag. First install of\n"
+        << "a name is v1; subsequent installs that change the content bump\n"
+        << "by one. Reinstalling identical content is a no-op.\n"
+        << "\n"
+        << "Bundled dependencies are sticky by default: reinstalling a\n"
+        << "parent reuses the dep bytes the previous install bundled.\n"
+        << "Use --update-deps to refresh listed deps from the install root.\n"
+        << "Pinned deps (include foo at version N in source) ignore the\n"
+        << "flag - they always resolve through the pin.\n"
+        << "\n"
         << "Options:\n"
-        << "  --yes, -y       skip the overwrite confirmation\n";
+        << "  --yes, -y                 skip the overwrite confirmation\n"
+        << "  --update-deps NAMES       comma-separated list of unpinned\n"
+        << "                            deps to refresh from the install\n"
+        << "                            root\n";
 }
 
 void print_help_run(std::ostream& out) {
@@ -105,13 +168,14 @@ void print_help_validate(std::ostream& out) {
 void print_help_list(std::ostream& out) {
     out << "usage: spudplate list\n"
         << "\n"
-        << "List installed templates by name, one per line.\n";
+        << "List installed templates as 'name (vN)', one per line.\n";
 }
 
 void print_help_inspect(std::ostream& out) {
     out << "usage: spudplate inspect <name>\n"
         << "\n"
-        << "Print the original .spud source of an installed template.\n";
+        << "Print the version of an installed template, the version of\n"
+        << "every dep it bundles, and the original .spud source.\n";
 }
 
 void print_help_uninstall(std::ostream& out) {
@@ -392,6 +456,7 @@ bool confirm_yes_no(std::ostream& out, const std::string& prompt) {
 
 int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     bool skip_confirm = false;
+    std::unordered_set<std::string> update_deps;
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
@@ -402,9 +467,29 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         if (arg == "--yes" || arg == "-y") {
             skip_confirm = true;
             ++positional_start;
-        } else {
-            break;
+            continue;
         }
+        if (arg == "--update-deps") {
+            if (positional_start + 1 >= argc) {
+                err << "--update-deps requires a comma-separated list of "
+                       "names\n";
+                return 1;
+            }
+            std::string raw{argv[positional_start + 1]};
+            std::size_t i = 0;
+            while (i < raw.size()) {
+                std::size_t comma = raw.find(',', i);
+                if (comma == std::string::npos) comma = raw.size();
+                std::string name = raw.substr(i, comma - i);
+                if (!name.empty()) {
+                    update_deps.insert(std::move(name));
+                }
+                i = comma + 1;
+            }
+            positional_start += 2;
+            continue;
+        }
+        break;
     }
     if (argc - positional_start != 1) {
         print_usage(err);
@@ -451,27 +536,6 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
 
-    std::vector<SpudpackAsset> assets;
-    std::vector<spudplate::SpudpackDep> deps;
-    try {
-        BundleResult bundled =
-            bundle_assets(program, source_path.parent_path(), home);
-        assets = std::move(bundled.assets);
-        deps = std::move(bundled.deps);
-    } catch (const BundleError& e) {
-        print_error(err, source_path.string(), "bundle error", e.line(), e.column(),
-                    e.what());
-        return 3;
-    }
-
-    std::vector<std::uint8_t> program_bytes;
-    try {
-        program_bytes = serialize_program(program);
-    } catch (const BinarySerializeError& e) {
-        err << source_path.string() << ": " << e.what() << "\n";
-        return 3;
-    }
-
     std::string name = source_path.stem().string();
     if (name.empty()) {
         err << source_path.string() << ": cannot derive template name\n";
@@ -489,9 +553,9 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     std::filesystem::path final_path = home / (name + ".spp");
     std::filesystem::path tmp_path = home / (name + ".spp.tmp");
 
-    // Step 7a - refuse to clobber a stray non-regular file/dir that
-    // happens to sit at the destination. Surfacing this here gives a
-    // friendlier diagnostic than letting the rename fail later.
+    // Refuse to clobber a stray non-regular file/dir that happens to sit
+    // at the destination. Surfacing this here gives a friendlier
+    // diagnostic than letting the rename fail later.
     if (std::filesystem::exists(final_path) &&
         !std::filesystem::is_regular_file(final_path)) {
         err << "refusing to install: '" << final_path.filename().string()
@@ -499,11 +563,82 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         return 1;
     }
 
-    // Step 7b - overwrite prompt fires when either form (`<name>.spp` or
-    // legacy `<name>/`) is present. Capture the legacy flag now so the
-    // step-11 cleanup runs even when the prompt is suppressed by `--yes`.
+    // Decode the existing parent if present. Drives sticky-dep
+    // resolution and the next version_tag value.
+    std::optional<Spudpack> existing_parent;
+    std::vector<std::uint8_t> existing_bytes;
     bool spp_existed = std::filesystem::exists(final_path);
+    if (spp_existed) {
+        try {
+            existing_bytes = read_all_bytes(final_path);
+            existing_parent =
+                spudpack_decode(existing_bytes.data(), existing_bytes.size());
+        } catch (const std::exception& e) {
+            err << final_path.string() << ": cannot read existing install: "
+                << e.what() << "\n";
+            return 1;
+        }
+    }
+
+    BundleOptions bopts;
+    bopts.existing_parent =
+        existing_parent.has_value() ? &*existing_parent : nullptr;
+    bopts.update_deps = update_deps.empty() ? nullptr : &update_deps;
+    BundleNotes bnotes;
+
+    std::vector<SpudpackAsset> assets;
+    std::vector<spudplate::SpudpackDep> deps;
+    try {
+        BundleResult bundled = bundle_assets(
+            program, source_path.parent_path(), home, bopts, &bnotes);
+        assets = std::move(bundled.assets);
+        deps = std::move(bundled.deps);
+    } catch (const BundleError& e) {
+        print_error(err, source_path.string(), "bundle error", e.line(), e.column(),
+                    e.what());
+        return 3;
+    }
+
+    for (const auto& pinned : bnotes.ignored_update_pins) {
+        err << "note: '" << pinned
+            << "' is pinned in source; --update-deps ignored\n";
+    }
+
+    std::vector<std::uint8_t> program_bytes;
+    try {
+        program_bytes = serialize_program(program);
+    } catch (const BinarySerializeError& e) {
+        err << source_path.string() << ": " << e.what() << "\n";
+        return 3;
+    }
+
     bool legacy_existed = legacy_install_exists(home, name);
+
+    Spudpack pack;
+    pack.source = std::move(source);
+    pack.program_bytes = std::move(program_bytes);
+    pack.assets = std::move(assets);
+    pack.deps = std::move(deps);
+    // Tentatively encode at the existing version tag. If the resulting
+    // bytes match the existing install, this was a no-op reinstall and
+    // we can short-circuit. Otherwise we bump and re-encode.
+    pack.version_tag =
+        existing_parent.has_value() ? existing_parent->version_tag : 1;
+
+    std::vector<std::uint8_t> tentative_bytes;
+    try {
+        tentative_bytes = spudpack_encode(pack);
+    } catch (const std::exception& e) {
+        err << final_path.string() << ": cannot encode: " << e.what() << "\n";
+        return 1;
+    }
+
+    if (spp_existed && tentative_bytes == existing_bytes) {
+        out << name << " is already up to date (v" << pack.version_tag
+            << ")\n";
+        return 0;
+    }
+
     if ((spp_existed || legacy_existed) && !skip_confirm) {
         if (!confirm_yes_no(out, "this will overwrite the existing '" + name +
                                      "' template. continue? [y/N] ")) {
@@ -512,14 +647,53 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         }
     }
 
-    Spudpack pack;
-    pack.source = std::move(source);
-    pack.program_bytes = std::move(program_bytes);
-    pack.assets = std::move(assets);
-    pack.deps = std::move(deps);
+    if (existing_parent.has_value()) {
+        pack.version_tag = existing_parent->version_tag + 1;
+    }
+
+    std::vector<std::uint8_t> final_bytes;
+    try {
+        final_bytes = spudpack_encode(pack);
+    } catch (const std::exception& e) {
+        err << final_path.string() << ": cannot encode: " << e.what() << "\n";
+        return 1;
+    }
+
+    // Archive the previous install before clobbering. Failures here are
+    // non-fatal but loud - the install proceeds, but the user gets told
+    // their archive may be incomplete.
+    if (existing_parent.has_value()) {
+        std::filesystem::path archive_dir = home / kArchiveDir;
+        std::error_code adir_ec;
+        std::filesystem::create_directories(archive_dir, adir_ec);
+        if (adir_ec) {
+            err << "warning: cannot create archive directory "
+                << archive_dir.string() << ": " << adir_ec.message() << "\n";
+        } else {
+            std::filesystem::path archive_path = archive_path_for(
+                home, name, existing_parent->version_tag);
+            std::error_code cp_ec;
+            std::filesystem::copy_file(
+                final_path, archive_path,
+                std::filesystem::copy_options::overwrite_existing, cp_ec);
+            if (cp_ec) {
+                err << "warning: could not archive previous v"
+                    << existing_parent->version_tag << ": " << cp_ec.message()
+                    << "\n";
+            }
+        }
+    }
 
     try {
-        spudpack_write_file(tmp_path, pack);
+        std::ofstream tmp_out(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!tmp_out) {
+            throw std::runtime_error("could not open temp file");
+        }
+        tmp_out.write(reinterpret_cast<const char*>(final_bytes.data()),
+                      static_cast<std::streamsize>(final_bytes.size()));
+        if (!tmp_out) {
+            throw std::runtime_error("write failed");
+        }
     } catch (const std::exception& e) {
         std::filesystem::remove(tmp_path, ec);
         err << final_path.string() << ": cannot write: " << e.what() << "\n";
@@ -545,7 +719,7 @@ int cmd_install(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
 
     out << (spp_existed ? "reinstalled " : "installed ") << name << " to "
-        << final_path.string() << "\n";
+        << final_path.string() << " (v" << pack.version_tag << ")\n";
     return 0;
 }
 
@@ -986,33 +1160,60 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     if (!std::filesystem::is_directory(home)) {
         return 0;  // No installs yet - empty output, success.
     }
-    std::vector<std::string> names;
+    struct Entry {
+        std::string name;
+        std::optional<std::uint32_t> version_tag;
+    };
+    std::vector<Entry> entries;
     std::vector<std::string> shadowed_legacy;
     std::vector<std::string> only_legacy;
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
         if (entry.is_regular_file() && ends_with_spp(entry.path())) {
-            names.push_back(entry.path().stem().string());
+            Entry e{entry.path().stem().string(), std::nullopt};
+            try {
+                Spudpack p = spudpack_read_file(entry.path());
+                e.version_tag = p.version_tag;
+            } catch (...) {
+                // Unreadable pack: list the name without a version. The
+                // user can still see it exists and act on it.
+            }
+            entries.push_back(std::move(e));
         }
     }
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
         if (!entry.is_directory())
             continue;
         std::string n = entry.path().filename().string();
+        // Skip the archive directory - it holds historical .spp files,
+        // not installable templates.
+        if (n == kArchiveDir) continue;
         if (!std::filesystem::is_regular_file(entry.path() / "template.spud")) {
             continue;
         }
-        if (std::find(names.begin(), names.end(), n) != names.end()) {
+        bool already_listed = false;
+        for (const auto& e : entries) {
+            if (e.name == n) {
+                already_listed = true;
+                break;
+            }
+        }
+        if (already_listed) {
             shadowed_legacy.push_back(n);
         } else {
             only_legacy.push_back(n);
         }
     }
-    std::sort(names.begin(), names.end());
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry& a, const Entry& b) { return a.name < b.name; });
     std::sort(shadowed_legacy.begin(), shadowed_legacy.end());
     std::sort(only_legacy.begin(), only_legacy.end());
-    for (const auto& n : names) {
-        out << n << "\n";
+    for (const auto& e : entries) {
+        out << e.name;
+        if (e.version_tag.has_value()) {
+            out << " (v" << *e.version_tag << ")";
+        }
+        out << "\n";
     }
     for (const auto& n : shadowed_legacy) {
         err << "warning: legacy install '" << n << "' is shadowed by '" << n << ".spp'\n";
@@ -1060,6 +1261,16 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
     try {
         Spudpack pack = spudpack_read_file(spp_path);
+        out << name << " (v" << pack.version_tag << ")\n";
+        if (!pack.deps.empty()) {
+            out << "\nDependencies:\n";
+            for (const auto& dep : pack.deps) {
+                out << "  " << dep.name << " (v" << dep.version_tag << ")\n";
+            }
+            out << "\n";
+        } else {
+            out << "\n";
+        }
         out.write(pack.source.data(), static_cast<std::streamsize>(pack.source.size()));
     } catch (const SpudpackError& e) {
         err << name << ": " << e.what() << "\n";
@@ -1109,6 +1320,45 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
             return 1;
         }
         removed_anything = true;
+    }
+
+    // Prefix-match must include the trailing `.v` and the `.spp` suffix
+    // with all-digits middle, otherwise `foobar.v1.spp` is wrongly swept
+    // by `uninstall foo`.
+    std::filesystem::path archive_dir = home / kArchiveDir;
+    if (std::filesystem::is_directory(archive_dir, ec)) {
+        std::string prefix = name + ".v";
+        std::string suffix = ".spp";
+        std::error_code it_ec;
+        for (const auto& ent :
+             std::filesystem::directory_iterator(archive_dir, it_ec)) {
+            if (!ent.is_regular_file()) continue;
+            std::string fname = ent.path().filename().string();
+            if (fname.size() <= prefix.size() + suffix.size()) continue;
+            if (fname.compare(0, prefix.size(), prefix) != 0) continue;
+            if (fname.compare(fname.size() - suffix.size(), suffix.size(),
+                              suffix) != 0)
+                continue;
+            std::string mid = fname.substr(
+                prefix.size(), fname.size() - prefix.size() - suffix.size());
+            bool all_digits = !mid.empty();
+            for (char c : mid) {
+                if (c < '0' || c > '9') {
+                    all_digits = false;
+                    break;
+                }
+            }
+            if (!all_digits) continue;
+            std::error_code rm_ec;
+            std::filesystem::remove(ent.path(), rm_ec);
+            if (rm_ec) {
+                err << name
+                    << ": cannot remove archive " << ent.path().string()
+                    << ": " << rm_ec.message() << "\n";
+                return 1;
+            }
+            removed_anything = true;
+        }
     }
     if (!removed_anything) {
         err << name << ": not installed\n";
@@ -1248,6 +1498,10 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         print_error(err, file_path.string(), "semantic error", e.line(), e.column(),
                     e.what());
         return 3;
+    }
+
+    if (have_pack && shape == RunShape::InstalledSpp && !pack.deps.empty()) {
+        warn_on_dep_drift(err, pack, install_dir());
     }
 
     std::optional<AssetMapSourceProvider> provider;

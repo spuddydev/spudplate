@@ -1361,6 +1361,42 @@ TEST(ParserTest, IncludeAtTopLevelInProgram) {
     EXPECT_TRUE(inc.when_clause.has_value());
 }
 
+TEST(ParserTest, IncludeWithVersionPin) {
+    auto stmt = parse_include("include foo@2\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    EXPECT_EQ(inc.name, "foo");
+    ASSERT_TRUE(inc.version_pin.has_value());
+    EXPECT_EQ(*inc.version_pin, 2u);
+    EXPECT_FALSE(inc.when_clause.has_value());
+}
+
+TEST(ParserTest, IncludeWithVersionPinAndWhen) {
+    auto stmt = parse_include("include foo@7 when use_foo\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    EXPECT_EQ(inc.name, "foo");
+    ASSERT_TRUE(inc.version_pin.has_value());
+    EXPECT_EQ(*inc.version_pin, 7u);
+    ASSERT_TRUE(inc.when_clause.has_value());
+}
+
+TEST(ParserTest, IncludeWithoutPinHasNoVersionPin) {
+    auto stmt = parse_include("include bar\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    EXPECT_FALSE(inc.version_pin.has_value());
+}
+
+TEST(ParserTest, IncludePinZeroRejected) {
+    EXPECT_THROW(parse_include("include foo@0\n"), ParseError);
+}
+
+TEST(ParserTest, IncludePinMissingNumberRejected) {
+    EXPECT_THROW(parse_include("include foo@\n"), ParseError);
+}
+
+TEST(ParserTest, IncludePinNonIntegerRejected) {
+    EXPECT_THROW(parse_include("include foo@bar\n"), ParseError);
+}
+
 TEST(ParserTest, UnexpectedTokenAtTopLevel) {
     EXPECT_THROW(parse_program("42\n"), ParseError);
 }

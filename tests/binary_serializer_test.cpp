@@ -376,6 +376,37 @@ TEST(BinarySerializer, RoundTripCopy) {
     expect_round_trip(program_with(std::move(stmts)));
 }
 
+TEST(BinarySerializer, RoundTripIncludeWithVersionPin) {
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(IncludeStmt{.name = "foo",
+                                          .version_pin = std::uint32_t{42},
+                                          .when_clause = std::nullopt,
+                                          .line = 1,
+                                          .column = 1}));
+    expect_round_trip(program_with(std::move(stmts)));
+}
+
+TEST(BinarySerializer, IncludePinAbsentInV3DecodesAsNullopt) {
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(IncludeStmt{.name = "foo",
+                                          .version_pin = std::uint32_t{5},
+                                          .when_clause = std::nullopt,
+                                          .line = 1,
+                                          .column = 1}));
+    auto bytes = serialize_program(program_with(std::move(stmts)));
+    // Decoding the same bytes as v3 ignores the trailing pin field. The
+    // decoded IncludeStmt should have nullopt version_pin even though the
+    // bytes carry one. The trailing line/column reads will land on the
+    // wrong offsets (since the v4 trailing flag+pin sit before them), so
+    // we only assert that decode does not throw and that pin is nullopt.
+    Program p = deserialize_program(bytes.data(), bytes.size(),
+                                    /*pack_version=*/3);
+    ASSERT_EQ(p.statements.size(), 1u);
+    auto& inc = std::get<IncludeStmt>(p.statements[0]->data);
+    EXPECT_EQ(inc.name, "foo");
+    EXPECT_FALSE(inc.version_pin.has_value());
+}
+
 TEST(BinarySerializer, RoundTripIncludeAndRunWithCwd) {
     PathExpr cwd;
     cwd.segments.emplace_back(PathVar{.name = "modulepath", .line = 2, .column = 14});
