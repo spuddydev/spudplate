@@ -316,6 +316,38 @@ TEST(SpudpackCodec, RoundTripWithDeps) {
     EXPECT_EQ(a_decoded.source, inner_a.source);
 }
 
+TEST(SpudpackCodec, EncodeRejectsZeroVersionTag) {
+    Spudpack in = make_simple();
+    in.version_tag = 0;
+    EXPECT_THROW(spudpack_encode(in), SpudpackError);
+}
+
+TEST(SpudpackCodec, EncodeRejectsZeroDepVersionTag) {
+    Spudpack in = make_simple();
+    in.deps.push_back({"foo", {1, 2, 3}, /*version_tag=*/0});
+    EXPECT_THROW(spudpack_encode(in), SpudpackError);
+}
+
+TEST(SpudpackCodec, DecodeRejectsZeroVersionTag) {
+    Spudpack in = make_simple();
+    auto bytes = spudpack_encode(in);
+    // version_tag sits at bytes[6..9] (LE u32) in v4. Zero it out.
+    bytes[6] = 0;
+    bytes[7] = 0;
+    bytes[8] = 0;
+    bytes[9] = 0;
+    rewrite_crc(bytes);
+    try {
+        spudpack_decode(bytes.data(), bytes.size());
+        FAIL() << "expected throw";
+    } catch (const SpudpackError& e) {
+        EXPECT_NE(std::string(e.what()).find("version_tag must be >= 1"),
+                  std::string::npos);
+        ASSERT_TRUE(e.offset().has_value());
+        EXPECT_EQ(*e.offset(), 6u);
+    }
+}
+
 TEST(SpudpackCodec, EncodeRejectsDepNameWithSlash) {
     Spudpack in;
     in.deps.push_back({"a/b", {1, 2, 3}});
