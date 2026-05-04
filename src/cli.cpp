@@ -1398,6 +1398,50 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         return 3;
     }
 
+    // Drift warnings: for each top-level bundled dep, compare its tag
+    // against the currently-installed copy under the install root (only
+    // when running an installed .spp by name - direct .spud and .spp
+    // paths are not necessarily anchored to any install root). Mismatch
+    // surfaces as a non-fatal warning; a missing or unreadable installed
+    // copy is silent (the bundled bytes always run).
+    if (have_pack && shape == RunShape::InstalledSpp && !pack.deps.empty()) {
+        std::filesystem::path drift_home = install_dir();
+        if (!drift_home.empty()) {
+            for (const auto& dep : pack.deps) {
+                std::filesystem::path dep_path =
+                    drift_home / (dep.name + ".spp");
+                std::error_code drift_ec;
+                if (!std::filesystem::is_regular_file(dep_path, drift_ec) ||
+                    drift_ec) {
+                    continue;
+                }
+                std::vector<std::uint8_t> dep_bytes;
+                try {
+                    dep_bytes = read_all_bytes(dep_path);
+                } catch (...) {
+                    continue;
+                }
+                Spudpack installed;
+                try {
+                    installed = spudpack_decode(dep_bytes.data(),
+                                                dep_bytes.size());
+                } catch (...) {
+                    continue;
+                }
+                if (installed.version_tag == dep.version_tag) continue;
+                err << "warning: dep '" << dep.name << "' is bundled at v"
+                    << dep.version_tag << ", installed v"
+                    << installed.version_tag;
+                if (installed.version_tag > dep.version_tag) {
+                    err << " (newer; reinstall this template to update)\n";
+                } else {
+                    err << " (older than what this template was built "
+                           "against)\n";
+                }
+            }
+        }
+    }
+
     std::optional<AssetMapSourceProvider> provider;
     const SourceProvider* source_ptr = nullptr;
     const std::vector<spudplate::SpudpackDep>* deps_ptr = nullptr;
