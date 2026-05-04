@@ -141,13 +141,14 @@ void print_help_validate(std::ostream& out) {
 void print_help_list(std::ostream& out) {
     out << "usage: spudplate list\n"
         << "\n"
-        << "List installed templates by name, one per line.\n";
+        << "List installed templates as 'name (vN)', one per line.\n";
 }
 
 void print_help_inspect(std::ostream& out) {
     out << "usage: spudplate inspect <name>\n"
         << "\n"
-        << "Print the original .spud source of an installed template.\n";
+        << "Print the version of an installed template, the version of\n"
+        << "every dep it bundles, and the original .spud source.\n";
 }
 
 void print_help_uninstall(std::ostream& out) {
@@ -1134,33 +1135,60 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     if (!std::filesystem::is_directory(home)) {
         return 0;  // No installs yet - empty output, success.
     }
-    std::vector<std::string> names;
+    struct Entry {
+        std::string name;
+        std::optional<std::uint32_t> version_tag;
+    };
+    std::vector<Entry> entries;
     std::vector<std::string> shadowed_legacy;
     std::vector<std::string> only_legacy;
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
         if (entry.is_regular_file() && ends_with_spp(entry.path())) {
-            names.push_back(entry.path().stem().string());
+            Entry e{entry.path().stem().string(), std::nullopt};
+            try {
+                Spudpack p = spudpack_read_file(entry.path());
+                e.version_tag = p.version_tag;
+            } catch (...) {
+                // Unreadable pack: list the name without a version. The
+                // user can still see it exists and act on it.
+            }
+            entries.push_back(std::move(e));
         }
     }
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
         if (!entry.is_directory())
             continue;
         std::string n = entry.path().filename().string();
+        // Skip the archive directory - it holds historical .spp files,
+        // not installable templates.
+        if (n == ".archive") continue;
         if (!std::filesystem::is_regular_file(entry.path() / "template.spud")) {
             continue;
         }
-        if (std::find(names.begin(), names.end(), n) != names.end()) {
+        bool already_listed = false;
+        for (const auto& e : entries) {
+            if (e.name == n) {
+                already_listed = true;
+                break;
+            }
+        }
+        if (already_listed) {
             shadowed_legacy.push_back(n);
         } else {
             only_legacy.push_back(n);
         }
     }
-    std::sort(names.begin(), names.end());
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry& a, const Entry& b) { return a.name < b.name; });
     std::sort(shadowed_legacy.begin(), shadowed_legacy.end());
     std::sort(only_legacy.begin(), only_legacy.end());
-    for (const auto& n : names) {
-        out << n << "\n";
+    for (const auto& e : entries) {
+        out << e.name;
+        if (e.version_tag.has_value()) {
+            out << " (v" << *e.version_tag << ")";
+        }
+        out << "\n";
     }
     for (const auto& n : shadowed_legacy) {
         err << "warning: legacy install '" << n << "' is shadowed by '" << n << ".spp'\n";
@@ -1208,6 +1236,16 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
     try {
         Spudpack pack = spudpack_read_file(spp_path);
+        out << name << " (v" << pack.version_tag << ")\n";
+        if (!pack.deps.empty()) {
+            out << "\nDependencies:\n";
+            for (const auto& dep : pack.deps) {
+                out << "  " << dep.name << " (v" << dep.version_tag << ")\n";
+            }
+            out << "\n";
+        } else {
+            out << "\n";
+        }
         out.write(pack.source.data(), static_cast<std::streamsize>(pack.source.size()));
     } catch (const SpudpackError& e) {
         err << name << ": " << e.what() << "\n";
