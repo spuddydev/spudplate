@@ -185,9 +185,14 @@ void print_help_inspect(std::ostream& out) {
 }
 
 void print_help_uninstall(std::ostream& out) {
-    out << "usage: spudplate uninstall <name>\n"
+    out << "usage: spudplate uninstall <name[@N]>\n"
         << "\n"
-        << "Remove an installed template from the install root.\n";
+        << "Remove an installed template from the install root. Bare-name\n"
+        << "form removes the live install along with any archived versions.\n"
+        << "\n"
+        << "Suffix `@N` to remove only one archived version, e.g. 'foo@4'.\n"
+        << "Refuses to remove the current install via `@N`; drop the suffix\n"
+        << "to remove the whole template.\n";
 }
 
 void print_help_version(std::ostream& out) {
@@ -1343,8 +1348,8 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
         print_usage(err);
         return 1;
     }
-    std::string name{argv[2]};
-    if (looks_like_path(name)) {
+    std::string raw{argv[2]};
+    if (looks_like_path(raw)) {
         err << "uninstall takes an installed template name, not a path\n";
         return 1;
     }
@@ -1354,6 +1359,42 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
                "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
+    NameAtVersion parsed = parse_name_at_version(raw);
+    if (parsed.version.has_value()) {
+        // `@N` form removes a single archived version. Refuses to touch
+        // the live install - that is what bare uninstall is for.
+        std::filesystem::path live = home / (parsed.name + ".spp");
+        if (std::filesystem::is_regular_file(live)) {
+            try {
+                Spudpack p = spudpack_read_file(live);
+                if (p.version_tag == *parsed.version) {
+                    err << parsed.name << "@" << *parsed.version
+                        << " is the current install; use 'spudplate "
+                           "uninstall " << parsed.name << "' to remove\n";
+                    return 1;
+                }
+            } catch (...) {
+                // Live unreadable - fall through to archive lookup.
+            }
+        }
+        std::filesystem::path archive =
+            archive_path_for(home, parsed.name, *parsed.version);
+        if (!std::filesystem::is_regular_file(archive)) {
+            err << parsed.name << "@" << *parsed.version
+                << ": not installed\n";
+            return 5;
+        }
+        std::error_code rm_ec;
+        std::filesystem::remove(archive, rm_ec);
+        if (rm_ec) {
+            err << parsed.name << "@" << *parsed.version
+                << ": cannot remove: " << rm_ec.message() << "\n";
+            return 1;
+        }
+        out << "uninstalled " << parsed.name << "@" << *parsed.version << "\n";
+        return 0;
+    }
+    const std::string& name = parsed.name;
     std::filesystem::path spp_path = home / (name + ".spp");
     std::filesystem::path legacy_dir = home / name;
 
