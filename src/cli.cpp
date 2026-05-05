@@ -144,12 +144,15 @@ void print_help_install(std::ostream& out) {
 
 void print_help_run(std::ostream& out) {
     out << "usage: spudplate run [--dry-run] [--yes] [--no-timeout] "
-           "<name|file.spud|file.spp>\n"
+           "<name[@N]|file.spud|file.spp>\n"
         << "\n"
         << "Run an installed template by name, or run a .spud or .spp file\n"
         << "directly. The argument is treated as a path when it contains a\n"
         << "slash or ends with .spud or .spp; otherwise it is looked up under\n"
         << "the install root.\n"
+        << "\n"
+        << "Suffix `@N` to pin a specific archived version, e.g. 'foo@4' to\n"
+        << "run version 4 even if a newer release is now installed.\n"
         << "\n"
         << "Options:\n"
         << "  --dry-run       print the file tree the run would create,\n"
@@ -173,16 +176,23 @@ void print_help_list(std::ostream& out) {
 }
 
 void print_help_inspect(std::ostream& out) {
-    out << "usage: spudplate inspect <name>\n"
+    out << "usage: spudplate inspect <name[@N]>\n"
         << "\n"
         << "Print the version of an installed template, the version of\n"
-        << "every dep it bundles, and the original .spud source.\n";
+        << "every dep it bundles, and the original .spud source.\n"
+        << "\n"
+        << "Suffix `@N` to inspect an archived version, e.g. 'foo@4'.\n";
 }
 
 void print_help_uninstall(std::ostream& out) {
-    out << "usage: spudplate uninstall <name>\n"
+    out << "usage: spudplate uninstall <name[@N]>\n"
         << "\n"
-        << "Remove an installed template from the install root.\n";
+        << "Remove an installed template from the install root. Bare-name\n"
+        << "form removes the live install along with any archived versions.\n"
+        << "\n"
+        << "Suffix `@N` to remove only one archived version, e.g. 'foo@4'.\n"
+        << "Refuses to remove the current install via `@N`; drop the suffix\n"
+        << "to remove the whole template.\n";
 }
 
 void print_help_version(std::ostream& out) {
@@ -241,6 +251,65 @@ std::filesystem::path install_dir() {
     }
     if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         return std::filesystem::path(home) / ".local" / "share" / "spudplate";
+    }
+    return {};
+}
+
+struct NameAtVersion {
+    std::string name;
+    std::optional<std::uint32_t> version;
+};
+
+// Parse `<name>` or `<name>@<N>`. The trailing `@<N>` form is only
+// recognised when N is a non-empty run of digits parsing to a positive
+// uint32_t. Anything else - missing digits, leading zeros that overflow,
+// or a literal `@` followed by non-digits - is returned as an unparsed
+// bare name. The name itself is not further validated.
+NameAtVersion parse_name_at_version(std::string_view arg) {
+    auto pos = arg.rfind('@');
+    if (pos == std::string_view::npos || pos + 1 >= arg.size()) {
+        return {std::string{arg}, std::nullopt};
+    }
+    std::string_view tail = arg.substr(pos + 1);
+    std::uint64_t v = 0;
+    for (char c : tail) {
+        if (c < '0' || c > '9') {
+            return {std::string{arg}, std::nullopt};
+        }
+        v = v * 10 + static_cast<std::uint64_t>(c - '0');
+        if (v > std::numeric_limits<std::uint32_t>::max()) {
+            return {std::string{arg}, std::nullopt};
+        }
+    }
+    if (v == 0) {
+        return {std::string{arg}, std::nullopt};
+    }
+    return {std::string{arg.substr(0, pos)},
+            static_cast<std::uint32_t>(v)};
+}
+
+// Resolve `<name>@<N>` to an on-disk `.spp` path. Looks in the archive
+// first; falls back to the live install when its `version_tag` matches
+// `N` so a user typing the version they have installed gets a sensible
+// answer. Returns the empty path when neither matches.
+std::filesystem::path resolve_versioned_pack(
+    const std::filesystem::path& home, const std::string& name,
+    std::uint32_t version) {
+    auto archive = archive_path_for(home, name, version);
+    if (std::filesystem::is_regular_file(archive)) {
+        return archive;
+    }
+    auto live = home / (name + ".spp");
+    if (std::filesystem::is_regular_file(live)) {
+        try {
+            Spudpack p = spudpack_read_file(live);
+            if (p.version_tag == version) {
+                return live;
+            }
+        } catch (...) {
+            // Treat unreadable live as absent; the archive miss already
+            // means @N cannot be served.
+        }
     }
     return {};
 }
@@ -1212,8 +1281,8 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         print_usage(err);
         return 1;
     }
-    std::string name{argv[2]};
-    if (looks_like_path(name)) {
+    std::string raw{argv[2]};
+    if (looks_like_path(raw)) {
         err << "inspect takes an installed template name, not a path\n";
         return 1;
     }
@@ -1223,20 +1292,32 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
                "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
-    std::filesystem::path spp_path = home / (name + ".spp");
-    if (std::filesystem::exists(spp_path) &&
-        !std::filesystem::is_regular_file(spp_path)) {
-        err << "refusing to read: '" << name
-            << ".spp' exists but is not a regular file\n";
-        return 1;
-    }
-    if (!std::filesystem::exists(spp_path)) {
-        if (legacy_install_exists(home, name)) {
-            err << "legacy install '" << name << "'; reinstall to upgrade\n";
+    NameAtVersion parsed = parse_name_at_version(raw);
+    const std::string& name = parsed.name;
+    std::filesystem::path spp_path;
+    if (parsed.version.has_value()) {
+        spp_path = resolve_versioned_pack(home, name, *parsed.version);
+        if (spp_path.empty()) {
+            err << name << "@" << *parsed.version << ": not installed\n";
+            return 5;
+        }
+    } else {
+        spp_path = home / (name + ".spp");
+        if (std::filesystem::exists(spp_path) &&
+            !std::filesystem::is_regular_file(spp_path)) {
+            err << "refusing to read: '" << name
+                << ".spp' exists but is not a regular file\n";
             return 1;
         }
-        err << name << ": not installed\n";
-        return 5;
+        if (!std::filesystem::exists(spp_path)) {
+            if (legacy_install_exists(home, name)) {
+                err << "legacy install '" << name
+                    << "'; reinstall to upgrade\n";
+                return 1;
+            }
+            err << name << ": not installed\n";
+            return 5;
+        }
     }
     try {
         Spudpack pack = spudpack_read_file(spp_path);
@@ -1267,8 +1348,8 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
         print_usage(err);
         return 1;
     }
-    std::string name{argv[2]};
-    if (looks_like_path(name)) {
+    std::string raw{argv[2]};
+    if (looks_like_path(raw)) {
         err << "uninstall takes an installed template name, not a path\n";
         return 1;
     }
@@ -1278,6 +1359,42 @@ int cmd_uninstall(int argc, char* argv[], std::ostream& out, std::ostream& err) 
                "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
+    NameAtVersion parsed = parse_name_at_version(raw);
+    if (parsed.version.has_value()) {
+        // `@N` form removes a single archived version. Refuses to touch
+        // the live install - that is what bare uninstall is for.
+        std::filesystem::path live = home / (parsed.name + ".spp");
+        if (std::filesystem::is_regular_file(live)) {
+            try {
+                Spudpack p = spudpack_read_file(live);
+                if (p.version_tag == *parsed.version) {
+                    err << parsed.name << "@" << *parsed.version
+                        << " is the current install; use 'spudplate "
+                           "uninstall " << parsed.name << "' to remove\n";
+                    return 1;
+                }
+            } catch (...) {
+                // Live unreadable - fall through to archive lookup.
+            }
+        }
+        std::filesystem::path archive =
+            archive_path_for(home, parsed.name, *parsed.version);
+        if (!std::filesystem::is_regular_file(archive)) {
+            err << parsed.name << "@" << *parsed.version
+                << ": not installed\n";
+            return 5;
+        }
+        std::error_code rm_ec;
+        std::filesystem::remove(archive, rm_ec);
+        if (rm_ec) {
+            err << parsed.name << "@" << *parsed.version
+                << ": cannot remove: " << rm_ec.message() << "\n";
+            return 1;
+        }
+        out << "uninstalled " << parsed.name << "@" << *parsed.version << "\n";
+        return 0;
+    }
+    const std::string& name = parsed.name;
     std::filesystem::path spp_path = home / (name + ".spp");
     std::filesystem::path legacy_dir = home / name;
 
@@ -1403,27 +1520,40 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
                    "XDG_DATA_HOME, or HOME\n";
             return 1;
         }
-        file_path = home / (raw_arg + ".spp");
-
-        if (!std::filesystem::exists(file_path) && legacy_install_exists(home, raw_arg)) {
-            err << "legacy install '" << raw_arg << "'; reinstall to upgrade\n";
-            return 1;
-        }
-        if (!std::filesystem::exists(file_path)) {
-            err << "'" << raw_arg << "' is not installed";
-            std::string suggestion =
-                suggest_template_name(raw_arg, list_installed_names(home));
-            if (!suggestion.empty()) {
-                err << ", did you mean '" << suggestion << "'?\n";
-            } else {
-                err << "; run 'spudplate list' to see available templates\n";
+        NameAtVersion parsed = parse_name_at_version(raw_arg);
+        if (parsed.version.has_value()) {
+            file_path = resolve_versioned_pack(home, parsed.name,
+                                               *parsed.version);
+            if (file_path.empty()) {
+                err << parsed.name << "@" << *parsed.version
+                    << ": not installed\n";
+                return 5;
             }
-            return 5;
-        }
-        if (!std::filesystem::is_regular_file(file_path)) {
-            err << "refusing to read: '" << raw_arg
-                << ".spp' exists but is not a regular file\n";
-            return 1;
+        } else {
+            file_path = home / (raw_arg + ".spp");
+            if (!std::filesystem::exists(file_path) &&
+                legacy_install_exists(home, raw_arg)) {
+                err << "legacy install '" << raw_arg
+                    << "'; reinstall to upgrade\n";
+                return 1;
+            }
+            if (!std::filesystem::exists(file_path)) {
+                err << "'" << raw_arg << "' is not installed";
+                std::string suggestion =
+                    suggest_template_name(raw_arg, list_installed_names(home));
+                if (!suggestion.empty()) {
+                    err << ", did you mean '" << suggestion << "'?\n";
+                } else {
+                    err << "; run 'spudplate list' to see available "
+                           "templates\n";
+                }
+                return 5;
+            }
+            if (!std::filesystem::is_regular_file(file_path)) {
+                err << "refusing to read: '" << raw_arg
+                    << ".spp' exists but is not a regular file\n";
+                return 1;
+            }
         }
     }
 
