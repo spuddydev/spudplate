@@ -17,7 +17,7 @@ ask project_name "Project name?" string
 let kebab_slug = lower(replace(trim(project_name), " ", "-"))
 ```
 
-### Name `ask` variables after the value, not the question
+### Name ask variables after the value, not the question
 
 The variable holds the answer, not the prompt. Aim for names that describe what the value **is**, not what was asked.
 
@@ -29,7 +29,7 @@ ask format "Output format?" string options "pdf" "html"        # value is the ch
 
 Names that read as a question (`should_we_include_tests`, `how_many_weeks`) age badly: they make `if use_tests` read fine but `if should_we_include_tests` clunky.
 
-### Boolean gates start with `use_` or are simply the feature name
+### Boolean gates start with use_ or are simply the feature name
 
 Most boolean asks are gates on optional sections. The conventional prefixes make the intent obvious at a glance:
 
@@ -43,13 +43,13 @@ A direct feature name (`tests`, `docs`) also works for the boolean form. Pick on
 
 ## Asking questions
 
-### Always supply a `default` if the answer is optional
+### Always supply a default if the answer is optional
 
 A question with no default is **required**. The user cannot skip it. That is exactly right for the project name, but wrong for the test runner: a user who does not care should be able to press enter.
 
 A useful rule of thumb: if you can describe a sensible default in one sentence, the question deserves a `default`.
 
-### Use `options` to bound free-form answers
+### Use options to bound free-form answers
 
 `options` turns an answer into a numbered menu. The user can type the literal value or the menu number. Two reasons this is worth using even when typing the value is easy:
 
@@ -71,7 +71,7 @@ ask num_weeks "How many weeks?" int default 0 when use_tests
 
 A well-ordered question sequence reads like a guided conversation.
 
-### Gate dependent questions with `when`
+### Gate dependent questions with when
 
 A `when`-gated question is only asked if its condition is true. The default is bound when the gate is false, so subsequent code always sees a real value. This is cleaner than asking a question the user has already implicitly declined.
 
@@ -79,7 +79,7 @@ The `when`-gated question must always have a `default`; the validator enforces i
 
 ## Variables
 
-### `let` once, use everywhere
+### let once, use everywhere
 
 If the same expression appears in two places, name it with `let`. It gives you one place to change, and a name that documents what the value means.
 
@@ -91,7 +91,7 @@ mkdir project_dir
 file project_dir/"README.md" content "# " + project_name
 ```
 
-### Prefer `as` aliases over inline path expressions you reuse
+### Prefer as aliases over inline path expressions you reuse
 
 When the same path appears twice in a row, an `as` alias is shorter and conveys "this is the same path, not a coincidentally-similar one":
 
@@ -124,7 +124,7 @@ file readme append content "\n\n## CI\n" when use_ci
 
 This is the lightest-weight way to build a sectioned file with optional parts. The same pattern works for `.gitignore`, `package.json` `scripts` blocks, etc.
 
-### Keep `let` chains short
+### Keep let chains short
 
 A `let` derived from a `let` derived from a `let` works, but each link in the chain hides the original input. Three or four steps is fine; a long chain usually means the original `ask` should be reshaped.
 
@@ -141,7 +141,7 @@ mkdir src                 # variable reference to 'src' (must be a let or alias)
 
 A common mistake is to write `mkdir templates from base_templates` and expect both names as literals. The parser interprets each as a variable reference, and the validator rejects them as undeclared. Quote them: `mkdir "templates" from "base_templates"`.
 
-### Use `{var}` only inside quoted segments
+### Use interpolation only inside quoted segments
 
 Interpolation in a path expression works only inside a quoted segment:
 
@@ -158,7 +158,7 @@ mkdir "static" as static_path
 mkdir static_path/"week_{n}"
 ```
 
-### `mkdir from` vs `copy into`
+### mkdir from vs copy into
 
 These two answer different questions:
 
@@ -179,7 +179,7 @@ copy "templates_extras" into templates_path when use_extras
 
 ## Conditional structure
 
-### `when` for one statement, `if` for blocks
+### when for one statement, if for blocks
 
 A single conditional statement reads fine with a `when` clause:
 
@@ -199,7 +199,7 @@ end
 
 The threshold is usually two or three statements. Below that, `when` is fine. Above it, the repeated condition obscures what is shared.
 
-### Compose two-branch decisions from negated `if`s
+### Compose two-branch decisions from negated ifs
 
 Spudlang has no `else`. For "do A or B but not both", two `if` blocks work:
 
@@ -214,13 +214,13 @@ end
 
 For more than two branches, a chain of `if` blocks with mutually-exclusive `==` conditions is the cleanest form.
 
-### Keep `repeat` bodies short
+### Keep repeat bodies short
 
 A `repeat` introduces its own scope and prompts inside it run once per iteration. Both are useful, but a long loop body with several `let`s and nested `if`s gets hard to follow. If you find yourself writing more than ten or so lines inside a `repeat`, consider whether each iteration should be its own `include`d template.
 
 ## Files and content
 
-### `file from` for large static content, `file content` for small dynamic content
+### file from for large static content, file content for small dynamic content
 
 `file from` is for files where most of the content is fixed and you want to ship them as-is, with light `{ident}` substitution.
 
@@ -228,13 +228,13 @@ A `repeat` introduces its own scope and prompts inside it run once per iteration
 
 The line is roughly: if you would think of opening the file in a text editor, it belongs in `from`. If it is a single string the template assembles, `content` is right.
 
-### Use `verbatim` for binary content and for text that contains literal `{`
+### Use verbatim for binary content and for text that contains literal braces
 
 The interpreter auto-detects binary content (anything that is not valid UTF-8) and copies it verbatim regardless of the `verbatim` keyword. So you do not need `verbatim` on PNGs, favicons, etc.
 
 You **do** need `verbatim` on text files that legitimately contain `{`, because the substitution scan would otherwise misinterpret them. LaTeX templates and shell scripts are common cases.
 
-### Set `mode` only when the system default is wrong
+### Set mode only when the system default is wrong
 
 Most files want the system default. The two cases worth setting `mode` for are:
 
@@ -256,7 +256,7 @@ run "git add ." in proj
 run "git commit -m 'initial'" in proj
 ```
 
-### Restrict free-form inputs that flow into `run`
+### Restrict free-form inputs that flow into run
 
 A user's `string` answer can be anything, including a shell injection payload. Two ways to defend:
 
@@ -265,11 +265,11 @@ A user's `string` answer can be anything, including a shell injection payload. T
 
 Most templates do not need user input inside a `run`. The trust prompt and the user reading their own commands are a good safety net, but the safest design avoids the problem.
 
-### Use `timeout` for slow commands
+### Use timeout for slow commands
 
 The default timeout is 60 seconds, which is right for `git init` but wrong for `npm install` or a multi-minute build. Set `timeout` explicitly when you know the command will take longer.
 
-### Reach for `run` only when there is no native form
+### Reach for run only when there is no native form
 
 `run` is the most powerful and the most dangerous statement. Use it for things that cannot be expressed structurally:
 
@@ -310,7 +310,7 @@ A few categories of error are inherently run-time:
 
 Lean on the parse-time guarantees: a template that survives `spudplate validate` is much closer to working than one that has not been validated.
 
-### Use `spudplate validate` while writing
+### Use spudplate validate while writing
 
 `spudplate validate <file.spud>` runs the lexer, parser, and validator without prompting or installing. Run it after each substantive edit. The errors it produces are precise about line and column.
 
