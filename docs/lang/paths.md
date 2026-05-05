@@ -35,13 +35,13 @@ mkdir "static" as static_path
 mkdir static_path/"week_{n}"
 ```
 
-## `mkdir -p` semantics
+## mkdir -p semantics
 
 `mkdir` always creates intermediate directories. `mkdir "a/b/c"` creates `a`, `a/b`, and `a/b/c` in turn if any do not exist. There is no separate `mkdir -p` form.
 
 A `mkdir` whose path resolves to an already-existing path that the current run did not create is a runtime error. The interpreter only allows writing to paths it created itself within the same run, so there is no risk of silently overwriting a directory that pre-existed.
 
-## Path aliases with `as`
+## Path aliases with as
 
 The `as <name>` clause on `mkdir` or `file` binds the resolved path to a name. Subsequent path expressions may use that name as a bare identifier segment.
 
@@ -61,7 +61,7 @@ file readme append content "## Testing\n" when use_tests
 
 An `as` clause is optional. If you do not need to refer back to the path, omit it.
 
-### Alias scoping under `when`
+### Alias scoping under when
 
 When a `mkdir` or `file` carries a `when` clause, the alias it binds is **conditional**. It cannot be used outside a statement guarded by an equivalent condition. The validator rejects references that escape the gate.
 
@@ -79,7 +79,7 @@ Conditions are compared after normalisation. Equivalences the validator recognis
 
 If the binding statement has no `when` clause, the alias is unconditional and can be used anywhere.
 
-## `let`-bound strings as path roots
+## let-bound strings as path roots
 
 A string declared with `let` can be used as a bare path segment, just like an alias.
 

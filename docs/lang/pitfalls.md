@@ -40,7 +40,7 @@ line2
 
 There is also no `\"` escape. A double-quote inside a string literal closes the string. To compose a string that contains `"`, bind the value via `ask` or `let`.
 
-## `{var}` outside quoted path segments is rejected
+## Interpolation outside quoted path segments is rejected
 
 Inside a path expression, `{...}` interpolation is allowed **only inside a quoted segment**:
 
@@ -81,7 +81,7 @@ file x_path/"z" content "" when both
 
 This is a known limitation. It may be lifted in a future version; for now, write the same condition the same way every time.
 
-## A `when`-gated `ask` must have a `default`
+## A when-gated ask must have a default
 
 A bare `ask` is required: the user cannot skip it. A `when`-gated `ask` is asked only sometimes, but the variable must be bound after the statement either way. So the validator requires a `default`:
 
@@ -92,7 +92,7 @@ ask num_weeks "Weeks?" int default 0 when use_tests        # ok
 
 When `use_tests` is `false`, the default is bound and `num_weeks` is ready for any later code that reads it. When `use_tests` is `true`, the user is prompted as normal, and the default fills in for empty input.
 
-## `copy into` errors if the destination does not exist
+## copy into errors if the destination does not exist
 
 `copy <source> into <dest>` requires `<dest>` to already exist. It will not create it for you. If you want a fresh directory populated from one source, use `mkdir from` instead.
 
@@ -104,7 +104,7 @@ copy "templates" into "missing_dir"    # runtime error: missing_dir does not exi
 
 The pattern that combines both: `mkdir from` to create and seed, then `copy into` to merge add-ons.
 
-## `file append` errors if the file is not from this run
+## file append errors if the file is not from this run
 
 The interpreter tracks paths created during a single run. `file ... append` requires the target file to have been created earlier in the **same run**. Appending to a pre-existing file from outside the run is rejected on principle: spudplate never modifies files it did not create.
 
@@ -117,7 +117,7 @@ file "/etc/hosts" append content "..."   # runtime error: file pre-existed
 
 This is also why an aliased file path (`as`) is the conventional way to wire up conditional appends: the alias makes it impossible to typo a different filename.
 
-## Shell injection through `run` interpolation
+## Shell injection through run interpolation
 
 `run` builds a shell command from a string expression and dispatches it via `/bin/sh -c`. The trust prompt shows the **literal source** but the **evaluated string** is what executes:
 
@@ -132,7 +132,7 @@ A malicious `url` such as `; rm -rf $HOME` is passed straight to the shell. Defe
 
 See @ref lang_stmt_run "run" for the full security treatment.
 
-## `run` without `in <path>` uses the parent's working directory
+## run without in clause uses the parent's working directory
 
 Without `in`, a `run` inherits the working directory of `spudplate`, which is wherever the user invoked it from (rarely the project subdirectory the template just created). Always pin commands that depend on a particular cwd:
 
@@ -152,7 +152,7 @@ This usually only matters for `run` commands: a `run` failing mid-flush leaves t
 
 The "all or nothing" guarantee covers the common case: a user aborting at any prompt, before the flush starts. The first prompt is the cheapest place to back out.
 
-## `--no-timeout` is a CLI flag, not a per-statement clause
+## no-timeout is a CLI flag, not a per-statement clause
 
 The default `run` timeout is 60 seconds. A per-statement `timeout 600` overrides it for one command. There is no per-statement way to say "no timeout"; the only escape is the CLI `--no-timeout` flag, which applies to every `run` in the invocation.
 

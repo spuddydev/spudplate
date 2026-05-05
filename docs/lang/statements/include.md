@@ -46,7 +46,7 @@ include claude_setup@3
 
 The bundler tries `<install-root>/claude_setup.spp` first; if its `version_tag` is not `3`, it falls back to `<install-root>/.archive/claude_setup.v3.spp`. If neither carries v3, the install fails with a clear error pointing to both paths it tried.
 
-Pinned deps are unaffected by `--update-deps`; the flag is silently no-op for them with a one-line `note: '<name>' is pinned in source; --update-deps ignored`.
+Pinned deps are unaffected by `--update-deps`; the flag is silently no-op for them with a one-line note `'NAME' is pinned in source; --update-deps ignored`.
 
 ## when
 

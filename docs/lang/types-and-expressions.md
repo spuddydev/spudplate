@@ -139,7 +139,7 @@ file "src/{slug}/main.cpp" content ""
 
 `{...}` outside a quoted segment in a path is a parse error: bare-identifier path segments must be plain identifiers (variable references), and there is no syntax for inline interpolation in an unquoted segment. See @ref lang_paths "Path expressions" for the full path grammar.
 
-### 3. `from` source files and `copy` source files
+### 3. from source files and copy source files
 
 When a `file ... from <source>` or `copy <source> into <dest>` reads a file from the bundle, the file's contents are scanned for bare `{ident}` substitutions. **Only bare identifier substitution applies.** Function calls, arithmetic, and string concatenation inside the braces are not supported in source-file contents. For full expression power, use `content <expr>` instead of `from`.
 

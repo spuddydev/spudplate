@@ -79,7 +79,7 @@ A few patterns recur across most templates and are covered in @ref lang_best_pra
 - The **alias-then-append** idiom: `file ... as readme; file readme append content "..." when use_X` for sectioned README files.
 - The **slug-and-dir** idiom: an early `let dir = lower(slug) + "-project"` makes one path root that every subsequent statement reuses.
 - The **bool-question gate**: `ask use_tests bool default false` followed by `if use_tests ... end` keeps optional sections together.
-- The **`mkdir from` then `copy into`** idiom: create a base directory from one template tree, then merge optional add-ons in.
+- The **mkdir-then-copy** idiom: `mkdir <path> from <source>` to create a base directory from one template tree, then `copy <source> into <path>` to merge optional add-ons in.
 
 ## See also
 

@@ -66,7 +66,11 @@ class BundleError : public std::runtime_error {
  * resolution always honours the pin.
  */
 struct BundleOptions {
+    /// Previously-installed parent whose bundled deps the bundler should
+    /// reuse by default ("sticky" mode). Null when there is no prior install.
     const Spudpack* existing_parent = nullptr;
+    /// Names of unpinned deps the caller wants refreshed from the install
+    /// root despite the sticky default. Null means "no overrides".
     const std::unordered_set<std::string>* update_deps = nullptr;
 };
 
@@ -78,6 +82,8 @@ struct BundleOptions {
  * ignored" hint without the bundler having to take a stream parameter.
  */
 struct BundleNotes {
+    /// Names of deps that were listed in `--update-deps` but are pinned in
+    /// source; the bundler honoured the pin and ignored the override.
     std::vector<std::string> ignored_update_pins;
 };
 

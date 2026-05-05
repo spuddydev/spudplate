@@ -57,7 +57,7 @@ n
 total_days
 ```
 
-Identifiers are case-sensitive. `Name` and `name` are different identifiers. The convention used throughout this reference, the test suite, and the example library is **`snake_case`**.
+Identifiers are case-sensitive. `Name` and `name` are different identifiers. The convention used throughout this reference, the test suite, and the example library is `snake_case`.
 
 ## Keywords
 
@@ -93,9 +93,9 @@ second line
 "
 ```
 
-A double quote cannot appear inside a string. There is no `\"` escape. Use `{expr}` interpolation if you need to compose a string that contains a quote (for example, by binding the quote to an `ask` value or another `let`).
+A double quote cannot appear inside a string. There is no escape sequence for it. Use `{expr}` interpolation if you need to compose a string that contains a quote (for example, by binding the quote to an `ask` value or another `let`).
 
-Strings may contain `{expr}` interpolations. See [Types and expressions](types-and-expressions.md) for the rules.
+Strings may contain `{expr}` interpolations. See @ref lang_types "Types and expressions" for the rules.
 
 ### Integer
 
@@ -125,7 +125,7 @@ let ready = true
 | Token | Used in                                                                       |
 |-------|-------------------------------------------------------------------------------|
 | `+`, `-`, `*`, `/` | Arithmetic and string concatenation (`+`)                          |
-| `==`, `!=`, `&lt;`, `&lt;=`, `>`, `>=` | Comparison operators                           |
+| `==`, `!=`, `<`, `<=`, `>`, `>=` | Comparison operators                                |
 | `=`   | Assignment in `let` and reassignment statements                               |
 | `(`, `)` | Grouping in expressions; argument lists for `lower`, `upper`, `trim`, `replace` |
 | `{`, `}` | Open and close interpolation in path expressions                            |
