@@ -61,7 +61,7 @@ Parses and validates a `.spud` file without installing anything. Useful in CI an
 spudplate list
 ```
 
-Prints every installed template as `name (vN)`, one per line, where `vN` is the current `version_tag` of the template.
+Prints every installed template name, one per line. Use `inspect <name>` to see the version tag and bundled deps.
 
 ---
 
