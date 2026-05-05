@@ -168,7 +168,8 @@ void print_help_validate(std::ostream& out) {
 void print_help_list(std::ostream& out) {
     out << "usage: spudplate list\n"
         << "\n"
-        << "List installed templates as 'name (vN)', one per line.\n";
+        << "List installed template names, one per line. Use 'spudplate "
+           "inspect <name>' to see version and dependency details.\n";
 }
 
 void print_help_inspect(std::ostream& out) {
@@ -1160,25 +1161,13 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     if (!std::filesystem::is_directory(home)) {
         return 0;  // No installs yet - empty output, success.
     }
-    struct Entry {
-        std::string name;
-        std::optional<std::uint32_t> version_tag;
-    };
-    std::vector<Entry> entries;
+    std::vector<std::string> entries;
     std::vector<std::string> shadowed_legacy;
     std::vector<std::string> only_legacy;
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
         if (entry.is_regular_file() && ends_with_spp(entry.path())) {
-            Entry e{entry.path().stem().string(), std::nullopt};
-            try {
-                Spudpack p = spudpack_read_file(entry.path());
-                e.version_tag = p.version_tag;
-            } catch (...) {
-                // Unreadable pack: list the name without a version. The
-                // user can still see it exists and act on it.
-            }
-            entries.push_back(std::move(e));
+            entries.push_back(entry.path().stem().string());
         }
     }
     for (const auto& entry : std::filesystem::directory_iterator(home, ec)) {
@@ -1191,29 +1180,19 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         if (!std::filesystem::is_regular_file(entry.path() / "template.spud")) {
             continue;
         }
-        bool already_listed = false;
-        for (const auto& e : entries) {
-            if (e.name == n) {
-                already_listed = true;
-                break;
-            }
-        }
+        bool already_listed =
+            std::find(entries.begin(), entries.end(), n) != entries.end();
         if (already_listed) {
             shadowed_legacy.push_back(n);
         } else {
             only_legacy.push_back(n);
         }
     }
-    std::sort(entries.begin(), entries.end(),
-              [](const Entry& a, const Entry& b) { return a.name < b.name; });
+    std::sort(entries.begin(), entries.end());
     std::sort(shadowed_legacy.begin(), shadowed_legacy.end());
     std::sort(only_legacy.begin(), only_legacy.end());
-    for (const auto& e : entries) {
-        out << e.name;
-        if (e.version_tag.has_value()) {
-            out << " (v" << *e.version_tag << ")";
-        }
-        out << "\n";
+    for (const auto& n : entries) {
+        out << n << "\n";
     }
     for (const auto& n : shadowed_legacy) {
         err << "warning: legacy install '" << n << "' is shadowed by '" << n << ".spp'\n";

@@ -530,7 +530,7 @@ TEST(CliTest, ListShowsInstalledNamesSorted) {
     ScriptedPrompter prompter({});
     int code = cli_main(args.argc(), args.argv(), out, err, prompter);
     EXPECT_EQ(code, 0);
-    EXPECT_EQ(out.str(), "alpha (v1)\nzebra (v1)\n");
+    EXPECT_EQ(out.str(), "alpha\nzebra\n");
 }
 
 TEST(CliTest, InspectPrintsSource) {
@@ -1031,7 +1031,7 @@ TEST(CliTest, ListWarnsAboutShadowedLegacy) {
     std::stringstream err;
     ScriptedPrompter prompter({});
     EXPECT_EQ(cli_main(args.argc(), args.argv(), out, err, prompter), 0);
-    EXPECT_EQ(out.str(), "demo (v1)\n");
+    EXPECT_EQ(out.str(), "demo\n");
     EXPECT_NE(err.str().find("shadowed"), std::string::npos);
 }
 
@@ -1751,7 +1751,7 @@ TEST(CliTest, UninstallLeavesOtherNamesArchive) {
                                                  "foobar.v1.spp"));
 }
 
-TEST(CliTest, ListShowsTagsAndSkipsArchive) {
+TEST(CliTest, ListAfterReinstallSkipsArchive) {
     TmpDir td;
     auto home_path = td.path() / "home";
     ScopedHome home(home_path);
@@ -1769,7 +1769,7 @@ TEST(CliTest, ListShowsTagsAndSkipsArchive) {
               0);
     auto r = run_cli({"spudplate", "list"});
     EXPECT_EQ(r.code, 0) << r.err;
-    EXPECT_EQ(r.out, "foo (v2)\n");
+    EXPECT_EQ(r.out, "foo\n");
 }
 
 TEST(CliTest, InspectShowsVersionAndDeps) {
