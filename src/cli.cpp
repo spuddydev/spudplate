@@ -176,10 +176,12 @@ void print_help_list(std::ostream& out) {
 }
 
 void print_help_inspect(std::ostream& out) {
-    out << "usage: spudplate inspect <name>\n"
+    out << "usage: spudplate inspect <name[@N]>\n"
         << "\n"
         << "Print the version of an installed template, the version of\n"
-        << "every dep it bundles, and the original .spud source.\n";
+        << "every dep it bundles, and the original .spud source.\n"
+        << "\n"
+        << "Suffix `@N` to inspect an archived version, e.g. 'foo@4'.\n";
 }
 
 void print_help_uninstall(std::ostream& out) {
@@ -1274,8 +1276,8 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
         print_usage(err);
         return 1;
     }
-    std::string name{argv[2]};
-    if (looks_like_path(name)) {
+    std::string raw{argv[2]};
+    if (looks_like_path(raw)) {
         err << "inspect takes an installed template name, not a path\n";
         return 1;
     }
@@ -1285,20 +1287,32 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
                "XDG_DATA_HOME, or HOME\n";
         return 1;
     }
-    std::filesystem::path spp_path = home / (name + ".spp");
-    if (std::filesystem::exists(spp_path) &&
-        !std::filesystem::is_regular_file(spp_path)) {
-        err << "refusing to read: '" << name
-            << ".spp' exists but is not a regular file\n";
-        return 1;
-    }
-    if (!std::filesystem::exists(spp_path)) {
-        if (legacy_install_exists(home, name)) {
-            err << "legacy install '" << name << "'; reinstall to upgrade\n";
+    NameAtVersion parsed = parse_name_at_version(raw);
+    const std::string& name = parsed.name;
+    std::filesystem::path spp_path;
+    if (parsed.version.has_value()) {
+        spp_path = resolve_versioned_pack(home, name, *parsed.version);
+        if (spp_path.empty()) {
+            err << name << "@" << *parsed.version << ": not installed\n";
+            return 5;
+        }
+    } else {
+        spp_path = home / (name + ".spp");
+        if (std::filesystem::exists(spp_path) &&
+            !std::filesystem::is_regular_file(spp_path)) {
+            err << "refusing to read: '" << name
+                << ".spp' exists but is not a regular file\n";
             return 1;
         }
-        err << name << ": not installed\n";
-        return 5;
+        if (!std::filesystem::exists(spp_path)) {
+            if (legacy_install_exists(home, name)) {
+                err << "legacy install '" << name
+                    << "'; reinstall to upgrade\n";
+                return 1;
+            }
+            err << name << ": not installed\n";
+            return 5;
+        }
     }
     try {
         Spudpack pack = spudpack_read_file(spp_path);
