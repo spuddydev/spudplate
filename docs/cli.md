@@ -30,7 +30,7 @@ Bundled `include` deps are sticky by default: reinstalling a parent reuses the d
 ## run
 
 ```
-spudplate run [--dry-run] [--yes] [--no-timeout] <name|file.spud|file.spp>
+spudplate run [--dry-run] [--yes] [--no-timeout] <name[@N]|file.spud|file.spp>
 ```
 
 Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
@@ -42,6 +42,8 @@ Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
 | `--no-timeout` | Disable per-`run` timeouts for this invocation (default is 60 seconds per shell command). |
 
 `run` decides whether the argument is a path or an installed name. An argument containing `/` or ending in `.spud` or `.spp` is treated as a path; everything else is looked up as `<install-root>/<arg>.spp`.
+
+Suffix `@N` to pin a specific archived version, for example `spudplate run foo@4` runs version 4 even if a newer release is now installed. The lookup checks the archive first and falls back to the live install when its version tag matches `N`.
 
 ---
 
@@ -68,20 +70,24 @@ Prints every installed template name, one per line. Use `inspect <name>` to see 
 ## inspect
 
 ```
-spudplate inspect <name>
+spudplate inspect <name[@N]>
 ```
 
 Prints the version tag of an installed template, the version tag of every dep it bundles, and the original `.spud` source captured at install time. Accepts a bare name only - not a path.
+
+Suffix `@N` to inspect an archived version, for example `spudplate inspect foo@4`. Same lookup as `run`: archive first, live fallback when the version tag matches.
 
 ---
 
 ## uninstall
 
 ```
-spudplate uninstall <name>
+spudplate uninstall <name[@N]>
 ```
 
-Removes an installed template. Accepts a bare name only.
+Removes an installed template. The bare-name form removes the live install along with every archived version of the same name. Accepts a bare name only - not a path.
+
+Suffix `@N` to remove only one archived version, for example `spudplate uninstall foo@4`. Refuses to remove the live install via `@N`; drop the suffix to remove the whole template.
 
 ---
 
