@@ -1751,6 +1751,58 @@ TEST(CliTest, UninstallLeavesOtherNamesArchive) {
                                                  "foobar.v1.spp"));
 }
 
+TEST(CliTest, InspectAtArchivedVersionPrintsArchivedSource) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    const std::string v1_body = "ask q \"v1 prompt?\" string default \"x\"\n";
+    const std::string v2_body = "ask q \"v2 prompt?\" string default \"x\"\n";
+    write_file(td.path() / "foo.spud", v1_body);
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    write_file(td.path() / "foo.spud", v2_body);
+    ASSERT_EQ(run_cli({"spudplate", "install", "--yes",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli({"spudplate", "inspect", "foo@1"});
+    EXPECT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.out.find("foo (v1)"), std::string::npos) << r.out;
+    EXPECT_NE(r.out.find("v1 prompt"), std::string::npos) << r.out;
+    EXPECT_EQ(r.out.find("v2 prompt"), std::string::npos) << r.out;
+}
+
+TEST(CliTest, InspectAtCurrentVersionUsesLiveInstall) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud", "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli({"spudplate", "inspect", "foo@1"});
+    EXPECT_EQ(r.code, 0) << r.err;
+    EXPECT_NE(r.out.find("foo (v1)"), std::string::npos) << r.out;
+}
+
+TEST(CliTest, InspectAtUnknownVersionExitsFive) {
+    TmpDir td;
+    auto home_path = td.path() / "home";
+    ScopedHome home(home_path);
+    write_file(td.path() / "foo.spud", "ask q \"q?\" string default \"x\"\n");
+    ASSERT_EQ(run_cli({"spudplate", "install",
+                       (td.path() / "foo.spud").string()})
+                  .code,
+              0);
+    auto r = run_cli({"spudplate", "inspect", "foo@9"});
+    EXPECT_EQ(r.code, 5);
+    EXPECT_NE(r.err.find("foo@9"), std::string::npos) << r.err;
+    EXPECT_NE(r.err.find("not installed"), std::string::npos) << r.err;
+}
+
 TEST(CliTest, RunAtArchivedVersionRunsArchivedProgram) {
     TmpDir td;
     auto home_path = td.path() / "home";
