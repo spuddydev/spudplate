@@ -8,6 +8,9 @@
 #include <utility>
 #include <variant>
 
+#include "spudplate/binary_serializer.h"
+#include "spudplate/validator.h"
+
 namespace spudplate {
 
 namespace fs = std::filesystem;
@@ -16,6 +19,49 @@ BundleError::BundleError(std::string message, int line, int column)
     : std::runtime_error(std::move(message)), line_(line), column_(column) {}
 
 namespace {
+
+const char* var_type_name(VarType t) {
+    switch (t) {
+        case VarType::String:
+            return "string";
+        case VarType::Bool:
+            return "bool";
+        case VarType::Int:
+            return "int";
+    }
+    return "unknown";
+}
+
+// What the bundler remembers about each top-level (and each nested) `ask`
+// in an includee, so it can cross-check `include with`-args at bundle time.
+struct IncludeeAskInfo {
+    VarType type;  ///< The ask's declared type.
+    bool nested;   ///< True if the ask is inside `repeat` or `if`.
+};
+
+// Walk a (deserialised) includee program and record every `ask` it carries,
+// flagging whether each one sits at top level or inside a `repeat`/`if`.
+// Names are guaranteed unique across the whole program by the validator's
+// no-shadowing rule, so a single map keyed by name suffices.
+void collect_includee_asks(
+    const std::vector<StmtPtr>& body, bool nested,
+    std::unordered_map<std::string, IncludeeAskInfo>& out) {
+    for (const auto& sp : body) {
+        if (!sp) continue;
+        std::visit(
+            [&](const auto& s) {
+                using T = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<T, AskStmt>) {
+                    out[s.name] = {.type = s.var_type, .nested = nested};
+                } else if constexpr (std::is_same_v<T, RepeatStmt>) {
+                    collect_includee_asks(s.body, /*nested=*/true, out);
+                } else if constexpr (std::is_same_v<T, IfStmt>) {
+                    collect_includee_asks(s.body, /*nested=*/true, out);
+                }
+            },
+            sp->data);
+    }
+}
 
 // Result of classifying a source PathExpr. The bundler distinguishes the
 // two legal shapes - a fully-literal path (walk the exact target) and a
@@ -151,6 +197,7 @@ class Bundler {
                     process_dir_source(s.source, s.line, s.column,
                                        /*forbid_regular_file=*/true);
                 } else if constexpr (std::is_same_v<T, RepeatStmt>) {
+                    type_map_[s.iterator_var] = VarType::Int;
                     for (const auto& body : s.body) {
                         if (body) visit_stmt(*body);
                     }
@@ -160,9 +207,15 @@ class Bundler {
                     }
                 } else if constexpr (std::is_same_v<T, IncludeStmt>) {
                     process_include(s);
+                } else if constexpr (std::is_same_v<T, AskStmt>) {
+                    type_map_[s.name] = s.var_type;
+                } else if constexpr (std::is_same_v<T, LetStmt>) {
+                    if (auto t = infer_expr_type(*s.value, type_map_)) {
+                        type_map_[s.name] = *t;
+                    }
                 }
-                // AskStmt, LetStmt, AssignStmt, RunStmt carry no asset or
-                // dep references and are intentionally skipped.
+                // AssignStmt, RunStmt carry no asset or dep references and
+                // do not introduce new identifiers.
             },
             stmt.data);
     }
@@ -172,6 +225,8 @@ class Bundler {
     // includes of the same name dedupe to one record; the first
     // encounter wins on dep order. If a later encounter pins a different
     // version than the earlier one, that is rejected as inconsistent.
+    // Every include site, including duplicates, has its `with`-args
+    // cross-checked against the includee's top-level asks.
     void process_include(const IncludeStmt& s) {
         const std::string& name = s.name;
         int line = s.line;
@@ -199,6 +254,7 @@ class Bundler {
                         line, column);
                 }
             }
+            check_with_args(s);
             return;
         }
 
@@ -223,6 +279,73 @@ class Bundler {
 
         deps_.emplace(name, std::move(dep));
         dep_order_.push_back(name);
+        check_with_args(s);
+    }
+
+    // Cross-check each `with`-arg against the includee's top-level asks.
+    // Builds (and caches) the includee's ask map on first sight. Empty
+    // arg list short-circuits before any decode work happens.
+    void check_with_args(const IncludeStmt& s) {
+        if (s.args.empty()) return;
+        const auto& asks = lookup_includee_asks(s);
+        for (const auto& arg : s.args) {
+            auto it = asks.find(arg.name);
+            if (it == asks.end()) {
+                throw BundleError(
+                    "include '" + s.name +
+                        "' has no ask named '" + arg.name + "'",
+                    arg.line, arg.column);
+            }
+            if (it->second.nested) {
+                throw BundleError(
+                    "include '" + s.name + "' arg '" + arg.name +
+                        "' targets an ask nested inside repeat or if",
+                    arg.line, arg.column);
+            }
+            auto caller_type = infer_expr_type(*arg.value, type_map_);
+            if (caller_type.has_value() &&
+                *caller_type != it->second.type) {
+                throw BundleError(
+                    std::string("include '") + s.name + "' arg '" +
+                        arg.name + "' type mismatch: caller " +
+                        var_type_name(*caller_type) + " vs includee " +
+                        var_type_name(it->second.type),
+                    arg.line, arg.column);
+            }
+        }
+    }
+
+    const std::unordered_map<std::string, IncludeeAskInfo>&
+    lookup_includee_asks(const IncludeStmt& s) {
+        auto it_cached = includee_asks_.find(s.name);
+        if (it_cached != includee_asks_.end()) {
+            return it_cached->second;
+        }
+        const auto& dep = deps_.at(s.name);
+        Spudpack pack;
+        try {
+            pack = spudpack_decode(dep.bytes.data(), dep.bytes.size());
+        } catch (const SpudpackError& e) {
+            throw BundleError(
+                "include '" + s.name +
+                    "' could not be decoded for arg checking: " + e.what(),
+                s.line, s.column);
+        }
+        Program prog;
+        try {
+            prog = deserialize_program(pack.program_bytes.data(),
+                                       pack.program_bytes.size(),
+                                       pack.version);
+        } catch (const std::exception& e) {
+            throw BundleError(
+                "include '" + s.name +
+                    "' has malformed program bytes: " + e.what(),
+                s.line, s.column);
+        }
+        std::unordered_map<std::string, IncludeeAskInfo> asks;
+        collect_includee_asks(prog.statements, /*nested=*/false, asks);
+        auto [it, _] = includee_asks_.emplace(s.name, std::move(asks));
+        return it->second;
     }
 
     struct ReadDep {
@@ -561,6 +684,10 @@ class Bundler {
     std::vector<std::string> insertion_order_;
     std::unordered_map<std::string, SpudpackDep> deps_;
     std::vector<std::string> dep_order_;
+    TypeMap type_map_;
+    std::unordered_map<std::string,
+                       std::unordered_map<std::string, IncludeeAskInfo>>
+        includee_asks_;
 };
 
 // Walk the program once and surface any dep names that the user listed in

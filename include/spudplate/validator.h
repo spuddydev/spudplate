@@ -1,6 +1,7 @@
 #ifndef SPUDPLATE_VALIDATOR_H
 #define SPUDPLATE_VALIDATOR_H
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -67,6 +68,16 @@ ExprPtr normalize(const Expr& expr, const TypeMap& tm);
  * child. For `FunctionCallExpr`, compares `name` then recurses into `argument`.
  */
 bool exprs_equal(const Expr& a, const Expr& b);
+
+/**
+ * @brief Best-effort static type inference for an expression.
+ *
+ * Returns `nullopt` when the expression's type cannot be deduced from `tm`
+ * (for example a chain through a `let` whose own type was inscrutable).
+ * Used by the validator's path-identifier check and by the bundler when
+ * type-checking `include`'s `with`-args against an includee's `ask` types.
+ */
+std::optional<VarType> infer_expr_type(const Expr& expr, const TypeMap& tm);
 
 }  // namespace spudplate
 
