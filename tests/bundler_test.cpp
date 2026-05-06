@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "spudplate/binary_serializer.h"
 #include "spudplate/lexer.h"
 #include "spudplate/parser.h"
 #include "spudplate/spudpack.h"
@@ -20,6 +21,7 @@ using spudplate::BundleResult;
 using spudplate::Lexer;
 using spudplate::Parser;
 using spudplate::Program;
+using spudplate::serialize_program;
 using spudplate::Spudpack;
 using spudplate::SpudpackAsset;
 using spudplate::bundle_assets;
@@ -255,6 +257,19 @@ void install_stub(const fs::path& install_root, const std::string& name) {
     spudpack_write_file(install_root / (name + ".spp"), p);
 }
 
+// Install a `.spp` whose program bytes are the serialised AST of `source`,
+// so the bundler can decode it and inspect its asks while cross-checking
+// `include with`-args.
+void install_with_program(const fs::path& install_root, const std::string& name,
+                          const std::string& source) {
+    fs::create_directories(install_root);
+    Program prog = parse(source);
+    Spudpack p;
+    p.source = source;
+    p.program_bytes = serialize_program(prog);
+    spudpack_write_file(install_root / (name + ".spp"), p);
+}
+
 }  // namespace
 
 TEST(Bundler, IncludeCollectsInstalledDep) {
@@ -316,4 +331,57 @@ TEST(Bundler, IncludeInsideRepeatAndIfIsCollected) {
     ASSERT_EQ(r.deps.size(), 2u);
     EXPECT_EQ(r.deps[0].name, "looped");
     EXPECT_EQ(r.deps[1].name, "guarded");
+}
+
+// --- include with-args -----------------------------------------------------
+
+TEST(Bundler, IncludeWithMatchingArgsBundles) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    install_with_program(install_root, "child",
+                         "ask project_name \"name?\" string\n"
+                         "ask use_tests \"tests?\" bool default false\n");
+    Program p = parse(
+        "ask name \"name?\" string\n"
+        "ask flag \"flag?\" bool\n"
+        "include child with project_name = name, use_tests = flag\n");
+    BundleResult r = bundle_assets(p, tmp.path(), install_root);
+    ASSERT_EQ(r.deps.size(), 1u);
+    EXPECT_EQ(r.deps[0].name, "child");
+}
+
+TEST(Bundler, IncludeWithUnknownArgNameRejected) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    install_with_program(install_root, "child",
+                         "ask project_name \"name?\" string\n");
+    Program p = parse(
+        "ask name \"name?\" string\n"
+        "include child with bogus = name\n");
+    EXPECT_THROW(bundle_assets(p, tmp.path(), install_root), BundleError);
+}
+
+TEST(Bundler, IncludeWithArgTargetingNestedAskRejected) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    install_with_program(install_root, "child",
+                         "ask n \"n?\" int default 1\n"
+                         "repeat n as i\n"
+                         "  ask label \"label?\" string\n"
+                         "end\n");
+    Program p = parse(
+        "ask name \"name?\" string\n"
+        "include child with label = name\n");
+    EXPECT_THROW(bundle_assets(p, tmp.path(), install_root), BundleError);
+}
+
+TEST(Bundler, IncludeWithArgTypeMismatchRejected) {
+    TmpDir tmp;
+    fs::path install_root = tmp.path() / "install";
+    install_with_program(install_root, "child",
+                         "ask use_tests \"tests?\" bool default false\n");
+    Program p = parse(
+        "ask name \"name?\" string\n"
+        "include child with use_tests = name\n");
+    EXPECT_THROW(bundle_assets(p, tmp.path(), install_root), BundleError);
 }
