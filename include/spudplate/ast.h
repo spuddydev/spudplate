@@ -328,9 +328,26 @@ struct RunStmt {
  * filesystem operations join the parent's deferred queue. The optional
  * `when` clause skips the include entirely if false.
  */
+/**
+ * @brief A single pre-answer argument on an `include` statement.
+ *
+ * The caller binds `name` to the result of evaluating `value` in the caller's
+ * scope. At runtime, when the includee reaches an `ask` whose name matches and
+ * whose `when` evaluates true (or has no `when`), the pre-answer is used and
+ * the prompt is skipped. If the includee's `when` evaluates false, the
+ * pre-answer is silently ignored and the ask's `default` applies.
+ */
+struct IncludeArg {
+    std::string name;  ///< The includee `ask` name being pre-answered.
+    ExprPtr value;     ///< Expression evaluated in the caller's scope.
+    int line;          ///< 1-based source line of this arg's name token.
+    int column;        ///< 1-based source column of this arg's name token.
+};
+
 struct IncludeStmt {
     std::string name;                          ///< Name of the installed template to run.
     std::optional<std::uint32_t> version_pin;  ///< Optional `@N` pin from source. Bundler resolves to that exact installed/archived version.
+    std::vector<IncludeArg> args;              ///< Optional `with k = e, ...` pre-answer arguments.
     std::optional<ExprPtr> when_clause;        ///< Optional condition guarding the include.
     int line;    ///< 1-based source line where this node begins.
     int column;  ///< 1-based source column where this node begins.
