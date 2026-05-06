@@ -1,7 +1,7 @@
 # include {#lang_stmt_include}
 
 ```
-include <name>[@<int>] [when <condition>]
+include <name>[@<int>] [with <name> = <expr> [, <name> = <expr>]*] [when <condition>]
 ```
 
 Runs another installed spudplate template by name, **inline at the include point**. The included template has isolated variable scope, but its prompts and filesystem operations interleave with the caller's in source order.
@@ -47,6 +47,51 @@ include claude_setup@3
 The bundler tries `<install-root>/claude_setup.spp` first; if its `version_tag` is not `3`, it falls back to `<install-root>/.archive/claude_setup.v3.spp`. If neither carries v3, the install fails with a clear error pointing to both paths it tried.
 
 Pinned deps are unaffected by `--update-deps`; the flag is silently no-op for them with a one-line note `'NAME' is pinned in source; --update-deps ignored`.
+
+## Pre-answering questions with `with`
+
+The optional `with` clause lets the caller pre-answer the includee's `ask` questions inline. Each entry binds an includee `ask` name to an expression evaluated in the **caller's** scope. Names are comma separated; trailing commas are rejected.
+
+```
+ask name "Project name?" string
+ask use_tests "Tests?" bool default false
+include claude_setup with project_name = name, with_tests = use_tests
+```
+
+When `claude_setup` runs, its `ask project_name` and `ask with_tests` are bound directly from the caller's `name` and `use_tests`; the user is not prompted for either.
+
+Right-hand sides are full expressions, so anything that is legal in a `let` value works:
+
+```
+include footer with title = upper(name) + "_v2"
+```
+
+### `when`-gated asks
+
+Pre-answers apply **only** when the includee's `ask` `when` clause evaluates true (or there is no `when` clause). If the gate is false, the ask's `default` fires and the pre-answer is silently dropped. This means a single caller can supply pre-answers for the whole shape of an includee without first checking which subset is actually live.
+
+```
+# Includee:
+ask enable "Enable?" bool default false
+ask extra "Extra?" string default "fallback" when enable
+```
+
+```
+# Caller skipping the optional path:
+include footer with enable = false, extra = "ignored"
+```
+
+`enable` becomes `false`; `extra`'s `when enable` is false, so its `default "fallback"` fires and the `extra = "ignored"` pre-answer is dropped on the floor. No prompts run.
+
+### Targets must be top-level asks
+
+Each `with` name must match a **top-level** `ask` in the includee, not one nested inside `repeat` or `if`. The bundler enforces this at install time and rejects:
+
+- A name that is not declared as an `ask` anywhere in the includee.
+- A name declared by an `ask` inside `repeat` or `if` (since multiple iterations or guarded branches can produce many bindings).
+- A type mismatch between the caller's expression and the includee's `ask` type.
+
+Caller-side errors (an arg expression referencing an undeclared identifier, a duplicate arg name in the same `include`) surface at parse or validate time before the bundler runs.
 
 ## when
 
