@@ -59,7 +59,7 @@ struct Spudpack {
     std::vector<std::uint8_t> program_bytes;  ///< Opaque serialised AST; decoded by the binary serializer.
     std::vector<SpudpackAsset> assets;        ///< Every bundled asset referenced by the program.
     std::vector<SpudpackDep> deps;            ///< Every bundled dependency referenced by `include` statements.
-    std::uint8_t version{4};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
+    std::uint8_t version{5};                  ///< Spudpack format version that produced these bytes. Threaded into the binary serializer so trailing-optional fields decode correctly across versions.
     std::uint32_t version_tag{1};             ///< Monotonic install counter for this template. Bumped on each install that produces different content. v3 decodes default to 1.
 };
 
@@ -83,8 +83,8 @@ class SpudpackError : public std::runtime_error {
 /**
  * @brief Encode a `Spudpack` into a tightly packed byte stream.
  *
- * Layout: magic `"SPUD"` (4 bytes), version `u8` (currently `4`; `1`, `2`,
- * and `3` are still accepted on decode for backward compatibility), flags
+ * Layout: magic `"SPUD"` (4 bytes), version `u8` (currently `5`; `1`, `2`,
+ * `3`, and `4` are still accepted on decode for backward compatibility), flags
  * `u8 = 0`, `u32 LE` version_tag (v4 only; default 1 for older decodes),
  * `varint`+`bytes` source, `varint`+`bytes` program, `varint` asset_count,
  * per asset (`varint`+`bytes` path, `u16 LE` mode, `varint`+`bytes` data),

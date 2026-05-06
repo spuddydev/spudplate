@@ -30,7 +30,7 @@ constexpr std::array<std::uint8_t, 4> kMagic = {'S', 'P', 'U', 'D'};
 // any callers having to handle a missing-tag case.
 // Encoder always writes the highest supported version; decoder accepts
 // every version in [kMinVersion, kVersion].
-constexpr std::uint8_t kVersion = 4;
+constexpr std::uint8_t kVersion = 5;
 constexpr std::uint8_t kMinVersion = 1;
 constexpr std::uint8_t kVersionDepsAllowed = 3;
 constexpr std::uint8_t kVersionTagsAllowed = 4;

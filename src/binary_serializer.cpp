@@ -67,7 +67,7 @@ class Writer {
 class Reader {
   public:
     Reader(const std::uint8_t* data, std::size_t size,
-           std::uint8_t pack_version = 4)
+           std::uint8_t pack_version = 5)
         : data_(data), size_(size), pack_version_(pack_version) {}
 
     std::size_t pos() const noexcept { return pos_; }
@@ -640,6 +640,16 @@ void encode_stmt(Writer& w, const Stmt& s) {
                 if (node.version_pin.has_value()) {
                     w.write_varint(*node.version_pin);
                 }
+                // Trailing field added with pack v5: pre-answer with-args.
+                // The decoder gates on pack_version >= 5; v4-and-earlier
+                // streams are read as having no args.
+                w.write_varint(node.args.size());
+                for (const auto& arg : node.args) {
+                    w.write_string(arg.name);
+                    encode_expr(w, *arg.value);
+                    w.write_zigzag(arg.line);
+                    w.write_zigzag(arg.column);
+                }
             } else if constexpr (std::is_same_v<T, RunStmt>) {
                 encode_expr(w, *node.command);
                 encode_opt_path_expr(w, node.cwd);
@@ -793,10 +803,28 @@ StmtPtr decode_stmt(Reader& r) {
                 }
                 version_pin = static_cast<std::uint32_t>(v);
             }
+            // Trailing field added with pack v5. v4 and earlier do not
+            // carry it and decode as an empty vector.
+            std::vector<IncludeArg> args;
+            if (r.pack_version() >= 5) {
+                const std::size_t n = r.read_count();
+                args.reserve(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    std::string arg_name = r.read_string();
+                    ExprPtr arg_value = decode_expr(r);
+                    const int arg_line = static_cast<int>(r.read_zigzag());
+                    const int arg_col = static_cast<int>(r.read_zigzag());
+                    args.push_back(IncludeArg{.name = std::move(arg_name),
+                                              .value = std::move(arg_value),
+                                              .line = arg_line,
+                                              .column = arg_col});
+                }
+            }
             const int line = static_cast<int>(r.read_zigzag());
             const int column = static_cast<int>(r.read_zigzag());
             return wrap(IncludeStmt{.name = std::move(name),
                                     .version_pin = version_pin,
+                                    .args = std::move(args),
                                     .when_clause = std::move(when_clause),
                                     .line = line,
                                     .column = column});
