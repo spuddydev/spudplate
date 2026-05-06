@@ -170,11 +170,14 @@ void check_alias(const PathVar& pv, const std::optional<ExprPtr>& current_when,
     }
 }
 
-// Best-effort static type inference for the right-hand side of `let`. Returns
-// nullopt when the expression type is not deducible from the static
-// information available (e.g. a chain through a let whose own type was
-// inscrutable). The validator's path-identifier check treats nullopt as
-// "string-compatible" so we never raise false negatives on opaque expressions.
+}  // namespace
+
+// Best-effort static type inference for the right-hand side of `let` and for
+// caller-side `include with` argument values. Returns nullopt when the
+// expression type is not deducible from the static information available (e.g.
+// a chain through a let whose own type was inscrutable). The validator's
+// path-identifier check treats nullopt as "string-compatible" so we never
+// raise false negatives on opaque expressions.
 std::optional<VarType> infer_expr_type(const Expr& expr, const TypeMap& tm) {
     return std::visit(
         [&](const auto& e) -> std::optional<VarType> {
@@ -241,6 +244,8 @@ std::optional<VarType> infer_expr_type(const Expr& expr, const TypeMap& tm) {
         },
         expr.data);
 }
+
+namespace {
 
 // Render a VarType for diagnostics.
 const char* var_type_name(VarType t) {
@@ -470,6 +475,9 @@ void validate_stmt(const Stmt& stmt, Scope& scope, AliasCtx& ctx) {
                 walk_path(s.destination, scope, ctx, s.when_clause);
                 walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, IncludeStmt>) {
+                for (const auto& arg : s.args) {
+                    walk_expr(*arg.value, scope);
+                }
                 walk_optional_expr(s.when_clause, scope);
             } else if constexpr (std::is_same_v<T, RunStmt>) {
                 walk_expr(*s.command, scope);

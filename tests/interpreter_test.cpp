@@ -394,6 +394,116 @@ ask tail "tail?" string default "t"
     EXPECT_EQ(reqs[3].indent_level, 0);
 }
 
+// --- include with-args ----------------------------------------------------
+
+TEST(InterpreterTest, IncludeWithPreAnsweredAskSkipsPrompt) {
+    auto dep = dep_bytes_from_source(R"(ask project_name "name?" string
+ask use_tests "tests?" bool default false
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(ask name "name?" string
+ask flag "flag?" bool
+include child with project_name = name, use_tests = flag
+)");
+    // Two parent prompts answered; both child asks pre-answered, no
+    // child prompts fire.
+    ScriptedPrompter prompter({"alice", "true"});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+    const auto& reqs = prompter.requests();
+    ASSERT_EQ(reqs.size(), 2u);
+    EXPECT_EQ(reqs[0].text, "name?");
+    EXPECT_EQ(reqs[1].text, "flag?");
+}
+
+TEST(InterpreterTest, IncludeWithWhenFalsePreAnswerIgnoredDefaultUsed) {
+    // Includee gates `extra` on `enable`. The caller pre-answers `extra`
+    // but pre-answers `enable=false`, so `extra` falls back to its
+    // default and the pre-answer is silently dropped.
+    auto dep = dep_bytes_from_source(R"(ask enable "enable?" bool default false
+ask extra "extra?" string default "fallback" when enable
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(include child with enable = false, extra = "ignored"
+)");
+    ScriptedPrompter prompter({});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+    EXPECT_TRUE(prompter.requests().empty());
+}
+
+TEST(InterpreterTest, IncludeWithMissingArgFallsThroughToPrompt) {
+    auto dep = dep_bytes_from_source(R"(ask a "a?" string default "x"
+ask b "b?" string default "y"
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(ask v "v?" string
+include child with a = v
+)");
+    // Parent answers `v`. Child's `a` is pre-answered (skipped). Child's
+    // `b` has no pre-answer, so it prompts.
+    ScriptedPrompter prompter({"hello", "answered"});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+    const auto& reqs = prompter.requests();
+    ASSERT_EQ(reqs.size(), 2u);
+    EXPECT_EQ(reqs[0].text, "v?");
+    EXPECT_EQ(reqs[1].text, "b?");
+}
+
+TEST(InterpreterTest, IncludeArgsDoNotLeakToSiblingInclude) {
+    // Two include sites of the same dep with different pre-answers each.
+    // Per-site pre-answers must not bleed into the other site.
+    auto dep = dep_bytes_from_source(R"(ask label "label?" string default "fallback"
+)");
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"child", dep});
+
+    auto program = parse(R"(include child with label = "first"
+include child with label = "second"
+include child
+)");
+    // First two sites pre-answer; third site has no pre-answer, so the
+    // child prompts. The pre-answers from earlier sites must not survive.
+    ScriptedPrompter prompter({"prompted"});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+    const auto& reqs = prompter.requests();
+    ASSERT_EQ(reqs.size(), 1u);
+    EXPECT_EQ(reqs[0].text, "label?");
+}
+
+TEST(InterpreterTest, NestedIncludeArgsAreScoped) {
+    // A grandchild includee has its own ask. The middle dep includes
+    // grandchild with its own pre-answer. The outer caller passes args to
+    // the middle dep, but those must not reach the grandchild.
+    auto grandchild =
+        dep_bytes_from_source(R"(ask gc "gc?" string default "gc-default"
+)");
+    Program middle_program = parse(R"(ask mid "mid?" string
+include grandchild with gc = mid
+)");
+    Spudpack middle_pack;
+    middle_pack.source = "<inline>";
+    middle_pack.program_bytes = serialize_program(middle_program);
+    middle_pack.deps.push_back({"grandchild", grandchild});
+    auto middle = spudpack_encode(middle_pack);
+
+    std::vector<SpudpackDep> deps;
+    deps.push_back({"middle", middle});
+
+    auto program = parse(R"(include middle with mid = "from_outer"
+)");
+    // Outer pre-answers `mid` → middle dep skips its prompt. Middle then
+    // includes grandchild with `gc = mid`, so `gc` is pre-answered with
+    // `"from_outer"`. No prompts fire anywhere.
+    ScriptedPrompter prompter({});
+    run_for_tests(program, prompter, /*source=*/nullptr, &deps);
+    EXPECT_TRUE(prompter.requests().empty());
+}
+
 // --- run_for_tests returns the interpreter's environment ---
 
 TEST(InterpreterTest, RunForTestsReturnsEnvironmentOnEmptyProgram) {

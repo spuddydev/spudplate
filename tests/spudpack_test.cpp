@@ -164,11 +164,11 @@ TEST(SpudpackCodec, UnsupportedVersionZero) {
     }
 }
 
-TEST(SpudpackCodec, UnsupportedVersionFive) {
-    // v1..v4 are accepted; v5 (and above) is not.
+TEST(SpudpackCodec, UnsupportedVersionSix) {
+    // v1..v5 are accepted; v6 (and above) is not.
     Spudpack in = make_simple();
     auto bytes = spudpack_encode(in);
-    bytes[4] = 5;
+    bytes[4] = 6;
     rewrite_crc(bytes);
     EXPECT_THROW(spudpack_decode(bytes.data(), bytes.size()), SpudpackError);
 }
@@ -300,7 +300,7 @@ TEST(SpudpackCodec, RoundTripWithDeps) {
     in.deps.push_back({"inner_b", inner_b_bytes, 11});
     auto bytes = spudpack_encode(in);
     Spudpack out = spudpack_decode(bytes.data(), bytes.size());
-    EXPECT_EQ(out.version, 4u);
+    EXPECT_EQ(out.version, 5u);
     EXPECT_EQ(out.version_tag, 7u);
     ASSERT_EQ(out.deps.size(), 2u);
     EXPECT_EQ(out.deps[0].name, "inner_a");

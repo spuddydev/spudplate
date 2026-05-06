@@ -645,7 +645,8 @@ std::string build_authorize_summary(const Program& program) {
 void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
                  int question_index, int question_total, int indent_level,
                  const std::vector<std::pair<std::int64_t, std::int64_t>>&
-                     iterations) {
+                     iterations,
+                 const std::unordered_map<std::string, Value>& pre_answers) {
     if (!when_passes(stmt.when_clause, env)) {
         if (!stmt.default_value.has_value()) {
             throw RuntimeError(
@@ -653,7 +654,18 @@ void execute_ask(const AskStmt& stmt, Environment& env, Prompter& prompter,
                     "' missing default; validator should have rejected this",
                 stmt.line, stmt.column);
         }
+        // The when-clause evaluated false: a pre-answer for this name is
+        // silently ignored and the declared default fires.
         env.declare(stmt.name, evaluate_expr(**stmt.default_value, env));
+        return;
+    }
+
+    auto pre = pre_answers.find(stmt.name);
+    if (pre != pre_answers.end()) {
+        // Caller pre-answered this question via an `include with`-arg and
+        // the gating check above just confirmed `when` is true. Bind and
+        // skip the prompt.
+        env.declare(stmt.name, pre->second);
         return;
     }
 
@@ -837,6 +849,9 @@ class Interpreter {
         std::vector<std::pair<std::int64_t, std::int64_t>> iters) {
         inherited_iters_ = std::move(iters);
     }
+    void set_pre_answers(std::unordered_map<std::string, Value> answers) {
+        pre_answers_ = std::move(answers);
+    }
 
     void execute(const Stmt& stmt) {
         std::visit(
@@ -862,7 +877,7 @@ class Interpreter {
                     iters.insert(iters.end(), repeat_iters_.begin(),
                                  repeat_iters_.end());
                     execute_ask(s, env_, prompter_, index, total, indent,
-                                iters);
+                                iters, pre_answers_);
                 } else if constexpr (std::is_same_v<T, LetStmt>) {
                     Value v = evaluate_expr(*s.value, env_);
                     env_.declare(s.name, std::move(v));
@@ -986,6 +1001,18 @@ class Interpreter {
         child_inherited.insert(child_inherited.end(), repeat_iters_.begin(),
                                repeat_iters_.end());
         child.set_inherited_iters(std::move(child_inherited));
+
+        // Evaluate every `include with`-arg in the parent's environment and
+        // hand the resulting name->value map to the child as pre-answers.
+        // The bundler has already verified each arg targets a top-level
+        // `ask` in the includee; the child's `execute_ask` consults this
+        // map when (and only when) that ask's `when`-clause evaluates true.
+        std::unordered_map<std::string, Value> pre_answers;
+        pre_answers.reserve(s.args.size());
+        for (const auto& arg : s.args) {
+            pre_answers.emplace(arg.name, evaluate_expr(*arg.value, env_));
+        }
+        child.set_pre_answers(std::move(pre_answers));
 
         try {
             for (const auto& stmt : dep_program.statements) {
@@ -1578,6 +1605,12 @@ class Interpreter {
     // When true, every queued `run` ignores its statement-level and default
     // timeout and runs without one. Set via `--no-timeout` on the CLI.
     bool timeouts_disabled_{false};
+    // Pre-answers passed in by the parent at the include site (one entry per
+    // matching `include with`-arg). Consulted by `execute_ask` only when the
+    // ask's `when` clause evaluates true; binds the value and skips the
+    // prompt. When `when` is false the default fires and the entry here is
+    // ignored.
+    std::unordered_map<std::string, Value> pre_answers_;
 };
 
 // Recursive counter: walks the program's top-level statements (matching

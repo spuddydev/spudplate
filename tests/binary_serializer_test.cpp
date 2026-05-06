@@ -386,6 +386,89 @@ TEST(BinarySerializer, RoundTripIncludeWithVersionPin) {
     expect_round_trip(program_with(std::move(stmts)));
 }
 
+TEST(BinarySerializer, RoundTripIncludeWithSingleArg) {
+    std::vector<IncludeArg> args;
+    args.push_back(IncludeArg{.name = "project_name",
+                              .value = ident("name", 1, 20),
+                              .line = 1,
+                              .column = 16});
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(IncludeStmt{.name = "foo",
+                                          .version_pin = std::nullopt,
+                                          .args = std::move(args),
+                                          .when_clause = std::nullopt,
+                                          .line = 1,
+                                          .column = 1}));
+    expect_round_trip(program_with(std::move(stmts)));
+}
+
+TEST(BinarySerializer, RoundTripIncludeWithMultipleArgs) {
+    std::vector<IncludeArg> args;
+    args.push_back(IncludeArg{.name = "a",
+                              .value = ident("name", 1, 30),
+                              .line = 1,
+                              .column = 16});
+    args.push_back(IncludeArg{.name = "b",
+                              .value = bool_lit(true, 1, 40),
+                              .line = 1,
+                              .column = 35});
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(IncludeStmt{.name = "foo",
+                                          .version_pin = std::uint32_t{2},
+                                          .args = std::move(args),
+                                          .when_clause = std::nullopt,
+                                          .line = 1,
+                                          .column = 1}));
+    expect_round_trip(program_with(std::move(stmts)));
+}
+
+TEST(BinarySerializer, RoundTripIncludeWithExpressionArg) {
+    auto inner = make_expr(BinaryExpr{.op = TokenType::PLUS,
+                                       .left = ident("name", 1, 1),
+                                       .right = str_lit("_v2", 1, 1),
+                                       .line = 1,
+                                       .column = 1});
+    std::vector<IncludeArg> args;
+    args.push_back(IncludeArg{.name = "label",
+                              .value = std::move(inner),
+                              .line = 1,
+                              .column = 16});
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(IncludeStmt{.name = "foo",
+                                          .version_pin = std::nullopt,
+                                          .args = std::move(args),
+                                          .when_clause = std::nullopt,
+                                          .line = 1,
+                                          .column = 1}));
+    expect_round_trip(program_with(std::move(stmts)));
+}
+
+TEST(BinarySerializer, IncludeArgsAbsentInV4DecodesAsEmpty) {
+    std::vector<IncludeArg> args;
+    args.push_back(IncludeArg{.name = "x",
+                              .value = ident("y", 1, 1),
+                              .line = 1,
+                              .column = 1});
+    std::vector<StmtPtr> stmts;
+    stmts.push_back(make_stmt(IncludeStmt{.name = "foo",
+                                          .version_pin = std::nullopt,
+                                          .args = std::move(args),
+                                          .when_clause = std::nullopt,
+                                          .line = 1,
+                                          .column = 1}));
+    auto bytes = serialize_program(program_with(std::move(stmts)));
+    // Decoding the same bytes as v4 ignores the trailing args field. The
+    // decoded IncludeStmt should have empty args even though the bytes
+    // carry one. Trailing line/column reads land on the wrong offsets, so
+    // we only assert that decode does not throw and that args is empty.
+    Program p = deserialize_program(bytes.data(), bytes.size(),
+                                    /*pack_version=*/4);
+    ASSERT_EQ(p.statements.size(), 1u);
+    auto& inc = std::get<IncludeStmt>(p.statements[0]->data);
+    EXPECT_EQ(inc.name, "foo");
+    EXPECT_TRUE(inc.args.empty());
+}
+
 TEST(BinarySerializer, IncludePinAbsentInV3DecodesAsNullopt) {
     std::vector<StmtPtr> stmts;
     stmts.push_back(make_stmt(IncludeStmt{.name = "foo",

@@ -220,6 +220,17 @@ bool stmts_equal(const Stmt& a, const Stmt& b) {
             } else if constexpr (std::is_same_v<T, IncludeStmt>) {
                 if (av.name != bv.name) return false;
                 if (av.version_pin != bv.version_pin) return false;
+                if (av.args.size() != bv.args.size()) return false;
+                for (std::size_t i = 0; i < av.args.size(); ++i) {
+                    if (av.args[i].name != bv.args[i].name) return false;
+                    if (!ptr_expr_equal(av.args[i].value, bv.args[i].value)) {
+                        return false;
+                    }
+                    if (av.args[i].line != bv.args[i].line ||
+                        av.args[i].column != bv.args[i].column) {
+                        return false;
+                    }
+                }
                 if (!optional_expr_equal(av.when_clause, bv.when_clause)) {
                     return false;
                 }

@@ -1397,6 +1397,71 @@ TEST(ParserTest, IncludePinNonIntegerRejected) {
     EXPECT_THROW(parse_include("include foo@bar\n"), ParseError);
 }
 
+TEST(ParserTest, IncludeWithoutWithHasEmptyArgs) {
+    auto stmt = parse_include("include foo\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    EXPECT_TRUE(inc.args.empty());
+}
+
+TEST(ParserTest, IncludeWithSingleArg) {
+    auto stmt = parse_include("include foo with project_name = name\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    ASSERT_EQ(inc.args.size(), 1u);
+    EXPECT_EQ(inc.args[0].name, "project_name");
+    auto& v = std::get<IdentifierExpr>(inc.args[0].value->data);
+    EXPECT_EQ(v.name, "name");
+}
+
+TEST(ParserTest, IncludeWithMultipleArgs) {
+    auto stmt = parse_include(
+        "include foo with project_name = name, with_tests = use_tests\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    ASSERT_EQ(inc.args.size(), 2u);
+    EXPECT_EQ(inc.args[0].name, "project_name");
+    EXPECT_EQ(inc.args[1].name, "with_tests");
+}
+
+TEST(ParserTest, IncludeWithExpressionArg) {
+    auto stmt =
+        parse_include("include foo with project_name = lower(name) + \"_v2\"\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    ASSERT_EQ(inc.args.size(), 1u);
+    auto& v = std::get<BinaryExpr>(inc.args[0].value->data);
+    EXPECT_EQ(v.op, TokenType::PLUS);
+}
+
+TEST(ParserTest, IncludeWithArgsAndPinAndWhen) {
+    auto stmt = parse_include(
+        "include foo@2 with project_name = name when use_foo\n");
+    auto& inc = std::get<IncludeStmt>(stmt->data);
+    ASSERT_TRUE(inc.version_pin.has_value());
+    EXPECT_EQ(*inc.version_pin, 2u);
+    ASSERT_EQ(inc.args.size(), 1u);
+    EXPECT_EQ(inc.args[0].name, "project_name");
+    EXPECT_TRUE(inc.when_clause.has_value());
+}
+
+TEST(ParserTest, IncludeWithDuplicateArgRejected) {
+    EXPECT_THROW(
+        parse_include("include foo with x = a, x = b\n"), ParseError);
+}
+
+TEST(ParserTest, IncludeWithTrailingCommaRejected) {
+    EXPECT_THROW(parse_include("include foo with x = a,\n"), ParseError);
+}
+
+TEST(ParserTest, IncludeWithMissingValueRejected) {
+    EXPECT_THROW(parse_include("include foo with x =\n"), ParseError);
+}
+
+TEST(ParserTest, IncludeWithMissingEqualsRejected) {
+    EXPECT_THROW(parse_include("include foo with x name\n"), ParseError);
+}
+
+TEST(ParserTest, IncludeWithEmptyArgListRejected) {
+    EXPECT_THROW(parse_include("include foo with\n"), ParseError);
+}
+
 TEST(ParserTest, UnexpectedTokenAtTopLevel) {
     EXPECT_THROW(parse_program("42\n"), ParseError);
 }

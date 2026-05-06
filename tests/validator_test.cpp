@@ -883,3 +883,51 @@ TEST(ValidatorTest, ComposedRulesEndToEnd) {
         "mkdir ci_path/\"out\" when use_ci == true\n");
     EXPECT_NO_THROW(validate(program));
 }
+
+// --- Include with-args tests ---
+
+TEST(ValidatorTest, IncludeWithArgReferencingPriorBindingValidates) {
+    auto program = parse(
+        "ask name \"name?\" string\n"
+        "include foo with project_name = name\n");
+    EXPECT_NO_THROW(validate(program));
+}
+
+TEST(ValidatorTest, IncludeWithArgReferencingPoppedBindingIsError) {
+    auto program = parse(
+        "ask n \"n?\" int\n"
+        "repeat n as i\n"
+        "  let x = 1\n"
+        "end\n"
+        "include foo with k = x\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, IncludeWithArgReferencingPoppedIteratorIsError) {
+    auto program = parse(
+        "ask n \"n?\" int\n"
+        "repeat n as i\n"
+        "end\n"
+        "include foo with k = i\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, IncludeWithSecondArgPoppedBindingIsError) {
+    // Even when the first arg is fine, a popped reference in a later
+    // arg must still trip the validator.
+    auto program = parse(
+        "ask n \"n?\" int\n"
+        "ask name \"name?\" string\n"
+        "repeat n as i\n"
+        "  let x = 1\n"
+        "end\n"
+        "include foo with a = name, b = x\n");
+    EXPECT_THROW(validate(program), SemanticError);
+}
+
+TEST(ValidatorTest, IncludeWithExpressionArgValidates) {
+    auto program = parse(
+        "ask name \"n?\" string\n"
+        "include foo with project_name = lower(name) + \"_v2\"\n");
+    EXPECT_NO_THROW(validate(program));
+}

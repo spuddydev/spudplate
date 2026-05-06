@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <string>
+#include <unordered_set>
 
 namespace spudplate {
 
@@ -528,12 +529,48 @@ StmtPtr Parser::parseInclude() {
         (void)at_tok;
     }
 
+    // Optional `with k = e [, k = e]*` clause sits between the version pin
+    // and the `when` clause. Each arg is an includee `ask` name to be
+    // pre-answered with the value of an expression evaluated in the caller's
+    // scope. Names are not allowed to repeat inside a single `include`.
+    std::vector<IncludeArg> args;
+    if (check(TokenType::WITH)) {
+        advance();
+        std::unordered_set<std::string> seen;
+        while (true) {
+            Token arg_name =
+                expect(TokenType::IDENTIFIER, "expected argument name after 'with'");
+            if (!seen.insert(arg_name.value).second) {
+                throw ParseError(
+                    "duplicate include argument name '" + arg_name.value + "'",
+                    arg_name.line, arg_name.column);
+            }
+            expect(TokenType::ASSIGN, "expected '=' after include argument name");
+            ExprPtr value = parseExpression();
+            args.push_back(IncludeArg{.name = arg_name.value,
+                                      .value = std::move(value),
+                                      .line = arg_name.line,
+                                      .column = arg_name.column});
+            if (!check(TokenType::COMMA)) {
+                break;
+            }
+            Token comma = advance();
+            if (check(TokenType::WHEN) || check(TokenType::NEWLINE) ||
+                check(TokenType::EOF_TOKEN)) {
+                throw ParseError(
+                    "trailing comma in include argument list", comma.line,
+                    comma.column);
+            }
+        }
+    }
+
     auto when_clause = parse_when_clause();
     expect_newline("include statement");
 
     auto stmt = std::make_unique<Stmt>();
     stmt->data = IncludeStmt{.name = name.value,
                              .version_pin = version_pin,
+                             .args = std::move(args),
                              .when_clause = std::move(when_clause),
                              .line = start.line,
                              .column = start.column};

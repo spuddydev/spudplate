@@ -112,6 +112,7 @@ TEST(LexerTest, AllKeywords) {
         {"string", TokenType::STRING_TYPE},
         {"bool", TokenType::BOOL_TYPE},
         {"int", TokenType::INT_TYPE},
+        {"with", TokenType::WITH},
     };
     for (const auto& c : cases) {
         Lexer lexer(c.input);
@@ -168,6 +169,13 @@ TEST(LexerTest, KeywordPrefixIsIdentifier) {
     Token tok = lexer.nextToken();
     EXPECT_EQ(tok.type, TokenType::IDENTIFIER);
     EXPECT_EQ(tok.value, "asking");
+}
+
+TEST(LexerTest, WithKeywordPrefixIsIdentifier) {
+    Lexer lexer("with_tests");
+    Token tok = lexer.nextToken();
+    EXPECT_EQ(tok.type, TokenType::IDENTIFIER);
+    EXPECT_EQ(tok.value, "with_tests");
 }
 
 TEST(LexerTest, SimpleString) {
