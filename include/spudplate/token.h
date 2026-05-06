@@ -27,6 +27,7 @@ enum class TokenType {
     COPY,      ///< `copy` - copy a source directory into an existing destination
     INTO,      ///< `into` - destination marker used by `copy`
     INCLUDE,   ///< `include` - run another installed template as a subprocess
+    WITH,      ///< `with` - introduces pre-answer arguments on `include`
     RUN,       ///< `run` - execute a shell command (gated by trust prompt)
     IN,        ///< `in` - working-directory marker on `run` statements
     TIMEOUT,   ///< `timeout` - per-statement timeout override on `run` statements
@@ -136,6 +137,8 @@ inline std::string tokenTypeToString(TokenType type) {
             return "INTO";
         case TokenType::INCLUDE:
             return "INCLUDE";
+        case TokenType::WITH:
+            return "WITH";
         case TokenType::RUN:
             return "RUN";
         case TokenType::IN:
