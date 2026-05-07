@@ -76,5 +76,40 @@ TEST(Introspect, EmptyProgramYieldsEmptyVector) {
     EXPECT_TRUE(asks.empty());
 }
 
+TEST(Introspect, HumanOutputListsEachQuestion) {
+    Program prog = parse_source(
+        "ask name \"Project name?\" string\n"
+        "ask use_git \"Use git?\" bool default true\n");
+    auto asks = collect_top_level_asks(prog);
+    std::ostringstream out;
+    emit_questions_human(out, asks);
+    std::string s = out.str();
+    EXPECT_NE(s.find("Questions:"), std::string::npos);
+    EXPECT_NE(s.find("name (string): Project name?"), std::string::npos);
+    EXPECT_NE(s.find("use_git (bool): Use git?"), std::string::npos);
+    EXPECT_NE(s.find("[default: true]"), std::string::npos);
+}
+
+TEST(Introspect, HumanOutputAnnotatesOptionsAndWhen) {
+    Program prog = parse_source(
+        "ask use_docs \"docs?\" bool default true\n"
+        "ask format \"format?\" string options \"pdf\" \"html\" "
+        "default \"pdf\" when use_docs\n");
+    auto asks = collect_top_level_asks(prog);
+    std::ostringstream out;
+    emit_questions_human(out, asks);
+    std::string s = out.str();
+    EXPECT_NE(s.find("[options: \"pdf\", \"html\"]"), std::string::npos);
+    EXPECT_NE(s.find("[when: gated]"), std::string::npos);
+}
+
+TEST(Introspect, HumanOutputHandlesEmpty) {
+    Program prog = parse_source("");
+    auto asks = collect_top_level_asks(prog);
+    std::ostringstream out;
+    emit_questions_human(out, asks);
+    EXPECT_NE(out.str().find("(no top-level questions)"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace spudplate
