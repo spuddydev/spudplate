@@ -548,6 +548,63 @@ TEST(CliTest, InspectPrintsSource) {
     EXPECT_EQ(out.str(), "demo (v1)\n\n" + body);
 }
 
+TEST(CliTest, InspectQuestionsListsTopLevelAsks) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud",
+                     "ask name \"Project name?\" string\n"
+                     "ask use_git \"Use git?\" bool default true\n");
+    Argv args({"spudplate", "inspect", "demo", "--questions"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("name (string): Project name?"),
+              std::string::npos);
+    EXPECT_NE(out.str().find("use_git (bool): Use git?"), std::string::npos);
+    EXPECT_NE(out.str().find("[default: true]"), std::string::npos);
+}
+
+TEST(CliTest, InspectQuestionsToFileWritesYaml) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud",
+                     "ask name \"Project name?\" string\n"
+                     "ask use_git \"Use git?\" bool default true\n");
+    auto out_path = td.path() / "answers.yaml";
+    Argv args({"spudplate", "inspect", "demo", "--questions",
+               "-o", out_path.string()});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    ASSERT_TRUE(std::filesystem::is_regular_file(out_path));
+    std::ifstream in(out_path);
+    std::stringstream buf;
+    buf << in.rdbuf();
+    std::string contents = buf.str();
+    EXPECT_NE(contents.find("name: \"\""), std::string::npos);
+    EXPECT_NE(contents.find("use_git: true"), std::string::npos);
+}
+
+TEST(CliTest, InspectOutputWithoutQuestionsRejected) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud", "mkdir \"x\"\n");
+    Argv args({"spudplate", "inspect", "demo", "-o", "out.yaml"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("requires --questions"), std::string::npos);
+}
+
 TEST(CliTest, InspectUnknownExitsFive) {
     TmpDir td;
     auto home = td.path() / "home";
