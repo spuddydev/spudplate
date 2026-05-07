@@ -28,6 +28,7 @@
 #include "spudplate/bundler.h"
 #include "spudplate/cli_internal.h"
 #include "spudplate/interpreter.h"
+#include "spudplate/introspect.h"
 #include "spudplate/lexer.h"
 #include "spudplate/parser.h"
 #include "spudplate/spudpack.h"
@@ -176,12 +177,19 @@ void print_help_list(std::ostream& out) {
 }
 
 void print_help_inspect(std::ostream& out) {
-    out << "usage: spudplate inspect <name[@N]>\n"
+    out << "usage: spudplate inspect <name[@N]> [--questions [-o FILE]]\n"
         << "\n"
         << "Print the version of an installed template, the version of\n"
         << "every dep it bundles, and the original .spud source.\n"
         << "\n"
-        << "Suffix `@N` to inspect an archived version, e.g. 'foo@4'.\n";
+        << "Suffix `@N` to inspect an archived version, e.g. 'foo@4'.\n"
+        << "\n"
+        << "Options:\n"
+        << "  --questions       list the template's top-level questions\n"
+        << "                    (the same set that may be pre-answered via\n"
+        << "                    `include with` or `run --answers`)\n"
+        << "  -o, --output FILE write a YAML answer template to FILE; only\n"
+        << "                    valid together with --questions\n";
 }
 
 void print_help_uninstall(std::ostream& out) {
@@ -1273,15 +1281,38 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 }
 
 int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
-    if (argc >= 3 && is_help_flag(argv[2])) {
-        print_help_inspect(out);
-        return 0;
+    bool questions = false;
+    std::string output_path;
+    int positional_start = 2;
+    while (positional_start < argc) {
+        std::string arg{argv[positional_start]};
+        if (is_help_flag(arg)) {
+            print_help_inspect(out);
+            return 0;
+        }
+        if (arg == "--questions") {
+            questions = true;
+            ++positional_start;
+        } else if (arg == "-o" || arg == "--output") {
+            if (positional_start + 1 >= argc) {
+                err << arg << " requires a path argument\n";
+                return 1;
+            }
+            output_path = argv[positional_start + 1];
+            positional_start += 2;
+        } else {
+            break;
+        }
     }
-    if (argc - 2 != 1) {
+    if (!output_path.empty() && !questions) {
+        err << "-o requires --questions\n";
+        return 1;
+    }
+    if (argc - positional_start != 1) {
         print_usage(err);
         return 1;
     }
-    std::string raw{argv[2]};
+    std::string raw{argv[positional_start]};
     if (looks_like_path(raw)) {
         err << "inspect takes an installed template name, not a path\n";
         return 1;
@@ -1321,6 +1352,34 @@ int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     }
     try {
         Spudpack pack = spudpack_read_file(spp_path);
+        if (questions) {
+            Program program;
+            try {
+                program = deserialize_program(
+                    pack.program_bytes.data(), pack.program_bytes.size(),
+                    pack.version);
+            } catch (const BinaryDeserializeError& e) {
+                err << name << ": " << e.what() << "\n";
+                return 1;
+            }
+            auto asks = collect_top_level_asks(program);
+            if (!output_path.empty()) {
+                std::ofstream sink(output_path);
+                if (!sink) {
+                    err << output_path << ": cannot open for writing: "
+                        << std::strerror(errno) << "\n";
+                    return 1;
+                }
+                emit_questions_yaml(sink, asks);
+                if (!sink) {
+                    err << output_path << ": write failed\n";
+                    return 1;
+                }
+            } else {
+                emit_questions_human(out, asks);
+            }
+            return 0;
+        }
         out << name << " (v" << pack.version_tag << ")\n";
         if (!pack.deps.empty()) {
             out << "\nDependencies:\n";
