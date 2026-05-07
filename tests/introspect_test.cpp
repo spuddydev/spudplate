@@ -111,5 +111,115 @@ TEST(Introspect, HumanOutputHandlesEmpty) {
     EXPECT_NE(out.str().find("(no top-level questions)"), std::string::npos);
 }
 
+TEST(Introspect, YamlOutputPrefillsLiteralDefaults) {
+    Program prog = parse_source(
+        "ask name \"Project name?\" string\n"
+        "ask use_git \"Use git?\" bool default true\n"
+        "ask weeks \"Weeks?\" int default 4\n"
+        "ask format \"Format?\" string default \"pdf\"\n");
+    auto asks = collect_top_level_asks(prog);
+    std::ostringstream out;
+    emit_questions_yaml(out, asks);
+    std::string s = out.str();
+    EXPECT_NE(s.find("name: \"\""), std::string::npos);
+    EXPECT_NE(s.find("use_git: true"), std::string::npos);
+    EXPECT_NE(s.find("weeks: 4"), std::string::npos);
+    EXPECT_NE(s.find("format: \"pdf\""), std::string::npos);
+}
+
+TEST(Introspect, YamlOutputAnnotatesOptionsAndWhen) {
+    Program prog = parse_source(
+        "ask use_docs \"docs?\" bool default true\n"
+        "ask format \"format\" string options \"pdf\" \"html\" "
+        "default \"pdf\" when use_docs\n");
+    auto asks = collect_top_level_asks(prog);
+    std::ostringstream out;
+    emit_questions_yaml(out, asks);
+    std::string s = out.str();
+    EXPECT_NE(s.find("# options: \"pdf\", \"html\""), std::string::npos);
+    EXPECT_NE(s.find("# when: gated"), std::string::npos);
+}
+
+TEST(Introspect, ParseAnswersHappyPath) {
+    Program prog = parse_source(
+        "ask name \"n\" string\n"
+        "ask weeks \"w\" int\n"
+        "ask use_git \"g\" bool\n");
+    auto asks = collect_top_level_asks(prog);
+    auto answers = parse_answers_yaml(
+        "name: \"my project\"\n"
+        "weeks: 12\n"
+        "use_git: false\n",
+        asks);
+    EXPECT_EQ(answers.size(), 3u);
+    EXPECT_EQ(std::get<std::string>(answers["name"]), "my project");
+    EXPECT_EQ(std::get<std::int64_t>(answers["weeks"]), 12);
+    EXPECT_EQ(std::get<bool>(answers["use_git"]), false);
+}
+
+TEST(Introspect, ParseAnswersAcceptsBareString) {
+    Program prog = parse_source("ask name \"n\" string\n");
+    auto asks = collect_top_level_asks(prog);
+    auto answers = parse_answers_yaml("name: hello world\n", asks);
+    EXPECT_EQ(std::get<std::string>(answers["name"]), "hello world");
+}
+
+TEST(Introspect, ParseAnswersIgnoresCommentsAndBlankLines) {
+    Program prog = parse_source("ask name \"n\" string\n");
+    auto asks = collect_top_level_asks(prog);
+    auto answers = parse_answers_yaml(
+        "# leading comment\n"
+        "\n"
+        "name: foo\n"
+        "\n"
+        "# trailing\n",
+        asks);
+    EXPECT_EQ(std::get<std::string>(answers["name"]), "foo");
+}
+
+TEST(Introspect, ParseAnswersRejectsUnknownKey) {
+    Program prog = parse_source("ask name \"n\" string\n");
+    auto asks = collect_top_level_asks(prog);
+    EXPECT_THROW(parse_answers_yaml("ghost: 1\n", asks),
+                 AnswersParseError);
+}
+
+TEST(Introspect, ParseAnswersRejectsTypeMismatch) {
+    Program prog = parse_source("ask weeks \"w\" int\n");
+    auto asks = collect_top_level_asks(prog);
+    EXPECT_THROW(parse_answers_yaml("weeks: notanint\n", asks),
+                 AnswersParseError);
+}
+
+TEST(Introspect, ParseAnswersRejectsBoolFromOtherStrings) {
+    Program prog = parse_source("ask flag \"f\" bool\n");
+    auto asks = collect_top_level_asks(prog);
+    EXPECT_THROW(parse_answers_yaml("flag: yes\n", asks),
+                 AnswersParseError);
+}
+
+TEST(Introspect, ParseAnswersRejectsDuplicateKey) {
+    Program prog = parse_source("ask name \"n\" string\n");
+    auto asks = collect_top_level_asks(prog);
+    EXPECT_THROW(parse_answers_yaml("name: a\nname: b\n", asks),
+                 AnswersParseError);
+}
+
+TEST(Introspect, ParseAnswersAcceptsCRLF) {
+    Program prog = parse_source("ask name \"n\" string\n");
+    auto asks = collect_top_level_asks(prog);
+    auto answers = parse_answers_yaml("name: \"foo\"\r\n", asks);
+    EXPECT_EQ(std::get<std::string>(answers["name"]), "foo");
+}
+
+TEST(Introspect, ParseAnswersHandlesQuotedEscapes) {
+    Program prog = parse_source("ask greeting \"g\" string\n");
+    auto asks = collect_top_level_asks(prog);
+    auto answers = parse_answers_yaml(
+        "greeting: \"hi \\\"there\\\"\"\n", asks);
+    EXPECT_EQ(std::get<std::string>(answers["greeting"]),
+              "hi \"there\"");
+}
+
 }  // namespace
 }  // namespace spudplate
