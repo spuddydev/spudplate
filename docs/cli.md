@@ -30,7 +30,7 @@ Bundled `include` deps are sticky by default: reinstalling a parent reuses the d
 ## run
 
 ```
-spudplate run [--dry-run] [--yes] [--no-timeout] <name[@N]|file.spud|file.spp>
+spudplate run [--dry-run] [--yes] [--no-timeout] [--answers FILE] <name[@N]|file.spud|file.spp>
 ```
 
 Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
@@ -40,10 +40,22 @@ Runs an installed template by name, or runs a `.spud` or `.spp` file directly.
 | `--dry-run` | Walk the program and print the questions and actions without writing any files. |
 | `--yes`, `-y` | Skip the authorisation prompt for `run` statements during this invocation. |
 | `--no-timeout` | Disable per-`run` timeouts for this invocation (default is 60 seconds per shell command). |
+| `--answers FILE` | Load top-level question answers from a YAML file. See [Non-interactive runs](#non-interactive-runs-with---answers) below. |
 
 `run` decides whether the argument is a path or an installed name. An argument containing `/` or ending in `.spud` or `.spp` is treated as a path; everything else is looked up as `<install-root>/<arg>.spp`.
 
 Suffix `@N` to pin a specific archived version, for example `spudplate run foo@4` runs version 4 even if a newer release is now installed. The lookup checks the archive first and falls back to the live install when its version tag matches `N`.
+
+### Non-interactive runs with `--answers`
+
+`--answers FILE` reads a YAML mapping of `name: value` entries and uses each value as the pre-filled answer for the matching top-level `ask`. Generate the schema with `inspect <name> --questions -o <file>`, edit the values, then pass the file back via `run --answers`.
+
+Behaviour:
+
+- Only top-level questions can be pre-answered. Asks nested in `repeat` or `if` still prompt at runtime.
+- A pre-answered question whose `when` clause evaluates false is skipped exactly as it would be without the answer; the template's `default` fires and the supplied value is dropped on the floor.
+- Unknown keys, type mismatches, and duplicate keys are errors and abort the run before any prompt or filesystem write.
+- Values are coerced against the declared ask type: `string` accepts bare or `"quoted"` text, `int` accepts signed integers, `bool` accepts `true`/`false` (case-insensitive). Other YAML features (lists, anchors, multi-line scalars) are not supported.
 
 ---
 
@@ -70,12 +82,19 @@ Prints every installed template name, one per line. Use `inspect <name>` to see 
 ## inspect
 
 ```
-spudplate inspect <name[@N]>
+spudplate inspect <name[@N]> [--questions [-o FILE]]
 ```
 
 Prints the version tag of an installed template, the version tag of every dep it bundles, and the original `.spud` source captured at install time. Accepts a bare name only - not a path.
 
 Suffix `@N` to inspect an archived version, for example `spudplate inspect foo@4`. Same lookup as `run`: archive first, live fallback when the version tag matches.
+
+| Flag | Effect |
+|------|--------|
+| `--questions` | List the template's top-level questions instead of printing the source. The same set is what `include with` accepts and what `run --answers` can pre-fill. |
+| `-o`, `--output FILE` | With `--questions`, write a YAML answer template to `FILE` ready to be edited and passed to `run --answers`. |
+
+The YAML template renders one `name: value` line per top-level question, with the type and prompt as a leading comment. Literal defaults are pre-filled; `when`-gated and option-restricted asks carry an extra comment so the editor knows what is allowed at runtime.
 
 ---
 

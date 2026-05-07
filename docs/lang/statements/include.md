@@ -93,6 +93,10 @@ Each `with` name must match a **top-level** `ask` in the includee, not one neste
 
 Caller-side errors (an arg expression referencing an undeclared identifier, a duplicate arg name in the same `include`) surface at parse or validate time before the bundler runs.
 
+### Discovering an includee's `with` keys
+
+`spudplate inspect <name> --questions` lists exactly the set of names a `with` clause may target, with each one's type, prompt, default, options, and any `when` annotation. Add `-o FILE` to dump the same information as a YAML answer template that doubles as a worked example for `run --answers`.
+
 ## when
 
 The `when` clause skips the include if the condition is false. The conditional is evaluated at run time.

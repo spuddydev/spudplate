@@ -1925,7 +1925,8 @@ std::string value_to_string(const Value& value) {
 
 void run(const Program& program, Prompter& prompter, bool skip_authorization,
          const SourceProvider* source, bool timeouts_disabled,
-         const std::vector<SpudpackDep>* deps) {
+         const std::vector<SpudpackDep>* deps,
+         const std::unordered_map<std::string, Value>* pre_answers) {
     if (!skip_authorization) {
         std::string summary = build_authorize_summary(program);
         if (!summary.empty() && !prompter.authorize(summary)) {
@@ -1936,6 +1937,9 @@ void run(const Program& program, Prompter& prompter, bool skip_authorization,
                        source != nullptr ? *source : default_source_provider(),
                        deps);
     interp.set_timeouts_disabled(timeouts_disabled);
+    if (pre_answers != nullptr && !pre_answers->empty()) {
+        interp.set_pre_answers(*pre_answers);
+    }
     run_program(program, interp, deps);
 }
 
@@ -2120,11 +2124,15 @@ bool locale_is_utf8() {
 
 void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
              bool ascii_only, const SourceProvider* source,
-             const std::vector<SpudpackDep>* deps) {
+             const std::vector<SpudpackDep>* deps,
+             const std::unordered_map<std::string, Value>* pre_answers) {
     Interpreter interp(prompter,
                        source != nullptr ? *source : default_source_provider(),
                        deps);
     interp.set_ask_total(count_ask_statements(program, deps));
+    if (pre_answers != nullptr && !pre_answers->empty()) {
+        interp.set_pre_answers(*pre_answers);
+    }
     for (const auto& stmt : program.statements) {
         interp.execute(*stmt);
     }
