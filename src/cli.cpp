@@ -104,7 +104,7 @@ void print_usage(std::ostream& out) {
         << "  run <name|file>          run an installed template, or a .spud/.spp file\n"
         << "  validate <file.spud>     parse and validate without installing\n"
         << "  list                     list installed templates\n"
-        << "  inspect <name>           print the source of an installed template\n"
+        << "  inspect <name>           print template source or list its questions\n"
         << "  uninstall <name>         remove an installed template\n"
         << "  version                  print the spudplate version\n"
         << "  update                   fetch and install the latest spudplate release\n"
