@@ -430,6 +430,96 @@ TEST(CliTest, RunByNameLooksUpInstalledTemplate) {
     EXPECT_TRUE(std::filesystem::is_directory(td.path() / "my_project"));
 }
 
+TEST(CliTest, RunWithAnswersFileSkipsMatchingPrompts) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud",
+                     "ask name \"name\" string\n"
+                     "mkdir \"{name}\"\n");
+    auto answers = td.path() / "answers.yaml";
+    write_file(answers, "name: alpha\n");
+    Argv args({"spudplate", "run", "--answers", answers.string(), "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    // Empty prompter answers - the test fails if the run actually prompts.
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "alpha"));
+}
+
+TEST(CliTest, RunWithAnswersFileWhenFalseFallsBackToDefault) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud",
+                     "ask use_extra \"x?\" bool default false\n"
+                     "ask flavour \"f\" string default \"vanilla\" "
+                     "when use_extra\n"
+                     "mkdir flavour\n");
+    auto answers = td.path() / "answers.yaml";
+    // use_extra stays false, so flavour's `when` evaluates false and the
+    // pre-answer here ("strawberry") is dropped in favour of the default.
+    write_file(answers, "use_extra: false\nflavour: strawberry\n");
+    Argv args({"spudplate", "run", "--answers", answers.string(), "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::is_directory(td.path() / "vanilla"));
+    EXPECT_FALSE(std::filesystem::is_directory(td.path() / "strawberry"));
+}
+
+TEST(CliTest, RunWithAnswersFileUnknownKeyFails) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud",
+                     "ask name \"n\" string\nmkdir \"{name}\"\n");
+    auto answers = td.path() / "answers.yaml";
+    write_file(answers, "ghost: 1\n");
+    Argv args({"spudplate", "run", "--answers", answers.string(), "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("unknown question 'ghost'"), std::string::npos);
+}
+
+TEST(CliTest, RunWithAnswersFileTypeMismatchFails) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud",
+                     "ask weeks \"w\" int\nmkdir \"out\"\n");
+    auto answers = td.path() / "answers.yaml";
+    write_file(answers, "weeks: not-a-number\n");
+    Argv args({"spudplate", "run", "--answers", answers.string(), "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("not an integer"), std::string::npos);
+}
+
+TEST(CliTest, RunWithAnswersFileMissingPathFails) {
+    TmpDir td;
+    auto home = td.path() / "home";
+    ScopedHome scoped(home);
+    install_template(td.path() / "demo.spud", "mkdir \"x\"\n");
+    Argv args({"spudplate", "run", "--answers", "/nonexistent.yaml", "demo"});
+    std::stringstream out;
+    std::stringstream err;
+    ScriptedPrompter prompter({});
+    int code = cli_main(args.argc(), args.argv(), out, err, prompter);
+    EXPECT_EQ(code, 1);
+    EXPECT_NE(err.str().find("cannot open"), std::string::npos);
+}
+
 TEST(CliTest, RunByUnknownNameExitsFive) {
     TmpDir td;
     auto home = td.path() / "home";
