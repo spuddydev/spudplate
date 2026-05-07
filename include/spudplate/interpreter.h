@@ -310,7 +310,8 @@ void run(const Program& program, Prompter& prompter,
          bool skip_authorization = false,
          const SourceProvider* source = nullptr,
          bool timeouts_disabled = false,
-         const std::vector<SpudpackDep>* deps = nullptr);
+         const std::vector<SpudpackDep>* deps = nullptr,
+         const std::unordered_map<std::string, Value>* pre_answers = nullptr);
 
 /**
  * @brief Test-only entry point: like `run`, but returns the final environment.
@@ -341,7 +342,9 @@ Environment run_for_tests(const Program& program, Prompter& prompter,
 void dry_run(const Program& program, Prompter& prompter, std::ostream& out,
              bool ascii_only = false,
              const SourceProvider* source = nullptr,
-             const std::vector<SpudpackDep>* deps = nullptr);
+             const std::vector<SpudpackDep>* deps = nullptr,
+             const std::unordered_map<std::string, Value>* pre_answers =
+                 nullptr);
 
 /**
  * @brief Heuristic check: does the current environment look UTF-8 capable?
