@@ -223,10 +223,7 @@ void emit_questions_yaml(std::ostream& out,
         out << "\n# (this template has no top-level questions)\n";
         return;
     }
-    bool first = true;
     for (const auto& a : asks) {
-        if (!first) out << "\n";
-        first = false;
         out << "\n# " << a.name << " (" << type_name(a.var_type) << "): "
             << a.prompt << "\n";
         if (a.options != nullptr && !a.options->empty()) {

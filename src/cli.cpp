@@ -1283,36 +1283,39 @@ int cmd_list(int argc, char* argv[], std::ostream& out, std::ostream& err) {
 int cmd_inspect(int argc, char* argv[], std::ostream& out, std::ostream& err) {
     bool questions = false;
     std::string output_path;
-    int positional_start = 2;
-    while (positional_start < argc) {
-        std::string arg{argv[positional_start]};
+    std::string raw;
+    for (int i = 2; i < argc; ++i) {
+        std::string arg{argv[i]};
         if (is_help_flag(arg)) {
             print_help_inspect(out);
             return 0;
         }
         if (arg == "--questions") {
             questions = true;
-            ++positional_start;
         } else if (arg == "-o" || arg == "--output") {
-            if (positional_start + 1 >= argc) {
+            if (i + 1 >= argc) {
                 err << arg << " requires a path argument\n";
                 return 1;
             }
-            output_path = argv[positional_start + 1];
-            positional_start += 2;
+            output_path = argv[++i];
+        } else if (!arg.empty() && arg[0] == '-') {
+            err << "unknown option '" << arg << "'\n";
+            return 1;
+        } else if (raw.empty()) {
+            raw = arg;
         } else {
-            break;
+            print_usage(err);
+            return 1;
         }
     }
     if (!output_path.empty() && !questions) {
         err << "-o requires --questions\n";
         return 1;
     }
-    if (argc - positional_start != 1) {
+    if (raw.empty()) {
         print_usage(err);
         return 1;
     }
-    std::string raw{argv[positional_start]};
     if (looks_like_path(raw)) {
         err << "inspect takes an installed template name, not a path\n";
         return 1;
