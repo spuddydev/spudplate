@@ -145,7 +145,7 @@ void print_help_install(std::ostream& out) {
 
 void print_help_run(std::ostream& out) {
     out << "usage: spudplate run [--dry-run] [--yes] [--no-timeout] "
-           "<name[@N]|file.spud|file.spp>\n"
+           "[--answers FILE] <name[@N]|file.spud|file.spp>\n"
         << "\n"
         << "Run an installed template by name, or run a .spud or .spp file\n"
         << "directly. The argument is treated as a path when it contains a\n"
@@ -156,10 +156,14 @@ void print_help_run(std::ostream& out) {
         << "run version 4 even if a newer release is now installed.\n"
         << "\n"
         << "Options:\n"
-        << "  --dry-run       print the file tree the run would create,\n"
-        << "                  without touching the filesystem\n"
-        << "  --yes, -y       skip the authorisation prompt for run statements\n"
-        << "  --no-timeout    disable per-statement timeouts\n";
+        << "  --dry-run        print the file tree the run would create,\n"
+        << "                   without touching the filesystem\n"
+        << "  --yes, -y        skip the authorisation prompt for run statements\n"
+        << "  --no-timeout     disable per-statement timeouts\n"
+        << "  --answers FILE   load top-level question answers from a YAML\n"
+        << "                   file produced by `inspect --questions -o`;\n"
+        << "                   prompts are skipped for matching answers,\n"
+        << "                   `when`-gated questions still resolve at runtime\n";
 }
 
 void print_help_validate(std::ostream& out) {
@@ -1531,6 +1535,7 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
     bool dry_run_mode = false;
     bool skip_authorization = false;
     bool timeouts_disabled = false;
+    std::string answers_path;
     int positional_start = 2;
     while (positional_start < argc) {
         std::string arg{argv[positional_start]};
@@ -1547,6 +1552,13 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         } else if (arg == "--no-timeout") {
             timeouts_disabled = true;
             ++positional_start;
+        } else if (arg == "--answers") {
+            if (positional_start + 1 >= argc) {
+                err << "--answers requires a path argument\n";
+                return 1;
+            }
+            answers_path = argv[positional_start + 1];
+            positional_start += 2;
         } else {
             break;
         }
@@ -1684,13 +1696,36 @@ int cmd_run(int argc, char* argv[], std::ostream& out, std::ostream& err,
         deps_ptr = &pack.deps;
     }
 
+    std::unordered_map<std::string, Value> pre_answers;
+    if (!answers_path.empty()) {
+        std::ifstream in(answers_path);
+        if (!in) {
+            err << answers_path << ": cannot open: "
+                << std::strerror(errno) << "\n";
+            return 1;
+        }
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        try {
+            auto asks = collect_top_level_asks(program);
+            pre_answers = parse_answers_yaml(buffer.str(), asks);
+        } catch (const AnswersParseError& e) {
+            err << answers_path;
+            if (e.line() > 0) err << ":" << e.line();
+            err << ": " << e.what() << "\n";
+            return 1;
+        }
+    }
+    const std::unordered_map<std::string, Value>* pre_answers_ptr =
+        pre_answers.empty() ? nullptr : &pre_answers;
+
     try {
         if (dry_run_mode) {
             dry_run(program, prompter, out, /*ascii_only=*/!locale_is_utf8(),
-                    source_ptr, deps_ptr);
+                    source_ptr, deps_ptr, pre_answers_ptr);
         } else {
             run(program, prompter, skip_authorization, source_ptr,
-                timeouts_disabled, deps_ptr);
+                timeouts_disabled, deps_ptr, pre_answers_ptr);
         }
     } catch (const RuntimeError& e) {
         print_error(err, file_path.string(), "runtime error", e.line(), e.column(),
