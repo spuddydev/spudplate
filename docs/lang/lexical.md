@@ -132,6 +132,7 @@ let ready = true
 | `,`   | Argument separator in function calls                                          |
 | `.`   | Path-segment separator (e.g. `README.md` between two literal segments)        |
 | `/`   | Path-segment separator                                                        |
+| `@`   | Version-pin marker on `include`, e.g. `include foo@3`                         |
 
 Punctuation tokens that are not used in a given context produce a parse error rather than a lexer error.
 
