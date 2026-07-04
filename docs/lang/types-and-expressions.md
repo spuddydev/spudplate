@@ -22,7 +22,7 @@ ask use_tests "Tests?" bool default false
 ask weeks "Weeks?" int default 0
 ```
 
-`let` infers the type from the right-hand side and a `let` binding cannot change type. Reassignment to a `let` binding (`name = expr`) keeps the original type. Assigning a value of a different type is a validation error.
+`let` infers the type from the right-hand side. Reassignment to a `let` binding (`name = expr`) is not type-checked, so by convention keep the type stable.
 
 ## Literals
 
@@ -60,9 +60,9 @@ let dir = slug + "-project"             # slug is in scope
 
 There is no unary minus. To produce a negative value, subtract from zero or use a binary expression.
 
-`+` is the only operator that works on both `string` and `int`. Mixing operand types (`"week " + n` where `n` is an `int`) is a validation error. Convert via interpolation first: `"week {n}"`.
+`+` is the only operator that works on both `string` and `int`. Mixing operand types (`"week " + n` where `n` is an `int`) is a run-time error. Convert via interpolation first: `"week {n}"`.
 
-Comparing values of different types with `==` or `!=` is also a validation error. Comparing `int` ordering operators (`<`, `<=`, `>`, `>=`) on non-`int` operands is rejected.
+`==` and `!=` accept operands of any type and compare unequal when the types differ. Ordering operators (`<`, `<=`, `>`, `>=`) require `int` operands and raise a run-time error otherwise.
 
 ## Operator precedence
 
@@ -95,7 +95,7 @@ Four string functions are built in. There is no facility for user-defined functi
 | `trim(s)`             | string  | Strip leading and trailing whitespace                |
 | `replace(s, from, to)`| string  | Replace every occurrence of `from` in `s` with `to`. Empty `from` is a runtime error |
 
-Arity is checked at parse time. Passing the wrong number of arguments is a parse error; passing the wrong type is a validation error.
+Argument count and argument types are checked when the template runs, not during validation.
 
 ```
 let slug = lower(trim(project_name))
@@ -159,12 +159,12 @@ The interpreter auto-detects binary content: a source file whose bytes do not fo
 | Context            | Expression must be of type      | Notes                                                |
 |--------------------|----------------------------------|------------------------------------------------------|
 | `let <name> = E`   | any                             | `<name>` takes the type of `E`                       |
-| `<name> = E`       | the type of the existing binding | Reassignment to the same type only                   |
+| `<name> = E`       | any                             | Existing `let` binding; not type-checked             |
 | `ask ... default E`| matching the declared `ask` type | Literal-default mismatches caught at parse time      |
 | `ask ... options E1 E2 ...` | matching the declared `ask` type | All option literals must match the type     |
 | `when E`           | `bool`                          | Used by `mkdir`, `file`, `copy`, `repeat`, `ask`, `include`, `run` |
 | `if E`             | `bool`                          | Same as `when`                                       |
-| `file "..." content E` | `string` (after stringification) | Non-string `E` is rejected; pre-stringify with interpolation |
+| `file "..." content E` | any (stringified)           | Any value is stringified, as in interpolation        |
 | `run E`            | `string`                        | The evaluated string is the shell command            |
 | `run ... timeout E`| positive `int`                  | Per-statement timeout in seconds                     |
 | `{E}` interpolation| any (stringified)                | `bool` becomes `true` or `false`; `int` is decimal   |
