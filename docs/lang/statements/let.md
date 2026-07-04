@@ -39,7 +39,7 @@ end
 Rules:
 
 - The name must already be declared by `let` and visible in the current scope. Reassigning an undeclared name is a validation error.
-- The new value's type must match the original binding.
+- The new value is not type-checked against the original; by convention keep the type stable.
 - Only `let` bindings are mutable. `ask` answers, path aliases (`as <name>` on a `mkdir` or `file`), and repeat iterators are read-only.
 - Reassignment inside a `repeat` body that targets an outer `let` mutates the outer binding. This is the basis of the accumulator pattern.
 
