@@ -31,7 +31,7 @@ file "{dir}/version.txt" content "v{major}.{minor}"
 file "{dir}/empty" content ""
 ```
 
-`content` requires a `string` value. Mixing a non-string into a `+` expression is rejected by the validator: convert through interpolation first.
+`content` stringifies any value, as interpolation does. Mixing a non-string into a `+` expression is a run-time error: convert through interpolation first.
 
 ## file from
 

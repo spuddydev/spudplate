@@ -131,7 +131,7 @@ Every path is normalised before it is stored or written:
 
 - Forward slashes are the only separator. A backslash is a literal byte, not a path separator.
 - A leading `/` is stripped: paths are always relative to the current working directory.
-- `..` segments are rejected at validate time. Templates cannot escape their working directory.
+- `..` segments are rejected when the template is bundled. Templates cannot escape their working directory.
 - Empty segments (caused by `//`) are collapsed.
 
 Modes set with `mode <octal>` are masked to `0o0777` so a template cannot ship setuid or setgid bits.
