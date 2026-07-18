@@ -87,18 +87,19 @@ file x/"z" content ""        when use_b and use_a   # error: not recognised as e
 
 ## Type tracking and type errors
 
-Beyond scoping, the validator enforces type rules:
+Beyond scoping, spudlang has type rules, but only a narrow set is checked before any prompt runs:
 
-- An expression in a `bool`-only context (`when`, `if`, `not`, `and`, `or`) must be `bool`.
-- An expression in an arithmetic context must be `int`.
-- Both sides of `==` and `!=` must have the same type.
-- Ordering operators (`<`, `<=`, `>`, `>=`) require both sides to be `int`.
 - A `default` value must match the declared `ask` type.
 - Each `options` entry must match the declared `ask` type.
-- A reassignment must match the original binding's type.
-- A function argument's type must match the function (the four built-ins are all `string`-only).
 
-Type errors are surfaced before any prompt runs, so a template either passes validation or stops before asking the user anything.
+The remaining rules are enforced while the template runs, so a violation can surface after earlier prompts and statements have already executed:
+
+- An expression in a `bool`-only context (`when`, `if`, `not`, `and`, `or`) must be `bool`.
+- An expression in an arithmetic context (`-`, `*`, `/`, and `+` on ints) must be `int`.
+- Ordering operators (`<`, `<=`, `>`, `>=`) require both sides to be `int`.
+- A function call must pass the right number of arguments, and the four built-ins take `string` arguments only.
+
+Two cases are not type-checked at all: `==` and `!=` accept operands of any type and simply compare unequal when the types differ, and a reassignment may bind a value of a different type than the original `let`.
 
 ## Mutation and capture
 

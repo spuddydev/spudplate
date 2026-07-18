@@ -11,7 +11,7 @@ let <name> = <expression>
 
 ## let
 
-Binds a fresh name to the value of an expression. The variable's type is inferred from the right-hand side and is fixed for the lifetime of the binding.
+Binds a fresh name to the value of an expression. The variable's type is inferred from the right-hand side.
 
 ```
 let slug = lower(trim(project_name))
@@ -39,7 +39,7 @@ end
 Rules:
 
 - The name must already be declared by `let` and visible in the current scope. Reassigning an undeclared name is a validation error.
-- The new value's type must match the original binding.
+- The new value is not type-checked against the original binding, so a reassignment can change the binding's type. By convention keep the type stable.
 - Only `let` bindings are mutable. `ask` answers, path aliases (`as <name>` on a `mkdir` or `file`), and repeat iterators are read-only.
 - Reassignment inside a `repeat` body that targets an outer `let` mutates the outer binding. This is the basis of the accumulator pattern.
 
