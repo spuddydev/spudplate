@@ -66,7 +66,7 @@ An `as` clause is optional. If you do not need to refer back to the path, omit i
 When a `mkdir` or `file` carries a `when` clause, the alias it binds is **conditional**. It cannot be used outside a statement guarded by an equivalent condition. The validator rejects references that escape the gate.
 
 ```
-mkdir "tests" as tests_path when use_tests
+mkdir "tests" when use_tests as tests_path
 file tests_path/"README.md" content "# Tests" when use_tests   # ok
 file tests_path/"main.cpp" from "templates/test.cpp"           # error: missing matching when
 ```

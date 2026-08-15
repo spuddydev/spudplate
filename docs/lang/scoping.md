@@ -45,10 +45,10 @@ Shadowing rejection covers all kinds of binding: a `let` cannot shadow an `ask`,
 
 ## Conditional alias scoping
 
-A path alias bound by `mkdir <path> as <name> when <cond>` or `file <path> as <name> when <cond>` is **conditional**. References to that alias outside a statement guarded by an equivalent condition are rejected at validate time.
+A path alias bound by `mkdir <path> when <cond> as <name>` or `file <path> when <cond> as <name>` is **conditional**. Note the clause order: on `mkdir` and `file` the `when` clause comes before `as`. References to that alias outside a statement guarded by an equivalent condition are rejected at validate time.
 
 ```
-mkdir "tests" as tests_path when use_tests
+mkdir "tests" when use_tests as tests_path
 file tests_path/"main.cpp" from "templates/test.cpp" when use_tests   # ok, same condition
 file tests_path/"README.md" content "# Tests"                          # error: missing matching when
 ```
@@ -80,7 +80,7 @@ The bool variable's type is required for the bool-specific simplifications, so t
 `a and b` and `b and a` are not considered equivalent, even though they evaluate identically. The same is true of `or`. If you bind an alias under a compound condition, repeat the operands in the same order on every reference:
 
 ```
-mkdir "x" as x when use_a and use_b
+mkdir "x" when use_a and use_b as x
 file x/"y" content ""        when use_a and use_b   # ok
 file x/"z" content ""        when use_b and use_a   # error: not recognised as equivalent
 ```
