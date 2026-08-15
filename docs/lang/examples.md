@@ -173,7 +173,7 @@ Every path expression in the examples uses quoting deliberately:
 
 `{language}` works inside the quoted source paths (`"templates/{language}/src"`) because path interpolation requires a quoted segment. See @ref lang_paths "Path expressions" for the rules.
 
-The README example uses real line breaks inside the string literal rather than escape sequences, because spudlang strings do not interpret `\n` and similar. For the same reason a `run` command cannot contain a double quote at all: there is no escape, so the first `"` after the opening one ends the string. Where the shell needs a quoted argument, use single quotes inside the spudlang string, as the commit command above does. `/bin/sh` honours them and spudlang treats them as ordinary bytes.
+The README example uses real line breaks inside the string literal rather than escape sequences, because spudlang strings do not interpret `\n` and similar. For the same reason a `run` command cannot contain a double quote at all: there is no escape, so the first closing quote ends the string. Where the shell needs a quoted argument, use single quotes inside the spudlang string, as the commit command above does. `/bin/sh` honours them and spudlang treats them as ordinary bytes.
 
 ## See also
 
