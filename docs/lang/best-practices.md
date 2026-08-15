@@ -53,7 +53,7 @@ A useful rule of thumb: if you can describe a sensible default in one sentence, 
 
 `options` turns an answer into a numbered menu. The user can type the literal value or the menu number. Two reasons this is worth using even when typing the value is easy:
 
-1. The validator can check that a `default` matches the options at parse time, catching typos in the template.
+1. The validator checks that a `default` is one of the options before any prompt runs, catching typos in the template.
 2. The user discovers the legal values without having to read the docs.
 
 Anywhere you would write a comment like "use 'pdf', 'html', or 'latex'", `options` does the same job in a way the user will see.
@@ -300,11 +300,12 @@ An `include` without a `when` runs unconditionally, asking its own questions eve
 
 ### Prefer parse-time errors to run-time errors
 
-Most spudlang errors surface before any prompt runs. The validator checks types, scopes, alias conditions, and condition normalisation. A template that fails validation is one the user never has to interact with.
+Many spudlang errors surface before any prompt runs. The validator checks scopes, alias conditions, condition normalisation, and the `ask` `default` and `options` types. A template that fails validation is one the user never has to interact with.
 
-A few categories of error are inherently run-time:
+Several categories of error are inherently run-time:
 
-- A `from` source that is missing at install time (validate with `spudplate validate`).
+- A general type mismatch, such as `when` on a non-`bool` or arithmetic on strings (checked while the template runs, not during validation).
+- A `from` source that is missing at install time.
 - A `copy into` whose destination does not exist (often a logic error in the template).
 - A `run` command that returns non-zero (the user's environment is the variable).
 

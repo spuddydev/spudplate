@@ -166,9 +166,10 @@ If none of the above is set, install-root operations fail with a clear diagnosti
 | Code | Meaning |
 |------|---------|
 | 0 | Success. |
-| 1 | Generic usage or runtime error. |
+| 1 | Generic usage or environment error. |
 | 2 | Parse error in a `.spud` file. |
 | 3 | Semantic (validator) error in a `.spud` file. |
+| 4 | Runtime error while executing a template. |
 | 5 | I/O error - file not found, permission denied, install root unreachable. |
 
 ---

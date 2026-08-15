@@ -46,7 +46,7 @@ ask format "Output format?" string options "pdf" "html" "latex"
 ask postgres_version "Postgres version?" int options 15 16 17
 ```
 
-When both `options` and `default` are present, the default value must equal one of the listed options. The parser rejects mismatches.
+When both `options` and `default` are present, the default value must equal one of the listed options. Validation rejects mismatches before any prompt runs.
 
 ## default values
 
