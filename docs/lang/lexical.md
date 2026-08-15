@@ -32,7 +32,7 @@ ask format "What output format?" string \
 
 The lexer discards the `\`, any trailing horizontal whitespace before the newline, the newline itself, and any leading whitespace on the next line.
 
-A `\` that is not immediately followed by a newline (allowing only spaces and tabs in between) is **not** a continuation and produces a lexer error at the offending position.
+A `\` that is not immediately followed by a newline (allowing only spaces and tabs in between) is **not** a continuation. The lexer leaves it as a stray token and the parser rejects it, so the failure surfaces as a parse error at that position, consistent with the note on punctuation below.
 
 ## Comments
 
