@@ -17,7 +17,7 @@ mkdir "project_dir" as base
 mkdir base/"include"                 # ok, mixed alias and quoted segment
 ```
 
-The error you will see is "expected newline after mkdir statement", pointing at the offending keyword. The fix is always to quote the segment.
+The error you will see depends on where the keyword sits. After a `/` it reads "expected path segment after '/'"; in the leading position it reads "expected path expression". Both point at the offending keyword. The fix is always to quote the segment.
 
 This affects more directory names than it might first seem: `include` is a normal C/C++ headers folder, `file` shows up in some toolchains, `from` is rare but legal as a folder name. When in doubt, quote.
 
@@ -51,7 +51,7 @@ mkdir week_{n}               # parse error
 mkdir {prefix}/notes         # parse error
 ```
 
-The error is "'{...}' interpolation is only allowed inside quoted path strings". To combine an alias with an interpolation, quote the part that needs braces:
+The message depends on position. A leading `{` reads "'{...}' interpolation is only allowed inside quoted path strings". Braces trailing a bare segment (`week_{n}`) end the path early instead, and read "expected newline after mkdir statement". To combine an alias with an interpolation, quote the part that needs braces:
 
 ```
 mkdir "static" as static_path
@@ -65,7 +65,7 @@ This rule is for paths only. Inside string literals (`content`, `default`, `run`
 A path alias bound under a `when` clause must be referenced under an equivalent condition. The validator normalises bool conditions before comparing them: `b`, `b == true`, and `not not b` all match. But `and` and `or` are **not** considered commutative:
 
 ```
-mkdir "x" as x_path when use_a and use_b
+mkdir "x" when use_a and use_b as x_path
 file x_path/"y" content "" when use_a and use_b   # ok
 file x_path/"z" content "" when use_b and use_a   # error: not recognised as equivalent
 ```
@@ -74,7 +74,7 @@ The fix is to keep the operands in the same order on every reference, or to bind
 
 ```
 let both = use_a and use_b
-mkdir "x" as x_path when both
+mkdir "x" when both as x_path
 file x_path/"y" content "" when both
 file x_path/"z" content "" when both
 ```
